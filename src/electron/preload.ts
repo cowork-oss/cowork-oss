@@ -113,12 +113,12 @@ export interface ElectronAPI {
   getLLMSettings: () => Promise<any>;
   saveLLMSettings: (settings: any) => Promise<{ success: boolean }>;
   testLLMProvider: (config: any) => Promise<{ success: boolean; error?: string }>;
-  getLLMModels: () => Promise<Array<{ key: string; displayName: string }>>;
+  getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getLLMConfigStatus: () => Promise<{
-    currentProvider: string;
+    currentProvider: 'anthropic' | 'bedrock';
     currentModel: string;
-    providers: Array<{ type: string; name: string; configured: boolean }>;
-    models: Array<{ key: string; displayName: string }>;
+    providers: Array<{ type: 'anthropic' | 'bedrock'; name: string; configured: boolean }>;
+    models: Array<{ key: string; displayName: string; description: string }>;
   }>;
 }
 

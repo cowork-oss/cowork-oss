@@ -17,7 +17,7 @@ export function App() {
   // Model selection state
   const [selectedModel, setSelectedModel] = useState<string>('opus-4-5');
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
-  const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
+  const [_availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
 
   // Load LLM config status on mount
   useEffect(() => {

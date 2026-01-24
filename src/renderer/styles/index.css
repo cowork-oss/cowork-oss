@@ -3628,3 +3628,17 @@ button {
 .clickable-file-path:active {
   color: var(--color-accent-hover);
 }
+
+/* AI Disclosure Styling */
+.cli-line-disclosure {
+  margin: 4px 0;
+  padding: 4px 8px;
+  background: rgba(251, 191, 36, 0.08);
+  border-left: 2px solid var(--color-warning);
+  border-radius: 2px;
+}
+
+.cli-text-muted {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}

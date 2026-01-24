@@ -11,7 +11,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  workspace,
+  workspace: _workspace,
   tasks,
   selectedTaskId,
   onSelectTask,
