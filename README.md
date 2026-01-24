@@ -1,4 +1,20 @@
-# Cowork - Agentic Task Automation for macOS
+# CoWork-OSS
+
+[![CI](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![macOS](https://img.shields.io/badge/platform-macOS-blue.svg)](https://www.apple.com/macos/)
+[![Electron](https://img.shields.io/badge/electron-40.0.0-47848F.svg)](https://www.electronjs.org/)
+
+**Open source agentic task automation for macOS**
+
+```
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗███████╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝██╔════╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗███████╗
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝
+```
 
 A desktop application inspired by Claude Cowork that provides agentic task automation with high agency over local folders.
 
@@ -92,7 +108,7 @@ The packaged app will be in the `release/` directory.
 
 ### 1. Select a Workspace
 
-On first launch, select a folder where Cowork can work. This folder will be:
+On first launch, select a folder where CoWork-OSS can work. This folder will be:
 - Mounted for read/write access
 - Protected by permission boundaries
 - Used as the working directory for all tasks

@@ -229,20 +229,20 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
             {/* ASCII Terminal Header */}
             <div className="cli-header">
               <pre className="ascii-art">{`
-  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗
- ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝
- ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝
- ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗
- ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗
-  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝`}</pre>
-              <div className="cli-version">v0.1.0 <span className="cli-tag">OSS</span></div>
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗███████╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝██╔════╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗███████╗
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
+              <div className="cli-version">v0.1.0</div>
             </div>
 
             {/* Terminal Info */}
             <div className="cli-info">
               <div className="cli-line">
                 <span className="cli-prompt">$</span>
-                <span className="cli-text">Welcome to Cowork OSS - your AI-powered task automation assistant</span>
+                <span className="cli-text">Welcome to CoWork-OSS - your AI-powered task automation assistant</span>
               </div>
               <div className="cli-line">
                 <span className="cli-prompt">$</span>

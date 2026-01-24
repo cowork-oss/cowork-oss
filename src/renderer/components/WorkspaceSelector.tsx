@@ -46,49 +46,86 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
   };
 
   return (
-    <div className="workspace-selector">
-      <div className="workspace-selector-content">
-        <div className="workspace-selector-header">
-          <div className="app-logo">
-            <svg width="48" height="48" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="45" stroke="#d4a574" strokeWidth="3" fill="none" />
-              <path d="M30 50 L45 65 L70 35" stroke="#d4a574" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            </svg>
+    <div className="workspace-selector cli-workspace-selector">
+      <div className="workspace-selector-content cli-workspace-content">
+        {/* Terminal Header */}
+        <div className="cli-terminal-header">
+          <div className="cli-terminal-dots">
+            <span className="cli-dot"></span>
+            <span className="cli-dot"></span>
+            <span className="cli-dot active"></span>
           </div>
-          <h1>Welcome to Cowork OSS</h1>
-          <p>Select a workspace folder to get started with AI-powered task automation</p>
+          <span className="cli-terminal-title">CoWork-OSS — init</span>
         </div>
 
+        {/* ASCII Logo */}
+        <div className="cli-logo-section">
+          <pre className="cli-ascii-logo">{`
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗███████╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝██╔════╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗███████╗
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
+          <div className="cli-version">v0.1.0</div>
+        </div>
+
+        {/* Terminal Info */}
+        <div className="cli-init-info">
+          <div className="cli-line">
+            <span className="cli-prompt">$</span>
+            <span className="cli-text">Welcome to CoWork-OSS</span>
+          </div>
+          <div className="cli-line">
+            <span className="cli-prompt">$</span>
+            <span className="cli-text">Select a workspace folder to initialize your environment</span>
+          </div>
+          <div className="cli-line cli-blink">
+            <span className="cli-prompt">$</span>
+            <span className="cli-text">Waiting for workspace selection...</span>
+            <span className="cli-cursor-block">_</span>
+          </div>
+        </div>
+
+        {/* Recent Workspaces */}
         {workspaces.length > 0 && (
-          <div className="workspace-list">
-            <h3>Recent Workspaces</h3>
-            {workspaces.map(workspace => (
+          <div className="cli-workspace-list">
+            <div className="cli-section-header">
+              <span className="cli-section-prompt">&gt;</span>
+              <span className="cli-section-title">RECENT_WORKSPACES</span>
+            </div>
+            {workspaces.map((workspace, index) => (
               <div
                 key={workspace.id}
-                className="workspace-list-item"
+                className="cli-workspace-item"
                 onClick={() => onWorkspaceSelected(workspace)}
               >
-                <div className="workspace-list-item-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                  </svg>
-                </div>
-                <div className="workspace-list-item-info">
-                  <div className="workspace-list-item-name">{workspace.name}</div>
-                  <div className="workspace-list-item-path">{workspace.path}</div>
+                <span className="cli-item-num">{String(index + 1).padStart(2, '0')}</span>
+                <span className="cli-item-icon">[dir]</span>
+                <div className="cli-item-info">
+                  <span className="cli-item-name">{workspace.name}/</span>
+                  <span className="cli-item-path">{workspace.path}</span>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        <div className="workspace-selector-actions">
-          <button className="button-primary" onClick={handleSelectFolder}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
-              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-            </svg>
-            Select Folder
+        {/* Select Folder Action */}
+        <div className="cli-workspace-actions">
+          <button className="cli-action-btn" onClick={handleSelectFolder}>
+            <span className="cli-btn-bracket">[</span>
+            <span className="cli-btn-icon">+</span>
+            <span className="cli-btn-bracket">]</span>
+            <span className="cli-btn-text">select_folder</span>
           </button>
+          <p className="cli-hint"># choose a directory for CoWork-OSS to operate in</p>
+        </div>
+
+        {/* Footer */}
+        <div className="cli-init-footer">
+          <span className="cli-footer-prompt">$</span>
+          <span className="cli-footer-text">ready</span>
         </div>
       </div>
     </div>

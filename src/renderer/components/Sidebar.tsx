@@ -120,14 +120,9 @@ export function Sidebar({
 
   return (
     <div className="sidebar cli-sidebar">
-      {/* Terminal Header */}
+      {/* Terminal Header - no dots here since macOS traffic lights occupy this space */}
       <div className="cli-sidebar-header">
         <span className="cli-sidebar-title">TASKS</span>
-        <div className="cli-sidebar-dots">
-          <span className="cli-dot"></span>
-          <span className="cli-dot"></span>
-          <span className="cli-dot active"></span>
-        </div>
       </div>
 
       {/* New Task Button */}
@@ -216,7 +211,7 @@ export function Sidebar({
       <div className="sidebar-footer cli-sidebar-footer">
         <div className="cli-footer-info">
           <span className="cli-footer-label">SYS:</span>
-          <span className="cli-footer-value">cowork-oss</span>
+          <span className="cli-footer-value">CoWork-OSS</span>
         </div>
         <button className="settings-btn cli-settings-btn" onClick={onOpenSettings} title="Settings">
           [cfg]

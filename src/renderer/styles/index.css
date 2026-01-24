@@ -1383,6 +1383,252 @@ a,
   justify-content: center;
 }
 
+/* ==========================================
+   CLI Workspace Selector Styles
+   ========================================== */
+
+.cli-workspace-selector {
+  background: var(--color-bg-primary);
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+}
+
+.cli-workspace-content {
+  max-width: 600px;
+  background: rgba(0, 0, 0, 0.6) !important;
+  border: 1px solid var(--color-border-subtle) !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.cli-workspace-content::before {
+  display: none;
+}
+
+.cli-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.cli-terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.cli-terminal-title {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.cli-logo-section {
+  padding: 32px 24px 16px;
+  text-align: center;
+}
+
+.cli-logo-section .cli-ascii-logo {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--color-accent);
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.3);
+  margin: 0;
+}
+
+.cli-logo-section .cli-version {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.cli-logo-section .cli-tag {
+  background: rgba(34, 211, 238, 0.15);
+  color: var(--color-accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.cli-init-info {
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cli-init-info .cli-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.cli-init-info .cli-prompt {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-init-info .cli-text {
+  color: var(--color-text-secondary);
+}
+
+.cli-init-info .cli-blink .cli-text {
+  color: var(--color-text-muted);
+}
+
+.cli-cursor-block {
+  color: var(--color-accent);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cli-workspace-list {
+  padding: 16px 24px;
+}
+
+.cli-workspace-list .cli-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cli-workspace-list .cli-section-prompt {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-workspace-list .cli-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.cli-workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cli-workspace-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--color-border-subtle);
+  border-left-color: var(--color-accent);
+}
+
+.cli-item-num {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.cli-item-icon {
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.cli-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cli-item-name {
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.cli-item-path {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cli-workspace-actions {
+  padding: 20px 24px;
+  text-align: center;
+}
+
+.cli-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cli-action-btn:hover {
+  border-color: var(--color-accent);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.cli-action-btn .cli-btn-bracket {
+  color: var(--color-text-muted);
+}
+
+.cli-action-btn .cli-btn-icon {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-action-btn .cli-btn-text {
+  color: var(--color-text);
+}
+
+.cli-workspace-actions .cli-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.cli-init-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.cli-init-footer .cli-footer-prompt {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-init-footer .cli-footer-text {
+  color: var(--color-success);
+  font-size: 12px;
+}
+
 /* ==================== MODAL ==================== */
 .modal-overlay {
   position: fixed;
@@ -2999,8 +3245,9 @@ button {
 .cli-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 12px 16px;
+  padding-top: 44px; /* Space for macOS traffic lights */
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid var(--color-border-subtle);
 }
