@@ -1,0 +1,593 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo } from '../../shared/types';
+import { ApprovalDialog } from './ApprovalDialog';
+
+interface MainContentProps {
+  task: Task | undefined;
+  workspace: Workspace | null;
+  events: TaskEvent[];
+  onSendMessage: (message: string) => void;
+  onCreateTask?: (title: string, prompt: string) => void;
+  onChangeWorkspace?: () => void;
+  selectedModel: string;
+  availableModels: LLMModelInfo[];
+  onModelChange: (model: string) => void;
+}
+
+const quickActions = [
+  { icon: 'file', label: 'Create a file' },
+  { icon: 'data', label: 'Crunch data' },
+  { icon: 'prototype', label: 'Make a prototype' },
+  { icon: 'organize', label: 'Organize files' },
+  { icon: 'meeting', label: 'Prep for a meeting' },
+  { icon: 'message', label: 'Draft a message' },
+];
+
+export function MainContent({ task, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, selectedModel, availableModels, onModelChange }: MainContentProps) {
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
+  const [inputValue, setInputValue] = useState('');
+  const [showSteps, setShowSteps] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const mainBodyRef = useRef<HTMLDivElement>(null);
+
+  // Check if user is near the bottom of the scroll container
+  const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    return scrollHeight - scrollTop - clientHeight < threshold;
+  }, []);
+
+  // Handle scroll events to detect manual scrolling
+  const handleScroll = useCallback(() => {
+    const container = mainBodyRef.current;
+    if (!container) return;
+
+    // If user scrolls to near bottom, re-enable auto-scroll
+    // If user scrolls away from bottom, disable auto-scroll
+    setAutoScroll(isNearBottom(container));
+  }, [isNearBottom]);
+
+  // Auto-scroll to bottom when new events arrive
+  useEffect(() => {
+    if (autoScroll && timelineRef.current && mainBodyRef.current) {
+      // Scroll the main body to show the latest event
+      mainBodyRef.current.scrollTop = mainBodyRef.current.scrollHeight;
+    }
+  }, [events, autoScroll]);
+
+  // Reset auto-scroll when task changes
+  useEffect(() => {
+    setAutoScroll(true);
+  }, [task?.id]);
+
+  // Close model dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setShowModelDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Get display name for selected model
+  const getModelDisplayName = () => {
+    const model = availableModels.find(m => m.key === selectedModel);
+    return model?.displayName || 'Select Model';
+  };
+
+  // Check for approval requests in events
+  useEffect(() => {
+    // Get all approval IDs that have been resolved (granted or denied)
+    const resolvedApprovalIds = new Set(
+      events
+        .filter(e => e.type === 'approval_granted' || e.type === 'approval_denied')
+        .map(e => e.payload?.approvalId || e.payload?.approval?.id)
+        .filter(Boolean)
+    );
+
+    // Log all approval-related events for debugging
+    const approvalEvents = events.filter(e =>
+      e.type === 'approval_requested' ||
+      e.type === 'approval_granted' ||
+      e.type === 'approval_denied'
+    );
+    if (approvalEvents.length > 0) {
+      console.log('[Approval Debug] Approval-related events:', approvalEvents);
+      console.log('[Approval Debug] Resolved approval IDs:', Array.from(resolvedApprovalIds));
+    }
+
+    // Find an approval request that hasn't been resolved yet
+    const pendingApprovalEvent = events.find(e => {
+      if (e.type !== 'approval_requested' || !e.payload?.approval) return false;
+      const approvalId = e.payload.approval.id;
+      // Only show if not already resolved
+      return !resolvedApprovalIds.has(approvalId);
+    });
+
+    if (pendingApprovalEvent) {
+      console.log('[Approval Debug] Setting pending approval:', pendingApprovalEvent.payload.approval);
+      setPendingApproval(pendingApprovalEvent.payload.approval);
+    } else {
+      // No pending approvals - clear the state
+      setPendingApproval(null);
+    }
+  }, [events]);
+
+  const handleApprovalResponse = async (approved: boolean) => {
+    if (!pendingApproval) return;
+    try {
+      await window.electronAPI.respondToApproval({
+        approvalId: pendingApproval.id,
+        approved,
+      });
+      setPendingApproval(null);
+    } catch (error) {
+      console.error('Failed to respond to approval:', error);
+    }
+  };
+
+  const handleSend = () => {
+    if (inputValue.trim()) {
+      if (!task && onCreateTask) {
+        // Create new task
+        const title = inputValue.trim().slice(0, 50);
+        onCreateTask(title, inputValue.trim());
+      } else {
+        onSendMessage(inputValue.trim());
+      }
+      setInputValue('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleQuickAction = (action: string) => {
+    setInputValue(action);
+  };
+
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const getEventDotClass = (type: TaskEvent['type']) => {
+    if (type === 'error') return 'error';
+    if (type === 'step_completed' || type === 'task_completed') return 'success';
+    if (type === 'step_started' || type === 'executing') return 'active';
+    return '';
+  };
+
+  const renderQuickActionIcon = (icon: string) => {
+    switch (icon) {
+      case 'file':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+          </svg>
+        );
+      case 'data':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18M9 21V9" />
+          </svg>
+        );
+      case 'prototype':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18M9 21V9" />
+            <circle cx="15" cy="15" r="2" />
+          </svg>
+        );
+      case 'organize':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+          </svg>
+        );
+      case 'meeting':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4M8 2v4M3 10h18" />
+          </svg>
+        );
+      case 'message':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+          </svg>
+        );
+      default:
+        return null;
+    }
+  };
+
+  // Welcome/Empty state
+  if (!task) {
+    return (
+      <div className="main-content">
+        <div className="main-body welcome-view">
+          <div className="welcome-content cli-style">
+            {/* ASCII Terminal Header */}
+            <div className="cli-header">
+              <pre className="ascii-art">{`
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝`}</pre>
+              <div className="cli-version">v0.1.0 <span className="cli-tag">OSS</span></div>
+            </div>
+
+            {/* Terminal Info */}
+            <div className="cli-info">
+              <div className="cli-line">
+                <span className="cli-prompt">$</span>
+                <span className="cli-text">Welcome to Cowork OSS - your AI-powered task automation assistant</span>
+              </div>
+              <div className="cli-line">
+                <span className="cli-prompt">$</span>
+                <span className="cli-text">Type a task below or select a quick command to get started</span>
+              </div>
+            </div>
+
+            {/* Quick Commands */}
+            <div className="cli-commands">
+              <div className="cli-commands-header">
+                <span className="cli-prompt">&gt;</span>
+                <span>QUICK COMMANDS</span>
+              </div>
+              <div className="cli-commands-grid">
+                <button className="cli-command" onClick={() => handleQuickAction('Create a file')}>
+                  <span className="cli-cmd-prefix">01</span>
+                  <span className="cli-cmd-text">create-file</span>
+                </button>
+                <button className="cli-command" onClick={() => handleQuickAction('Crunch data')}>
+                  <span className="cli-cmd-prefix">02</span>
+                  <span className="cli-cmd-text">crunch-data</span>
+                </button>
+                <button className="cli-command" onClick={() => handleQuickAction('Make a prototype')}>
+                  <span className="cli-cmd-prefix">03</span>
+                  <span className="cli-cmd-text">prototype</span>
+                </button>
+                <button className="cli-command" onClick={() => handleQuickAction('Organize files')}>
+                  <span className="cli-cmd-prefix">04</span>
+                  <span className="cli-cmd-text">organize</span>
+                </button>
+                <button className="cli-command" onClick={() => handleQuickAction('Prep for a meeting')}>
+                  <span className="cli-cmd-prefix">05</span>
+                  <span className="cli-cmd-text">prep-meeting</span>
+                </button>
+                <button className="cli-command" onClick={() => handleQuickAction('Draft a message')}>
+                  <span className="cli-cmd-prefix">06</span>
+                  <span className="cli-cmd-text">draft-msg</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Input Area */}
+            <div className="welcome-input-container cli-input-container">
+              <div className="cli-input-wrapper">
+                <span className="cli-input-prompt">~$</span>
+                <input
+                  type="text"
+                  className="welcome-input cli-input"
+                  placeholder="Enter your task..."
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                />
+                <span className="cli-cursor"></span>
+              </div>
+              <div className="welcome-input-footer">
+                <div className="input-left-actions">
+                  <button className="folder-selector" onClick={onChangeWorkspace}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    </svg>
+                    <span>{workspace?.name || 'Select folder'}</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="input-right-actions">
+                  <div className="model-dropdown-container" ref={modelDropdownRef}>
+                    <button
+                      className="model-selector"
+                      onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    >
+                      {getModelDisplayName()}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {showModelDropdown && (
+                      <div className="model-dropdown">
+                        {availableModels.map((model) => (
+                          <button
+                            key={model.key}
+                            className={`model-dropdown-item ${model.key === selectedModel ? 'selected' : ''}`}
+                            onClick={() => {
+                              onModelChange(model.key);
+                              setShowModelDropdown(false);
+                            }}
+                          >
+                            <div className="model-dropdown-item-content">
+                              <span className="model-dropdown-item-name">{model.displayName}</span>
+                              <span className="model-dropdown-item-desc">{model.description}</span>
+                            </div>
+                            {model.key === selectedModel && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="lets-go-btn"
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                  >
+                    <span>Let's Start</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 19V5M5 12l7-7 7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Task view
+  return (
+    <div className="main-content">
+      {/* Header */}
+      <div className="main-header">
+        <div className="main-header-title">{task.title}</div>
+        <div className="main-header-actions">
+          <button className="button-secondary" style={{ padding: '6px 8px' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
+        <div className="task-content">
+          {/* Task Description */}
+          <div className="task-section">
+            <div className="task-description">
+              <p>{task.prompt}</p>
+            </div>
+          </div>
+
+          {/* Timeline */}
+          {events.length > 0 && (
+            <div className="timeline-section">
+              <button
+                className={`view-steps-btn ${showSteps ? 'expanded' : ''}`}
+                onClick={() => setShowSteps(!showSteps)}
+              >
+                View steps
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </button>
+
+              {showSteps && (
+                <div className="timeline-events" ref={timelineRef}>
+                  {events.map((event, index) => (
+                    <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
+                      <div className="event-indicator">
+                        <div className={`event-dot ${getEventDotClass(event.type)}`} />
+                        {index < events.length - 1 && <div className="event-line" />}
+                      </div>
+                      <div className="event-content">
+                        <div className="event-title">{getEventTitle(event)}</div>
+                        <div className="event-time">{formatTime(event.timestamp)}</div>
+                        {renderEventDetails(event)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer with Input */}
+      <div className="main-footer">
+        <div className="input-container">
+          <div className="input-row">
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Reply..."
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <div className="input-actions">
+              <div className="model-dropdown-container" ref={modelDropdownRef}>
+                <button
+                  className="model-selector"
+                  onClick={() => setShowModelDropdown(!showModelDropdown)}
+                >
+                  {getModelDisplayName()}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {showModelDropdown && (
+                  <div className="model-dropdown">
+                    {availableModels.map((model) => (
+                      <button
+                        key={model.key}
+                        className={`model-dropdown-item ${model.key === selectedModel ? 'selected' : ''}`}
+                        onClick={() => {
+                          onModelChange(model.key);
+                          setShowModelDropdown(false);
+                        }}
+                      >
+                        <div className="model-dropdown-item-content">
+                          <span className="model-dropdown-item-name">{model.displayName}</span>
+                          <span className="model-dropdown-item-desc">{model.description}</span>
+                        </div>
+                        {model.key === selectedModel && (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                className={`send-btn ${task.status === 'executing' ? 'send-btn-queue' : ''}`}
+                onClick={handleSend}
+                disabled={!inputValue.trim() && task.status !== 'executing'}
+              >
+                {task.status === 'executing' ? (
+                  <span>Queue</span>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="input-disclaimer">
+            AI can make mistakes. Please double-check responses.
+          </div>
+        </div>
+      </div>
+
+      {pendingApproval && (
+        <ApprovalDialog
+          approval={pendingApproval}
+          onApprove={() => handleApprovalResponse(true)}
+          onDeny={() => handleApprovalResponse(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Truncate long text for display, with expand option handled via CSS
+ */
+function truncateForDisplay(text: string, maxLength: number = 2000): string {
+  if (!text || text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + '\n\n... [content truncated for display]';
+}
+
+function getEventTitle(event: TaskEvent): string {
+  switch (event.type) {
+    case 'task_created':
+      return 'Task created';
+    case 'plan_created':
+      return 'Execution plan created';
+    case 'step_started':
+      return `Started: ${event.payload.step?.description || 'Step'}`;
+    case 'step_completed':
+      return `Completed: ${event.payload.step?.description || event.payload.message || 'Step'}`;
+    case 'tool_call':
+      return `Tool: ${event.payload.tool}`;
+    case 'tool_result':
+      return `Result: ${event.payload.tool}`;
+    case 'assistant_message':
+      return 'Assistant';
+    case 'file_created':
+      return `Created: ${event.payload.path}`;
+    case 'file_modified':
+      return `Modified: ${event.payload.path || event.payload.from}`;
+    case 'file_deleted':
+      return `Deleted: ${event.payload.path}`;
+    case 'error':
+      return 'Error occurred';
+    case 'approval_requested':
+      return `Approval needed: ${event.payload.approval?.description}`;
+    case 'log':
+      return event.payload.message;
+    default:
+      return event.type;
+  }
+}
+
+function renderEventDetails(event: TaskEvent) {
+  switch (event.type) {
+    case 'plan_created':
+      return (
+        <div className="event-details">
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>{event.payload.plan?.description}</div>
+          {event.payload.plan?.steps && (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {event.payload.plan.steps.map((step: any, i: number) => (
+                <li key={i} style={{ marginBottom: 4 }}>{step.description}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
+    case 'tool_call':
+      return (
+        <div className="event-details event-details-scrollable">
+          <pre>{truncateForDisplay(JSON.stringify(event.payload.input, null, 2))}</pre>
+        </div>
+      );
+    case 'tool_result':
+      return (
+        <div className="event-details event-details-scrollable">
+          <pre>{truncateForDisplay(JSON.stringify(event.payload.result, null, 2))}</pre>
+        </div>
+      );
+    case 'assistant_message':
+      return (
+        <div className="event-details assistant-message event-details-scrollable markdown-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {truncateForDisplay(event.payload.message)}
+          </ReactMarkdown>
+        </div>
+      );
+    case 'error':
+      return (
+        <div className="event-details" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+          {event.payload.error || event.payload.message}
+        </div>
+      );
+    default:
+      return null;
+  }
+}

@@ -1,0 +1,98 @@
+import { config } from 'dotenv';
+import path from 'path';
+
+// Load environment variables from .env file
+config({ path: path.join(process.cwd(), '.env') });
+
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { DatabaseManager } from './database/schema';
+import { setupIpcHandlers } from './ipc/handlers';
+import { AgentDaemon } from './agent/daemon';
+import { LLMProviderFactory } from './agent/llm';
+
+let mainWindow: BrowserWindow | null = null;
+let dbManager: DatabaseManager;
+let agentDaemon: AgentDaemon;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 1000,
+    minWidth: 1200,
+    minHeight: 800,
+    center: true,
+    titleBarStyle: 'hiddenInset',
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    transparent: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  // Load the app
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(async () => {
+  // Initialize LLM provider factory (loads settings from disk)
+  LLMProviderFactory.initialize();
+
+  // Initialize database
+  dbManager = new DatabaseManager();
+
+  // Initialize agent daemon
+  agentDaemon = new AgentDaemon(dbManager);
+
+  // Setup IPC handlers
+  setupIpcHandlers(dbManager, agentDaemon);
+
+  // Create window
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  if (dbManager) {
+    dbManager.close();
+  }
+  if (agentDaemon) {
+    agentDaemon.shutdown();
+  }
+});
+
+// Handle folder selection
+ipcMain.handle('dialog:selectFolder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Select Workspace Folder',
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
