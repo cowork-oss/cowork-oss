@@ -1,0 +1,217 @@
+// Core types shared between main and renderer processes
+
+export type TaskStatus = 'pending' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export type EventType =
+  | 'task_created'
+  | 'task_completed'
+  | 'plan_created'
+  | 'step_started'
+  | 'step_completed'
+  | 'executing'
+  | 'tool_call'
+  | 'tool_result'
+  | 'assistant_message'
+  | 'approval_requested'
+  | 'approval_granted'
+  | 'approval_denied'
+  | 'file_created'
+  | 'file_modified'
+  | 'file_deleted'
+  | 'error'
+  | 'log';
+
+export type ToolType =
+  | 'read_file'
+  | 'write_file'
+  | 'list_directory'
+  | 'rename_file'
+  | 'move_file'
+  | 'delete_file'
+  | 'create_directory'
+  | 'search_files'
+  | 'run_skill';
+
+export type ApprovalType =
+  | 'delete_file'
+  | 'delete_multiple'
+  | 'bulk_rename'
+  | 'network_access'
+  | 'external_service';
+
+export interface Task {
+  id: string;
+  title: string;
+  prompt: string;
+  status: TaskStatus;
+  workspaceId: string;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  budgetTokens?: number;
+  budgetCost?: number;
+  error?: string;
+}
+
+export interface TaskEvent {
+  id: string;
+  taskId: string;
+  timestamp: number;
+  type: EventType;
+  payload: any;
+}
+
+export interface Artifact {
+  id: string;
+  taskId: string;
+  path: string;
+  mimeType: string;
+  sha256: string;
+  size: number;
+  createdAt: number;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: number;
+  permissions: WorkspacePermissions;
+}
+
+export interface WorkspacePermissions {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+  network: boolean;
+  allowedDomains?: string[];
+}
+
+export interface PlanStep {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
+}
+
+export interface Plan {
+  steps: PlanStep[];
+  description: string;
+}
+
+export interface ToolCall {
+  id: string;
+  tool: ToolType;
+  parameters: any;
+  timestamp: number;
+}
+
+export interface ToolResult {
+  callId: string;
+  success: boolean;
+  result?: any;
+  error?: string;
+  timestamp: number;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  taskId: string;
+  type: ApprovalType;
+  description: string;
+  details: any;
+  status: 'pending' | 'approved' | 'denied';
+  requestedAt: number;
+  resolvedAt?: number;
+}
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  category: 'document' | 'spreadsheet' | 'presentation' | 'organizer' | 'custom';
+  prompt: string;
+  scriptPath?: string;
+  parameters?: Record<string, any>;
+}
+
+// IPC Channel names
+export const IPC_CHANNELS = {
+  // Task operations
+  TASK_CREATE: 'task:create',
+  TASK_GET: 'task:get',
+  TASK_LIST: 'task:list',
+  TASK_CANCEL: 'task:cancel',
+  TASK_PAUSE: 'task:pause',
+  TASK_RESUME: 'task:resume',
+  TASK_RENAME: 'task:rename',
+  TASK_DELETE: 'task:delete',
+
+  // Task events (streaming and history)
+  TASK_EVENT: 'task:event',
+  TASK_EVENTS: 'task:events',
+  TASK_SEND_MESSAGE: 'task:sendMessage',
+
+  // Workspace operations
+  WORKSPACE_SELECT: 'workspace:select',
+  WORKSPACE_LIST: 'workspace:list',
+  WORKSPACE_CREATE: 'workspace:create',
+
+  // Approval operations
+  APPROVAL_RESPOND: 'approval:respond',
+
+  // Artifact operations
+  ARTIFACT_LIST: 'artifact:list',
+  ARTIFACT_PREVIEW: 'artifact:preview',
+
+  // Skills
+  SKILL_LIST: 'skill:list',
+  SKILL_GET: 'skill:get',
+
+  // LLM Settings
+  LLM_GET_SETTINGS: 'llm:getSettings',
+  LLM_SAVE_SETTINGS: 'llm:saveSettings',
+  LLM_TEST_PROVIDER: 'llm:testProvider',
+  LLM_GET_MODELS: 'llm:getModels',
+  LLM_GET_CONFIG_STATUS: 'llm:getConfigStatus',
+} as const;
+
+// LLM Provider types
+export type LLMProviderType = 'anthropic' | 'bedrock';
+
+export interface LLMSettingsData {
+  providerType: LLMProviderType;
+  modelKey: string;
+  anthropic?: {
+    apiKey?: string;
+  };
+  bedrock?: {
+    region?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
+    profile?: string;
+    useDefaultCredentials?: boolean;
+  };
+}
+
+export interface LLMProviderInfo {
+  type: LLMProviderType;
+  name: string;
+  configured: boolean;
+}
+
+export interface LLMModelInfo {
+  key: string;
+  displayName: string;
+  description: string;
+}
+
+export interface LLMConfigStatus {
+  currentProvider: LLMProviderType;
+  currentModel: string;
+  providers: LLMProviderInfo[];
+  models: LLMModelInfo[];
+}
