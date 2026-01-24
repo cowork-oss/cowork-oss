@@ -2986,3 +2986,379 @@ button {
   font-size: 11px;
   color: var(--color-text-muted);
 }
+
+/* ==========================================
+   CLI Sidebar Styles (Left Sidebar)
+   ========================================== */
+
+.cli-sidebar {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
+.cli-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.cli-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+  letter-spacing: 1px;
+}
+
+.cli-sidebar-dots {
+  display: flex;
+  gap: 6px;
+}
+
+/* CLI New Task Button */
+.cli-new-task-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid var(--color-border-subtle) !important;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace !important;
+  padding: 10px 14px !important;
+}
+
+.cli-new-task-btn:hover {
+  border-color: var(--color-accent) !important;
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
+.cli-btn-bracket {
+  color: var(--color-text-muted);
+}
+
+.cli-btn-plus {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-btn-text {
+  color: var(--color-text);
+}
+
+.cli-new-task-btn svg {
+  display: none;
+}
+
+/* CLI Task List */
+.cli-task-list {
+  padding: 0;
+}
+
+.cli-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.cli-list-header .cli-section-prompt {
+  color: var(--color-accent);
+}
+
+/* CLI Task Item */
+.cli-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  border-left: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.cli-task-item:hover {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border-left-color: var(--color-border);
+}
+
+.cli-task-item.task-item-selected {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-left-color: var(--color-accent) !important;
+}
+
+.cli-task-num {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.cli-task-status {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.cli-task-status.completed {
+  color: var(--color-success);
+}
+
+.cli-task-status.active {
+  color: var(--color-accent);
+}
+
+.cli-task-status.failed {
+  color: var(--color-error);
+}
+
+.cli-task-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.cli-task-title {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cli-task-item.task-item-selected .cli-task-title {
+  color: var(--color-text);
+}
+
+.cli-task-item .task-item-icon {
+  display: none;
+}
+
+/* CLI Task Actions */
+.cli-task-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cli-task-item:hover .cli-task-actions {
+  opacity: 1;
+}
+
+.cli-more-btn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.cli-more-btn:hover {
+  color: var(--color-accent);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* CLI Task Menu */
+.cli-task-menu {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+.cli-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace !important;
+  font-size: 11px !important;
+}
+
+.cli-menu-option svg {
+  display: none;
+}
+
+.cli-menu-prefix {
+  color: var(--color-accent);
+}
+
+.cli-menu-option:hover .cli-menu-prefix {
+  color: var(--color-text);
+}
+
+.cli-menu-danger:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+}
+
+.cli-menu-danger .cli-menu-prefix {
+  color: var(--color-error);
+}
+
+/* CLI Rename Input */
+.cli-rename-input {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace !important;
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid var(--color-accent) !important;
+}
+
+/* CLI Empty State */
+.cli-empty {
+  padding: 16px;
+}
+
+.cli-empty .cli-tree {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.cli-empty .cli-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  margin: 0;
+}
+
+/* CLI Sidebar Footer */
+.cli-sidebar-footer {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border-top: 1px solid var(--color-border-subtle) !important;
+  padding: 12px 16px !important;
+}
+
+.cli-footer-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.cli-footer-label {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.cli-footer-value {
+  color: var(--color-text-secondary);
+}
+
+.cli-settings-btn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace !important;
+  font-size: 11px !important;
+  color: var(--color-text-muted) !important;
+  background: transparent !important;
+  border: 1px solid var(--color-border-subtle) !important;
+  padding: 4px 8px !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+.cli-settings-btn:hover {
+  color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ==========================================
+   Global CLI App Styles
+   ========================================== */
+
+/* Make main content area match CLI style */
+.main-content {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.main-header {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.main-header-title {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+/* CLI Style for Task View */
+.task-content {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+}
+
+.task-description {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+}
+
+/* Timeline CLI Styles */
+.timeline-section {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.view-steps-btn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.timeline-event {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.event-title {
+  font-size: 12px;
+}
+
+.event-time {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.event-details {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.event-details pre {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+}
+
+/* Main Footer CLI Style */
+.main-footer {
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.input-container {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.input-field {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.input-disclaimer {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 10px;
+}
+
+/* Send Button CLI Style */
+.send-btn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
