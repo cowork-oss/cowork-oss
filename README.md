@@ -23,16 +23,20 @@ CoWork-OSS is an open-source, local-first agent workbench for running multi-step
 > **Independent project.** CoWork-OSS is not affiliated with, endorsed by, or sponsored by Anthropic.
 > This project implements a local, folder-scoped agent workflow pattern in open source.
 
+**Status**: macOS desktop app (cross-platform support planned).
+
 ---
 
 ## Why CoWork-OSS?
 
-- **Local-first state**: Tasks/events/artifacts are stored locally in SQLite; model requests are sent to your configured provider (Anthropic/Bedrock). No telemetry by default.
-- **Folder-scoped security**: Operations are sandboxed to your selected workspace with path traversal protection
+- **Local-first state**: Tasks/events/artifacts are stored locally in SQLite; model requests are sent to your configured provider (Anthropic/Bedrock). CoWork-OSS does not collect telemetry by default.
+- **Folder-scoped security**: File operations are constrained to your selected workspace with path traversal protection.
 - **Permissioned execution**: Explicit user approval required for destructive operations (delete, bulk rename)
 - **Extensible skills/tools**: Clear developer path to add custom tools and skills
 - **Transparent runtime**: Real-time timeline showing every step, tool call, and decision
 - **BYOK (Bring Your Own Key)**: Use your own API credentials — no proxy, no reselling
+
+**Note**: Today CoWork-OSS enforces workspace boundaries in-app; a VM sandbox is on the roadmap.
 
 ---
 
@@ -68,7 +72,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
 - Sent to provider: the task prompt and any context you choose to include (e.g., selected file contents/snippets) to generate outputs.
-- Not sent: your API keys (stored locally), unless you explicitly configure external syncing.
+- Not sent: your API keys (stored locally).
 
 ### Architecture
 
@@ -215,8 +219,6 @@ This project requires users to comply with their model provider's terms and poli
 - [Anthropic Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms)
 - [Anthropic Usage Policy](https://www.anthropic.com/legal/aup)
 - [AWS Bedrock Third-Party Model Terms](https://aws.amazon.com/legal/bedrock/third-party-models/)
-
-**Note:** Anthropic's Usage Policy requires that consumer-facing applications using AI disclose this to users. CoWork-OSS displays model information in the UI.
 
 **Note:** For consumer-facing use, Anthropic’s Usage Policy requires disclosing that users are interacting with AI at the beginning of each session. CoWork-OSS shows an explicit “AI system” disclosure when starting a new task/session.
 
