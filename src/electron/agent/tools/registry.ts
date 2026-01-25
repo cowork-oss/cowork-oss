@@ -2,7 +2,9 @@ import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
+import { SearchTools } from './search-tools';
 import { LLMTool } from '../llm/types';
+import { SearchProviderFactory } from '../search';
 
 /**
  * ToolRegistry manages all available tools and their execution
@@ -10,6 +12,7 @@ import { LLMTool } from '../llm/types';
 export class ToolRegistry {
   private fileTools: FileTools;
   private skillTools: SkillTools;
+  private searchTools: SearchTools;
 
   constructor(
     private workspace: Workspace,
@@ -18,23 +21,31 @@ export class ToolRegistry {
   ) {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
+    this.searchTools = new SearchTools(workspace, daemon, taskId);
   }
 
   /**
    * Get all available tools in provider-agnostic format
    */
   getTools(): LLMTool[] {
-    return [
+    const tools = [
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
     ];
+
+    // Only add search tool if a provider is configured
+    if (SearchProviderFactory.isAnyProviderConfigured()) {
+      tools.push(...this.getSearchToolDefinitions());
+    }
+
+    return tools;
   }
 
   /**
    * Get human-readable tool descriptions
    */
   getToolDescriptions(): string {
-    return `
+    let descriptions = `
 File Operations:
 - read_file: Read contents of a file
 - write_file: Write content to a file (creates or overwrites)
@@ -48,8 +59,17 @@ Skills:
 - create_spreadsheet: Create Excel spreadsheets with data and formulas
 - create_document: Create Word documents or PDFs
 - create_presentation: Create PowerPoint presentations
-- organize_folder: Organize and structure files in folders
-    `.trim();
+- organize_folder: Organize and structure files in folders`;
+
+    // Add search if configured
+    if (SearchProviderFactory.isAnyProviderConfigured()) {
+      descriptions += `
+
+Web Search:
+- web_search: Search the web for information (web, news, images)`;
+    }
+
+    return descriptions.trim();
   }
 
   /**
@@ -70,6 +90,9 @@ Skills:
     if (name === 'create_document') return await this.skillTools.createDocument(input);
     if (name === 'create_presentation') return await this.skillTools.createPresentation(input);
     if (name === 'organize_folder') return await this.skillTools.organizeFolder(input);
+
+    // Search tools
+    if (name === 'web_search') return await this.searchTools.webSearch(input);
 
     throw new Error(`Unknown tool: ${name}`);
   }
@@ -279,6 +302,57 @@ Skills:
             rules: { type: 'object', description: 'Custom organization rules (if strategy is custom)' },
           },
           required: ['path', 'strategy'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define search tools
+   */
+  private getSearchToolDefinitions(): LLMTool[] {
+    const providers = SearchProviderFactory.getAvailableProviders();
+    const configuredProviders = providers.filter((p) => p.configured);
+    const allSupportedTypes = [
+      ...new Set(configuredProviders.flatMap((p) => p.supportedTypes)),
+    ];
+
+    return [
+      {
+        name: 'web_search',
+        description: `Search the web for information. Configured providers: ${configuredProviders.map((p) => p.name).join(', ')}`,
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'The search query',
+            },
+            searchType: {
+              type: 'string',
+              enum: allSupportedTypes,
+              description: `Type of search. Available: ${allSupportedTypes.join(', ')}`,
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Maximum number of results (default: 10, max: 20)',
+            },
+            provider: {
+              type: 'string',
+              enum: configuredProviders.map((p) => p.type),
+              description: `Override the search provider. Available: ${configuredProviders.map((p) => p.type).join(', ')}`,
+            },
+            dateRange: {
+              type: 'string',
+              enum: ['day', 'week', 'month', 'year'],
+              description: 'Filter results by date range',
+            },
+            region: {
+              type: 'string',
+              description: 'Region code for localized results (e.g., "us", "uk", "de")',
+            },
+          },
+          required: ['query'],
         },
       },
     ];

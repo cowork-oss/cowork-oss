@@ -75,6 +75,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
+- **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -104,7 +105,8 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 │                  Execution Layer                 │
 │  - File Operations                               │
 │  - Skills (Document Creation)                    │
-│  - Provider Abstraction (Anthropic/Bedrock)      │
+│  - LLM Providers (Anthropic/Bedrock)             │
+│  - Search Providers (Tavily/Brave/SerpAPI/Google)│
 └─────────────────────────────────────────────────┘
                       ↕
 ┌─────────────────────────────────────────────────┐
@@ -268,6 +270,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] SQLite local persistence
 - [x] Telegram bot integration for remote task execution
+- [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
@@ -357,6 +360,82 @@ The bot converts responses to Telegram-compatible formatting:
 
 ---
 
+## Web Search Integration
+
+CoWork-OSS includes a multi-provider web search system that allows the agent to search the web for information during task execution. This is useful for tasks that require current information, research, or fact-checking.
+
+### Supported Providers
+
+| Provider | Search Types | Best For |
+|----------|--------------|----------|
+| **Tavily** | Web, News | AI-optimized search results, recommended for most use cases |
+| **Brave Search** | Web, News, Images | Privacy-focused search with good coverage |
+| **SerpAPI** | Web, News, Images | Google results via API, comprehensive coverage |
+| **Google Custom Search** | Web, Images | Direct Google integration, requires Search Engine ID |
+
+### Configuration
+
+Configure at least one provider by adding API keys to your `.env` file:
+
+```bash
+# Tavily (recommended) - https://tavily.com/
+TAVILY_API_KEY=tvly-...
+
+# Brave Search - https://brave.com/search/api/
+BRAVE_API_KEY=BSA...
+
+# SerpAPI - https://serpapi.com/
+SERPAPI_KEY=...
+
+# Google Custom Search - https://developers.google.com/custom-search/
+GOOGLE_API_KEY=AIza...
+GOOGLE_SEARCH_ENGINE_ID=...   # Required with GOOGLE_API_KEY
+```
+
+### Settings UI
+
+Once providers are configured, you can manage them in the app:
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Web Search** tab
+3. Select your **Primary Provider** - used for all searches by default
+4. Optionally select a **Fallback Provider** - used automatically if primary fails
+
+The settings panel shows:
+- Which providers are configured (based on environment variables)
+- Test button for each provider to verify connectivity
+- Provider capabilities (web, news, images support)
+
+### How the Agent Uses Search
+
+When the `web_search` tool is available, the agent can:
+- Search the web for current information
+- Look up news articles on specific topics
+- Find images (with supported providers)
+- Research facts to complete tasks accurately
+
+**Example tasks that benefit from web search:**
+- "Research the latest trends in renewable energy and create a summary"
+- "Find the current stock price of Apple and create a report"
+- "Look up recent news about AI regulation"
+
+### Fallback Behavior
+
+When multiple providers are configured:
+1. The **Primary Provider** is tried first
+2. If it fails (network error, rate limit, etc.), the **Fallback Provider** is automatically used
+3. This ensures reliable search even if one provider has issues
+
+### Provider Auto-Detection
+
+If no provider is explicitly selected, CoWork-OSS auto-detects available providers in this priority order:
+1. Tavily (if `TAVILY_API_KEY` is set)
+2. Brave (if `BRAVE_API_KEY` is set)
+3. SerpAPI (if `SERPAPI_KEY` is set)
+4. Google (if both `GOOGLE_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are set)
+
+---
+
 ## Technology Stack
 
 - **Frontend**: React 19 + TypeScript + Vite
@@ -379,6 +458,7 @@ cowork-oss/
 │   │   │   ├── daemon.ts      # Task coordinator
 │   │   │   ├── executor.ts    # Agent execution loop
 │   │   │   ├── llm/           # Provider abstraction
+│   │   │   ├── search/        # Web search providers
 │   │   │   ├── tools/         # Tool implementations
 │   │   │   └── skills/        # Document creation skills
 │   │   └── ipc/               # IPC handlers

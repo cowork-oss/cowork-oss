@@ -189,6 +189,12 @@ export const IPC_CHANNELS = {
   GATEWAY_GRANT_ACCESS: 'gateway:grantAccess',
   GATEWAY_REVOKE_ACCESS: 'gateway:revokeAccess',
   GATEWAY_GENERATE_PAIRING: 'gateway:generatePairing',
+
+  // Search Settings
+  SEARCH_GET_SETTINGS: 'search:getSettings',
+  SEARCH_SAVE_SETTINGS: 'search:saveSettings',
+  SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
+  SEARCH_TEST_PROVIDER: 'search:testProvider',
 } as const;
 
 // LLM Provider types
@@ -272,4 +278,41 @@ export interface TestChannelResult {
   success: boolean;
   error?: string;
   botUsername?: string;
+}
+
+// Search Provider types
+export type SearchProviderType = 'tavily' | 'brave' | 'serpapi' | 'google';
+export type SearchType = 'web' | 'news' | 'images';
+
+export interface SearchSettingsData {
+  primaryProvider: SearchProviderType | null;
+  fallbackProvider: SearchProviderType | null;
+  tavily?: {
+    apiKey?: string;
+  };
+  brave?: {
+    apiKey?: string;
+  };
+  serpapi?: {
+    apiKey?: string;
+  };
+  google?: {
+    apiKey?: string;
+    searchEngineId?: string;
+  };
+}
+
+export interface SearchProviderInfo {
+  type: SearchProviderType;
+  name: string;
+  description: string;
+  configured: boolean;
+  supportedTypes: SearchType[];
+}
+
+export interface SearchConfigStatus {
+  primaryProvider: SearchProviderType | null;
+  fallbackProvider: SearchProviderType | null;
+  providers: SearchProviderInfo[];
+  isConfigured: boolean;
 }

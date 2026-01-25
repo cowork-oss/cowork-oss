@@ -9,6 +9,7 @@ import { DatabaseManager } from './database/schema';
 import { setupIpcHandlers } from './ipc/handlers';
 import { AgentDaemon } from './agent/daemon';
 import { LLMProviderFactory } from './agent/llm';
+import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
 
 let mainWindow: BrowserWindow | null = null;
@@ -49,8 +50,9 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // Initialize LLM provider factory (loads settings from disk)
+  // Initialize provider factories (loads settings from disk)
   LLMProviderFactory.initialize();
+  SearchProviderFactory.initialize();
 
   // Initialize database
   dbManager = new DatabaseManager();

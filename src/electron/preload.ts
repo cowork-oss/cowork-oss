@@ -38,6 +38,11 @@ const IPC_CHANNELS = {
   GATEWAY_GRANT_ACCESS: 'gateway:grantAccess',
   GATEWAY_REVOKE_ACCESS: 'gateway:revokeAccess',
   GATEWAY_GENERATE_PAIRING: 'gateway:generatePairing',
+  // Search Settings
+  SEARCH_GET_SETTINGS: 'search:getSettings',
+  SEARCH_SAVE_SETTINGS: 'search:saveSettings',
+  SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
+  SEARCH_TEST_PROVIDER: 'search:testProvider',
 } as const;
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -118,6 +123,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('gateway:message', subscription);
     return () => ipcRenderer.removeListener('gateway:message', subscription);
   },
+
+  // Search Settings APIs
+  getSearchSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_SETTINGS),
+  saveSearchSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, settings),
+  getSearchConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_CONFIG_STATUS),
+  testSearchProvider: (providerType: string) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_TEST_PROVIDER, providerType),
 });
 
 // Type declarations for TypeScript
@@ -168,6 +179,25 @@ export interface ElectronAPI {
   revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
   generateGatewayPairing: (channelId: string, userId: string, displayName?: string) => Promise<string>;
   onGatewayMessage: (callback: (data: any) => void) => () => void;
+  // Search Settings
+  getSearchSettings: () => Promise<{
+    primaryProvider: 'tavily' | 'brave' | 'serpapi' | 'google' | null;
+    fallbackProvider: 'tavily' | 'brave' | 'serpapi' | 'google' | null;
+  }>;
+  saveSearchSettings: (settings: any) => Promise<{ success: boolean }>;
+  getSearchConfigStatus: () => Promise<{
+    primaryProvider: 'tavily' | 'brave' | 'serpapi' | 'google' | null;
+    fallbackProvider: 'tavily' | 'brave' | 'serpapi' | 'google' | null;
+    providers: Array<{
+      type: 'tavily' | 'brave' | 'serpapi' | 'google';
+      name: string;
+      description: string;
+      configured: boolean;
+      supportedTypes: Array<'web' | 'news' | 'images'>;
+    }>;
+    isConfigured: boolean;
+  }>;
+  testSearchProvider: (providerType: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {

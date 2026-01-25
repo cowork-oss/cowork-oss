@@ -11,6 +11,7 @@ import {
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode } from '../../shared/types';
 import { AgentDaemon } from '../agent/daemon';
 import { LLMProviderFactory, LLMProviderConfig, ModelKey } from '../agent/llm';
+import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
 
 export function setupIpcHandlers(
@@ -212,6 +213,25 @@ export function setupIpcHandlers(
         description: m.description,
       })),
     };
+  });
+
+  // Search Settings handlers
+  ipcMain.handle(IPC_CHANNELS.SEARCH_GET_SETTINGS, async () => {
+    return SearchProviderFactory.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, async (_, settings: SearchSettings) => {
+    SearchProviderFactory.saveSettings(settings);
+    SearchProviderFactory.clearCache();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SEARCH_GET_CONFIG_STATUS, async () => {
+    return SearchProviderFactory.getConfigStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SEARCH_TEST_PROVIDER, async (_, providerType: SearchProviderType) => {
+    return SearchProviderFactory.testProvider(providerType);
   });
 
   // Gateway / Channel handlers

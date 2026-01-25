@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LLMSettingsData } from '../../shared/types';
 import { TelegramSettings } from './TelegramSettings';
+import { SearchSettings } from './SearchSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'llm' | 'telegram';
+type SettingsTab = 'llm' | 'search' | 'telegram';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm');
@@ -161,6 +162,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               LLM Provider
             </button>
             <button
+              className={`settings-tab ${activeTab === 'search' ? 'active' : ''}`}
+              onClick={() => setActiveTab('search')}
+            >
+              Web Search
+            </button>
+            <button
               className={`settings-tab ${activeTab === 'telegram' ? 'active' : ''}`}
               onClick={() => setActiveTab('telegram')}
             >
@@ -170,6 +177,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           {activeTab === 'telegram' ? (
             <TelegramSettings />
+          ) : activeTab === 'search' ? (
+            <SearchSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (
@@ -375,6 +384,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         )}
 
         {activeTab === 'telegram' && (
+          <div className="modal-footer">
+            <div className="modal-footer-right">
+              <button className="button-secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'search' && (
           <div className="modal-footer">
             <div className="modal-footer-right">
               <button className="button-secondary" onClick={onClose}>
