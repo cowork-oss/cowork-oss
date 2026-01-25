@@ -41,27 +41,47 @@ export class OllamaProvider implements LLMProvider {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
 
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: request.model,
-        messages,
-        stream: false,
-        options: {
-          num_predict: request.maxTokens,
-        },
-        ...(tools && tools.length > 0 && { tools }),
-      }),
-    });
+    // Use AbortController for timeout (5 minutes for large models)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ollama API error: ${response.status} - ${error}`);
+    try {
+      console.log(`[Ollama] Sending request to model: ${request.model}`);
+      const startTime = Date.now();
+
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: request.model,
+          messages,
+          stream: false,
+          options: {
+            num_predict: request.maxTokens,
+          },
+          ...(tools && tools.length > 0 && { tools }),
+        }),
+      });
+
+      clearTimeout(timeoutId);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[Ollama] Response received in ${elapsed}s`);
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Ollama API error: ${response.status} - ${error}`);
+      }
+
+      const data = await response.json() as OllamaChatResponse;
+      return this.convertResponse(data);
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Ollama request timed out after 5 minutes. The model may be too slow or not responding.');
+      }
+      throw error;
     }
-
-    const data = await response.json() as OllamaChatResponse;
-    return this.convertResponse(data);
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
