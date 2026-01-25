@@ -25,6 +25,7 @@ import {
   ChannelMessageRepository,
   WorkspaceRepository,
   TaskRepository,
+  ArtifactRepository,
 } from '../database/repositories';
 import Database from 'better-sqlite3';
 import { AgentDaemon } from '../agent/daemon';
@@ -65,6 +66,7 @@ export class MessageRouter {
   private messageRepo: ChannelMessageRepository;
   private workspaceRepo: WorkspaceRepository;
   private taskRepo: TaskRepository;
+  private artifactRepo: ArtifactRepository;
 
   // Track pending responses for tasks
   private pendingTaskResponses: Map<string, { adapter: ChannelAdapter; chatId: string; sessionId: string }> = new Map();
@@ -80,6 +82,7 @@ export class MessageRouter {
     this.messageRepo = new ChannelMessageRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.taskRepo = new TaskRepository(db);
+    this.artifactRepo = new ArtifactRepository(db);
 
     // Initialize managers
     this.securityManager = new SecurityManager(db);
@@ -1274,12 +1277,61 @@ export class MessageRouter {
         });
       }
 
+      // Send artifacts if any were created
+      await this.sendTaskArtifacts(taskId, pending.adapter, pending.chatId);
+
       // Don't unlink session - keep it linked for follow-up messages
       // User can use /newtask to explicitly start a new task
     } catch (error) {
       console.error('Error sending task completion:', error);
     } finally {
       this.pendingTaskResponses.delete(taskId);
+    }
+  }
+
+  /**
+   * Send task artifacts as documents to the channel
+   */
+  private async sendTaskArtifacts(
+    taskId: string,
+    adapter: ChannelAdapter,
+    chatId: string
+  ): Promise<void> {
+    try {
+      const artifacts = this.artifactRepo.findByTaskId(taskId);
+      if (artifacts.length === 0) return;
+
+      // Filter for sendable file types (documents, spreadsheets, etc.)
+      const sendableExtensions = [
+        '.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.xls', '.ppt',
+        '.txt', '.csv', '.json', '.md', '.html', '.xml'
+      ];
+
+      const sendableArtifacts = artifacts.filter(artifact => {
+        const ext = path.extname(artifact.path).toLowerCase();
+        return sendableExtensions.includes(ext) && fs.existsSync(artifact.path);
+      });
+
+      if (sendableArtifacts.length === 0) return;
+
+      // Check if adapter supports sendDocument
+      if (!adapter.sendDocument) {
+        console.log('Adapter does not support sendDocument, skipping artifact delivery');
+        return;
+      }
+
+      // Send each artifact
+      for (const artifact of sendableArtifacts) {
+        try {
+          const fileName = path.basename(artifact.path);
+          await adapter.sendDocument(chatId, artifact.path, `📎 ${fileName}`);
+          console.log(`Sent artifact: ${fileName}`);
+        } catch (err) {
+          console.error(`Failed to send artifact ${artifact.path}:`, err);
+        }
+      }
+    } catch (error) {
+      console.error('Error sending task artifacts:', error);
     }
   }
 

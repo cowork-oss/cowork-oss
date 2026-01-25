@@ -5,7 +5,9 @@
  * Supports both polling and webhook modes.
  */
 
-import { Bot, Context, webhookCallback } from 'grammy';
+import { Bot, Context, webhookCallback, InputFile } from 'grammy';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   ChannelAdapter,
   ChannelStatus,
@@ -238,6 +240,31 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     await this.bot.api.deleteMessage(chatId, msgId);
+  }
+
+  /**
+   * Send a document/file to a chat
+   */
+  async sendDocument(chatId: string, filePath: string, caption?: string): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    const fileName = path.basename(filePath);
+    const fileBuffer = fs.readFileSync(filePath);
+
+    const sent = await this.bot.api.sendDocument(
+      chatId,
+      new InputFile(fileBuffer, fileName),
+      { caption }
+    );
+
+    return sent.message_id.toString();
   }
 
   /**
