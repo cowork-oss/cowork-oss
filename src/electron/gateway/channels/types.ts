@@ -154,6 +154,15 @@ export interface ChannelAdapter {
   deleteMessage?(chatId: string, messageId: string): Promise<void>;
 
   /**
+   * Send a document/file to a chat
+   * @param chatId Chat ID
+   * @param filePath Path to the file to send
+   * @param caption Optional caption for the file
+   * @returns The sent message ID
+   */
+  sendDocument?(chatId: string, filePath: string, caption?: string): Promise<string>;
+
+  /**
    * Register a message handler
    * @param handler Function to call when a message is received
    */
