@@ -618,11 +618,17 @@ export class MessageRouter {
     // Create workspace name from path
     const workspaceName = path.basename(workspacePath);
 
-    // Create new workspace
-    const workspace = this.workspaceRepo.create({
-      name: workspaceName,
-      path: workspacePath,
-    });
+    // Create new workspace with default permissions
+    const workspace = this.workspaceRepo.create(
+      workspaceName,
+      workspacePath,
+      {
+        read: true,
+        write: true,
+        delete: false, // Requires approval
+        network: false,
+      }
+    );
 
     // Set as current workspace
     this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
