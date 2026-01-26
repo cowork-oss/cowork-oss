@@ -738,12 +738,14 @@ function renderEventTitle(event: TaskEvent, workspacePath?: string): React.React
   switch (event.type) {
     case 'task_created':
       return 'Task created';
+    case 'task_completed':
+      return '✓ Task completed successfully';
     case 'plan_created':
       return 'Execution plan created';
     case 'step_started':
-      return `Started: ${event.payload.step?.description || 'Step'}`;
+      return `Step: ${event.payload.step?.description || 'Starting...'}`;
     case 'step_completed':
-      return `Completed: ${event.payload.step?.description || event.payload.message || 'Step'}`;
+      return `✓ ${event.payload.step?.description || event.payload.message || 'Step done'}`;
     case 'tool_call':
       return `Tool: ${event.payload.tool}`;
     case 'tool_result':
