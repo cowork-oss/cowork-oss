@@ -22,6 +22,8 @@ import { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 import {
   ChannelRepository,
   ChannelUserRepository,
+  ChannelSessionRepository,
+  ChannelMessageRepository,
   Channel,
 } from '../database/repositories';
 import { AgentDaemon } from '../agent/daemon';
@@ -49,6 +51,8 @@ export class ChannelGateway {
   private sessionManager: SessionManager;
   private channelRepo: ChannelRepository;
   private userRepo: ChannelUserRepository;
+  private sessionRepo: ChannelSessionRepository;
+  private messageRepo: ChannelMessageRepository;
   private config: GatewayConfig;
   private initialized = false;
   private agentDaemon?: AgentDaemon;
@@ -64,6 +68,8 @@ export class ChannelGateway {
     this.sessionManager = new SessionManager(db);
     this.channelRepo = new ChannelRepository(db);
     this.userRepo = new ChannelUserRepository(db);
+    this.sessionRepo = new ChannelSessionRepository(db);
+    this.messageRepo = new ChannelMessageRepository(db);
 
     // Listen for agent daemon events to send responses back to channels
     if (config.agentDaemon) {
@@ -325,6 +331,13 @@ export class ChannelGateway {
    */
   async removeChannel(channelId: string): Promise<void> {
     await this.disableChannel(channelId);
+
+    // Delete associated data first (to avoid foreign key constraint errors)
+    this.messageRepo.deleteByChannelId(channelId);
+    this.sessionRepo.deleteByChannelId(channelId);
+    this.userRepo.deleteByChannelId(channelId);
+
+    // Now delete the channel
     this.channelRepo.delete(channelId);
   }
 

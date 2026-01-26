@@ -742,6 +742,11 @@ export class ChannelUserRepository {
     return rows.map(row => this.mapRowToUser(row));
   }
 
+  deleteByChannelId(channelId: string): void {
+    const stmt = this.db.prepare('DELETE FROM channel_users WHERE channel_id = ?');
+    stmt.run(channelId);
+  }
+
   findByPairingCode(channelId: string, pairingCode: string): ChannelUser | undefined {
     const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? AND UPPER(pairing_code) = UPPER(?)');
     const row = stmt.get(channelId, pairingCode) as Record<string, unknown> | undefined;
@@ -855,6 +860,11 @@ export class ChannelSessionRepository {
     return rows.map(row => this.mapRowToSession(row));
   }
 
+  deleteByChannelId(channelId: string): void {
+    const stmt = this.db.prepare('DELETE FROM channel_sessions WHERE channel_id = ?');
+    stmt.run(channelId);
+  }
+
   private mapRowToSession(row: Record<string, unknown>): ChannelSession {
     return {
       id: row.id as string,
@@ -911,6 +921,11 @@ export class ChannelMessageRepository {
     const stmt = this.db.prepare('SELECT * FROM channel_messages WHERE channel_id = ? AND chat_id = ? ORDER BY timestamp DESC LIMIT ?');
     const rows = stmt.all(channelId, chatId, limit) as Record<string, unknown>[];
     return rows.map(row => this.mapRowToMessage(row)).reverse();
+  }
+
+  deleteByChannelId(channelId: string): void {
+    const stmt = this.db.prepare('DELETE FROM channel_messages WHERE channel_id = ?');
+    stmt.run(channelId);
   }
 
   private mapRowToMessage(row: Record<string, unknown>): ChannelMessage {
