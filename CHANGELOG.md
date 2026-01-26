@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configurable Guardrails** - User-configurable safety limits in Settings > Guardrails
+  - **Token Budget**: Limit total tokens per task (default: 100,000, range: 1K-10M)
+  - **Cost Budget**: Limit estimated cost per task (default: $1.00, disabled by default)
+  - **Iteration Limit**: Limit LLM calls per task to prevent infinite loops (default: 50)
+  - **Dangerous Command Blocking**: Block shell commands matching dangerous patterns (enabled by default)
+    - Built-in patterns: `sudo`, `rm -rf /`, `mkfs`, `dd if=`, fork bombs, `curl|bash`, etc.
+    - Support for custom regex patterns
+  - **File Size Limit**: Limit file write size (default: 50MB)
+  - **Domain Allowlist**: Restrict browser automation to approved domains (disabled by default)
+- Model pricing table for cost estimation (Anthropic, Bedrock, Gemini, OpenRouter models)
+- New IPC handlers and preload APIs for guardrail settings
+
+### Changed
+- Task executor now tracks token usage, cost, and iterations across LLM calls
+- Shell commands are blocked by guardrails before reaching approval dialog
+- File writes check size limits before writing
+- Browser navigation checks domain allowlist when enabled
+
 ## [0.1.7] - 2025-01-26
 
 ### Added

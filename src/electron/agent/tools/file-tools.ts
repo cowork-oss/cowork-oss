@@ -3,6 +3,7 @@ import * as path from 'path';
 import { shell } from 'electron';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
+import { GuardrailManager } from '../../guardrails/guardrail-manager';
 
 // Limits to prevent context overflow
 const MAX_FILE_SIZE = 100 * 1024; // 100KB max for file reads
@@ -99,6 +100,16 @@ export class FileTools {
   async writeFile(relativePath: string, content: string): Promise<{ success: boolean; path: string }> {
     this.checkPermission('write');
     const fullPath = this.resolvePath(relativePath);
+
+    // Check file size against guardrail limits
+    const contentSizeBytes = Buffer.byteLength(content, 'utf-8');
+    const sizeCheck = GuardrailManager.isFileSizeExceeded(contentSizeBytes);
+    if (sizeCheck.exceeded) {
+      throw new Error(
+        `File size limit exceeded: ${sizeCheck.sizeMB.toFixed(2)}MB exceeds limit of ${sizeCheck.limitMB}MB.\n` +
+        `You can adjust this limit in Settings > Guardrails.`
+      );
+    }
 
     try {
       // Ensure directory exists

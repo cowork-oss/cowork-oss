@@ -56,6 +56,10 @@ const IPC_CHANNELS = {
   APP_UPDATE_PROGRESS: 'app:updateProgress',
   APP_UPDATE_DOWNLOADED: 'app:updateDownloaded',
   APP_UPDATE_ERROR: 'app:updateError',
+  // Guardrails
+  GUARDRAIL_GET_SETTINGS: 'guardrail:getSettings',
+  GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
+  GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
 } as const;
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -170,6 +174,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_ERROR, subscription);
   },
+
+  // Guardrail Settings APIs
+  getGuardrailSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_SETTINGS),
+  saveGuardrailSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, settings),
+  getGuardrailDefaults: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS),
 });
 
 // Type declarations for TypeScript
@@ -271,6 +280,36 @@ export interface ElectronAPI {
   }) => void) => () => void;
   onUpdateDownloaded: (callback: (info: { requiresRestart: boolean; message: string }) => void) => () => void;
   onUpdateError: (callback: (error: { error: string }) => void) => () => void;
+  // Guardrail Settings
+  getGuardrailSettings: () => Promise<{
+    maxTokensPerTask: number;
+    tokenBudgetEnabled: boolean;
+    maxCostPerTask: number;
+    costBudgetEnabled: boolean;
+    blockDangerousCommands: boolean;
+    customBlockedPatterns: string[];
+    maxFileSizeMB: number;
+    fileSizeLimitEnabled: boolean;
+    enforceAllowedDomains: boolean;
+    allowedDomains: string[];
+    maxIterationsPerTask: number;
+    iterationLimitEnabled: boolean;
+  }>;
+  saveGuardrailSettings: (settings: any) => Promise<{ success: boolean }>;
+  getGuardrailDefaults: () => Promise<{
+    maxTokensPerTask: number;
+    tokenBudgetEnabled: boolean;
+    maxCostPerTask: number;
+    costBudgetEnabled: boolean;
+    blockDangerousCommands: boolean;
+    customBlockedPatterns: string[];
+    maxFileSizeMB: number;
+    fileSizeLimitEnabled: boolean;
+    enforceAllowedDomains: boolean;
+    allowedDomains: string[];
+    maxIterationsPerTask: number;
+    iterationLimitEnabled: boolean;
+  }>;
 }
 
 declare global {

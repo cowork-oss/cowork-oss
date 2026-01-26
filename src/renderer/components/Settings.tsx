@@ -4,6 +4,7 @@ import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { SearchSettings } from './SearchSettings';
 import { UpdateSettings } from './UpdateSettings';
+import { GuardrailSettings } from './GuardrailSettings';
 
 interface SettingsProps {
   onBack: () => void;
@@ -21,7 +22,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord' | 'updates';
+type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -582,6 +583,15 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
             </svg>
             Updates
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'guardrails' ? 'active' : ''}`}
+            onClick={() => setActiveTab('guardrails')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Guardrails
+          </button>
         </div>
 
         <div className="settings-content">
@@ -593,6 +603,8 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
             <SearchSettings />
           ) : activeTab === 'updates' ? (
             <UpdateSettings />
+          ) : activeTab === 'guardrails' ? (
+            <GuardrailSettings />
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (

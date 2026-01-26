@@ -13,6 +13,8 @@ import {
   truncateToolResult,
   estimateTokens,
 } from './context-manager';
+import { GuardrailManager } from '../guardrails/guardrail-manager';
+import { calculateCost, formatCost } from './llm/pricing';
 
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
@@ -56,6 +58,12 @@ export class TaskExecutor {
   private conversationHistory: LLMMessage[] = [];
   private systemPrompt: string = '';
 
+  // Guardrail tracking
+  private totalInputTokens: number = 0;
+  private totalOutputTokens: number = 0;
+  private totalCost: number = 0;
+  private iterationCount: number = 0;
+
   constructor(
     private task: Task,
     private workspace: Workspace,
@@ -85,6 +93,50 @@ export class TaskExecutor {
     this.sandboxRunner = new SandboxRunner(workspace);
 
     console.log(`TaskExecutor initialized with ${settings.providerType} provider, model: ${this.modelId}`);
+  }
+
+  /**
+   * Check guardrail budgets before making an LLM call
+   * @throws Error if any budget is exceeded
+   */
+  private checkBudgets(): void {
+    // Check iteration limit
+    const iterationCheck = GuardrailManager.isIterationLimitExceeded(this.iterationCount);
+    if (iterationCheck.exceeded) {
+      throw new Error(
+        `Iteration limit exceeded: ${iterationCheck.iterations}/${iterationCheck.limit} iterations. ` +
+        `Task stopped to prevent runaway execution.`
+      );
+    }
+
+    // Check token budget
+    const totalTokens = this.totalInputTokens + this.totalOutputTokens;
+    const tokenCheck = GuardrailManager.isTokenBudgetExceeded(totalTokens);
+    if (tokenCheck.exceeded) {
+      throw new Error(
+        `Token budget exceeded: ${tokenCheck.used.toLocaleString()}/${tokenCheck.limit.toLocaleString()} tokens. ` +
+        `Estimated cost: ${formatCost(this.totalCost)}`
+      );
+    }
+
+    // Check cost budget
+    const costCheck = GuardrailManager.isCostBudgetExceeded(this.totalCost);
+    if (costCheck.exceeded) {
+      throw new Error(
+        `Cost budget exceeded: ${formatCost(costCheck.cost)}/${formatCost(costCheck.limit)}. ` +
+        `Total tokens used: ${totalTokens.toLocaleString()}`
+      );
+    }
+  }
+
+  /**
+   * Update tracking after an LLM response
+   */
+  private updateTracking(inputTokens: number, outputTokens: number): void {
+    this.totalInputTokens += inputTokens;
+    this.totalOutputTokens += outputTokens;
+    this.totalCost += calculateCost(this.modelId, inputTokens, outputTokens);
+    this.iterationCount++;
   }
 
   /**
@@ -240,6 +292,9 @@ Format your plan as a JSON object with this structure:
 
     let response;
     try {
+      // Check budgets before LLM call
+      this.checkBudgets();
+
       const startTime = Date.now();
       console.log(`[Task ${this.task.id}] Calling LLM API for plan creation...`);
 
@@ -258,6 +313,11 @@ Format your plan as a JSON object with this structure:
         LLM_TIMEOUT_MS,
         'Plan creation'
       );
+
+      // Update tracking after response
+      if (response.usage) {
+        this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+      }
 
       console.log(`[Task ${this.task.id}] LLM response received in ${Date.now() - startTime}ms`);
     } catch (llmError: any) {
@@ -444,6 +504,9 @@ IMPORTANT INSTRUCTIONS:
           break;
         }
 
+        // Check guardrail budgets before each LLM call
+        this.checkBudgets();
+
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
@@ -458,6 +521,11 @@ IMPORTANT INSTRUCTIONS:
           LLM_TIMEOUT_MS,
           'LLM execution step'
         );
+
+        // Update tracking after response
+        if (response.usage) {
+          this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
 
         // Process response - only stop if we have actual content AND it's end_turn
         // Empty responses should not terminate the loop
@@ -614,6 +682,9 @@ IMPORTANT INSTRUCTIONS:
           break;
         }
 
+        // Check guardrail budgets before each LLM call
+        this.checkBudgets();
+
         // Compact messages if context is getting too large
         messages = this.contextManager.compactMessages(messages, systemPromptTokens);
 
@@ -628,6 +699,11 @@ IMPORTANT INSTRUCTIONS:
           LLM_TIMEOUT_MS,
           'LLM message processing'
         );
+
+        // Update tracking after response
+        if (response.usage) {
+          this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
 
         // Process response
         if (response.stopReason === 'end_turn') {

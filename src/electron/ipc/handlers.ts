@@ -30,9 +30,11 @@ import {
   GrantAccessSchema,
   RevokeAccessSchema,
   GeneratePairingSchema,
+  GuardrailSettingsSchema,
   UUIDSchema,
   StringIdSchema,
 } from '../utils/validation';
+import { GuardrailManager } from '../guardrails/guardrail-manager';
 
 // Helper to check rate limit and throw if exceeded
 function checkRateLimit(channel: string, config = RATE_LIMIT_CONFIGS.standard): void {
@@ -56,6 +58,7 @@ rateLimiter.configure(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limi
 rateLimiter.configure(IPC_CHANNELS.SEARCH_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 
 export function setupIpcHandlers(
   dbManager: DatabaseManager,
@@ -663,5 +666,22 @@ export function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
     await updateManager.installUpdateAndRestart();
     return { success: true };
+  });
+
+  // Guardrail Settings handlers
+  ipcMain.handle(IPC_CHANNELS.GUARDRAIL_GET_SETTINGS, async () => {
+    return GuardrailManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS);
+    const validated = validateInput(GuardrailSettingsSchema, settings, 'guardrail settings');
+    GuardrailManager.saveSettings(validated);
+    GuardrailManager.clearCache();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS, async () => {
+    return GuardrailManager.getDefaults();
   });
 }

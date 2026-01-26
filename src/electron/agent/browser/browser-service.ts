@@ -2,6 +2,7 @@ import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { Workspace } from '../../../shared/types';
+import { GuardrailManager } from '../../guardrails/guardrail-manager';
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -96,6 +97,19 @@ export class BrowserService {
    * Navigate to a URL
    */
   async navigate(url: string, waitUntil: 'load' | 'domcontentloaded' | 'networkidle' = 'load'): Promise<NavigateResult> {
+    // Check if domain is allowed by guardrails
+    if (!GuardrailManager.isDomainAllowed(url)) {
+      const settings = GuardrailManager.loadSettings();
+      const allowedDomainsStr = settings.allowedDomains.length > 0
+        ? settings.allowedDomains.join(', ')
+        : '(none configured)';
+      throw new Error(
+        `Domain not allowed: "${url}"\n` +
+        `Allowed domains: ${allowedDomainsStr}\n` +
+        `You can modify allowed domains in Settings > Guardrails.`
+      );
+    }
+
     await this.ensurePage();
 
     const response = await this.page!.goto(url, { waitUntil });

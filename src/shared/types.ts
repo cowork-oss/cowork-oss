@@ -18,6 +18,7 @@ export type EventType =
   | 'file_created'
   | 'file_modified'
   | 'file_deleted'
+  | 'image_generated'
   | 'error'
   | 'log';
 
@@ -31,7 +32,8 @@ export type ToolType =
   | 'create_directory'
   | 'search_files'
   | 'run_skill'
-  | 'run_command';
+  | 'run_command'
+  | 'generate_image';
 
 export type ApprovalType =
   | 'delete_file'
@@ -212,6 +214,11 @@ export const IPC_CHANNELS = {
   APP_UPDATE_PROGRESS: 'app:updateProgress',
   APP_UPDATE_DOWNLOADED: 'app:updateDownloaded',
   APP_UPDATE_ERROR: 'app:updateError',
+
+  // Guardrails
+  GUARDRAIL_GET_SETTINGS: 'guardrail:getSettings',
+  GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
+  GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
 } as const;
 
 // LLM Provider types
@@ -363,6 +370,54 @@ export interface SearchConfigStatus {
   providers: SearchProviderInfo[];
   isConfigured: boolean;
 }
+
+// Guardrail Settings types
+export interface GuardrailSettings {
+  // Token Budget (per task)
+  maxTokensPerTask: number;
+  tokenBudgetEnabled: boolean;
+
+  // Cost Budget (per task, in USD)
+  maxCostPerTask: number;
+  costBudgetEnabled: boolean;
+
+  // Dangerous Command Blocking
+  blockDangerousCommands: boolean;
+  customBlockedPatterns: string[];
+
+  // File Write Size Limit (in MB)
+  maxFileSizeMB: number;
+  fileSizeLimitEnabled: boolean;
+
+  // Network Domain Allowlist
+  enforceAllowedDomains: boolean;
+  allowedDomains: string[];
+
+  // Max Iterations Per Task
+  maxIterationsPerTask: number;
+  iterationLimitEnabled: boolean;
+}
+
+// Default dangerous command patterns (regex)
+export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
+  'sudo',
+  'rm\\s+-rf\\s+/',
+  'rm\\s+-rf\\s+~',
+  'rm\\s+-rf\\s+/\\*',
+  'rm\\s+-rf\\s+\\*',
+  'mkfs',
+  'dd\\s+if=',
+  ':\\(\\)\\{\\s*:\\|:\\&\\s*\\};:',  // Fork bomb
+  'curl.*\\|.*bash',
+  'wget.*\\|.*bash',
+  'curl.*\\|.*sh',
+  'wget.*\\|.*sh',
+  'chmod\\s+777',
+  '>\\s*/dev/sd',
+  'mv\\s+/\\*',
+  'format\\s+c:',
+  'del\\s+/f\\s+/s\\s+/q',
+];
 
 // App Update types
 export type UpdateMode = 'git' | 'electron-updater';

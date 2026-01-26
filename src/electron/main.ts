@@ -8,6 +8,7 @@ import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
 import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
+import { GuardrailManager } from './guardrails/guardrail-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -71,6 +72,7 @@ app.whenReady().then(async () => {
   // Initialize provider factories (loads settings from disk)
   LLMProviderFactory.initialize();
   SearchProviderFactory.initialize();
+  GuardrailManager.initialize();
 
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();
