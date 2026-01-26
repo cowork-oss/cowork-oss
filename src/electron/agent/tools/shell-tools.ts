@@ -2,6 +2,7 @@ import { exec, ExecOptions } from 'child_process';
 import { promisify } from 'util';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
+import { GuardrailManager } from '../../guardrails/guardrail-manager';
 
 const execAsync = promisify(exec);
 
@@ -39,6 +40,16 @@ export class ShellTools {
     exitCode: number | null;
     truncated?: boolean;
   }> {
+    // Check if command is blocked by guardrails BEFORE asking for approval
+    const blockCheck = GuardrailManager.isCommandBlocked(command);
+    if (blockCheck.blocked) {
+      throw new Error(
+        `Command blocked by guardrails: "${command}"\n` +
+        `Matched pattern: ${blockCheck.pattern}\n` +
+        `This command has been blocked for safety. You can modify blocked patterns in Settings > Guardrails.`
+      );
+    }
+
     // Request user approval before executing
     const approved = await this.daemon.requestApproval(
       this.taskId,

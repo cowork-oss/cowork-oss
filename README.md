@@ -277,6 +277,67 @@ The following operations always require user approval:
 
 ---
 
+## Configurable Guardrails
+
+CoWork-OSS includes configurable safety guardrails that you can customize in **Settings > Guardrails**. These provide additional protection against runaway tasks, excessive costs, and dangerous operations.
+
+### Available Guardrails
+
+| Guardrail | Description | Default | Range |
+|-----------|-------------|---------|-------|
+| **Token Budget** | Limits total tokens (input + output) per task | 100,000 | 1K - 10M |
+| **Cost Budget** | Limits estimated cost (USD) per task | $1.00 (disabled) | $0.01 - $100 |
+| **Iteration Limit** | Limits LLM calls per task to prevent infinite loops | 50 | 5 - 500 |
+| **Dangerous Command Blocking** | Blocks shell commands matching dangerous patterns | Enabled | On/Off + custom patterns |
+| **File Size Limit** | Limits the size of files the agent can write | 50 MB | 1 - 500 MB |
+| **Domain Allowlist** | Restricts browser automation to approved domains | Disabled | On/Off + domain list |
+
+### Token & Cost Budgets
+
+Token and cost budgets help prevent runaway tasks from consuming excessive resources:
+
+- **Token Budget**: Tracks total input + output tokens across all LLM calls in a task
+- **Cost Budget**: Calculates estimated cost based on model pricing (Claude, Gemini, GPT-4, Llama, etc.)
+
+When a budget is exceeded, the task stops with a clear error message showing usage vs. limit.
+
+### Dangerous Command Blocking
+
+Built-in patterns block potentially destructive shell commands **before** they reach the approval dialog:
+
+**Default blocked patterns:**
+- `sudo` - Elevated privileges
+- `rm -rf /` - Recursive deletion of root
+- `mkfs` - Filesystem formatting
+- `dd if=` - Direct disk writes
+- Fork bombs - Process exhaustion attacks
+- `curl|bash` - Piped execution from internet
+
+You can add custom patterns (regex supported) to block additional commands specific to your environment.
+
+### Domain Allowlist
+
+When enabled, browser automation is restricted to approved domains only:
+
+- Specify exact domains: `github.com`
+- Use wildcards: `*.google.com` (matches all subdomains)
+- Block all navigation when enabled with no domains configured
+
+This prevents the agent from navigating to unexpected websites during browser automation tasks.
+
+### Configuration
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Guardrails** tab
+3. Enable/disable guardrails using toggle switches
+4. Adjust values as needed
+5. Add custom blocked patterns or allowed domains
+6. Click **Save Settings**
+
+Settings are stored locally and persist across app restarts.
+
+---
+
 ## Compliance
 
 This project requires users to comply with their model provider's terms and policies:
@@ -309,6 +370,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Web search integration (Tavily, Brave, SerpAPI, Google)
 - [x] Local LLM support via Ollama (free, runs on your machine)
 - [x] **Browser automation** with Playwright (navigate, click, fill, screenshot, PDF)
+- [x] **Configurable guardrails** (token/cost budgets, iteration limits, command blocking, file size limits, domain allowlist)
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework

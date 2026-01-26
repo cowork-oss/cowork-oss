@@ -118,6 +118,34 @@ export const SearchSettingsSchema = z.object({
   }).optional(),
 });
 
+// ============ Guardrail Settings Schema ============
+
+export const GuardrailSettingsSchema = z.object({
+  // Token budget
+  maxTokensPerTask: z.number().int().min(1000).max(10000000).default(100000),
+  tokenBudgetEnabled: z.boolean().default(true),
+
+  // Cost budget
+  maxCostPerTask: z.number().min(0.01).max(100).default(1.00),
+  costBudgetEnabled: z.boolean().default(false),
+
+  // Dangerous commands
+  blockDangerousCommands: z.boolean().default(true),
+  customBlockedPatterns: z.array(z.string().max(500)).max(50).default([]),
+
+  // File size
+  maxFileSizeMB: z.number().int().min(1).max(500).default(50),
+  fileSizeLimitEnabled: z.boolean().default(true),
+
+  // Network domains
+  enforceAllowedDomains: z.boolean().default(false),
+  allowedDomains: z.array(z.string().max(255)).max(100).default([]),
+
+  // Iterations
+  maxIterationsPerTask: z.number().int().min(5).max(500).default(50),
+  iterationLimitEnabled: z.boolean().default(true),
+});
+
 // ============ Gateway/Channel Schemas ============
 
 export const SecurityModeSchema = z.enum(['pairing', 'allowlist', 'open']);

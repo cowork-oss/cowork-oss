@@ -40,6 +40,47 @@ Certain operations always require explicit user approval before execution:
 
 You can approve or deny each request individually.
 
+### Configurable Guardrails
+
+CoWork-OSS includes configurable guardrails in **Settings > Guardrails** to limit what the agent can do:
+
+| Guardrail | Description | Default |
+|-----------|-------------|---------|
+| **Token Budget** | Max tokens (input + output) per task | 100,000 (enabled) |
+| **Cost Budget** | Max estimated cost (USD) per task | $1.00 (disabled) |
+| **Iteration Limit** | Max LLM calls per task | 50 (enabled) |
+| **Dangerous Commands** | Block shell commands matching patterns | Enabled |
+| **File Size Limit** | Max file size the agent can write | 50 MB (enabled) |
+| **Domain Allowlist** | Restrict browser to approved domains | Disabled |
+
+#### Dangerous Command Blocking
+
+The following command patterns are blocked by default:
+
+| Pattern | Risk |
+|---------|------|
+| `sudo` | Elevated privileges |
+| `rm -rf /` or `rm -rf ~` | Mass deletion |
+| `mkfs` | Filesystem formatting |
+| `dd if=` | Direct disk writes |
+| Fork bombs | Process exhaustion |
+| `curl\|bash`, `wget\|sh` | Remote code execution |
+| `chmod 777` | Overly permissive |
+| `> /dev/sd` | Direct device writes |
+| `:(){ :|:& };:` | Fork bomb syntax |
+
+Commands are blocked **before** reaching the approval dialog. You can add custom patterns in Settings.
+
+#### Domain Allowlist
+
+When enabled, browser automation is restricted to specified domains:
+
+- Exact match: `github.com`
+- Wildcard: `*.google.com` (matches subdomains)
+- If enabled with no domains: all navigation blocked
+
+This prevents unintended browsing during automation tasks.
+
 ---
 
 ## What the App Can Access
@@ -351,5 +392,12 @@ CoWork-OSS is designed with security in mind:
 | Network access | Only configured providers |
 | Telemetry | None |
 | Electron security | Best practices followed |
+| Guardrails | Configurable limits on tokens, cost, iterations, commands, file size, and domains |
 
 **The security model is transparent and consent-based.** You remain in control of what the AI can do on your machine.
+
+### Guardrails Settings Location
+
+All guardrail settings can be configured at:
+- **Settings file**: `~/.config/CoWork-OSS/guardrail-settings.json`
+- **UI**: Settings (gear icon) → Guardrails tab
