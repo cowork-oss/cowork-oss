@@ -1,14 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { LLMSettingsData } from '../../shared/types';
+import { LLMSettingsData, ThemeMode, AccentColor } from '../../shared/types';
 import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { SearchSettings } from './SearchSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { GuardrailSettings } from './GuardrailSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 
 interface SettingsProps {
   onBack: () => void;
   onSettingsChanged?: () => void;
+  themeMode: ThemeMode;
+  accentColor: AccentColor;
+  onThemeChange: (theme: ThemeMode) => void;
+  onAccentChange: (accent: AccentColor) => void;
 }
 
 interface ModelOption {
@@ -22,7 +27,7 @@ interface ProviderInfo {
   configured: boolean;
 }
 
-type SettingsTab = 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails';
 
 // Helper to format bytes to human-readable size
 function formatBytes(bytes: number): string {
@@ -195,8 +200,8 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
   );
 }
 
-export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('llm');
+export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, onThemeChange, onAccentChange }: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
   const [settings, setSettings] = useState<LLMSettingsData>({
     providerType: 'anthropic',
     modelKey: 'sonnet-3-5',
@@ -537,6 +542,16 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
           </button>
           <div className="settings-nav-divider" />
           <button
+            className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`}
+            onClick={() => setActiveTab('appearance')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="5" />
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+            Appearance
+          </button>
+          <button
             className={`settings-nav-item ${activeTab === 'llm' ? 'active' : ''}`}
             onClick={() => setActiveTab('llm')}
           >
@@ -595,7 +610,14 @@ export function Settings({ onBack, onSettingsChanged }: SettingsProps) {
         </div>
 
         <div className="settings-content">
-          {activeTab === 'telegram' ? (
+          {activeTab === 'appearance' ? (
+            <AppearanceSettings
+              themeMode={themeMode}
+              accentColor={accentColor}
+              onThemeChange={onThemeChange}
+              onAccentChange={onAccentChange}
+            />
+          ) : activeTab === 'telegram' ? (
             <TelegramSettings />
           ) : activeTab === 'discord' ? (
             <DiscordSettings />

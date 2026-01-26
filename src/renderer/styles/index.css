@@ -5,7 +5,7 @@
 }
 
 :root {
-  /* Cowork OSS - Modern Dark Theme */
+  /* Cowork OSS - Modern Dark Theme (Default) */
   --color-bg: transparent;
   --color-bg-primary: rgba(30, 30, 30, 0.75);
   --color-bg-darker: rgba(15, 15, 15, 0.8);
@@ -24,7 +24,7 @@
   --color-text-primary: #ffffff;
   --color-text-secondary: rgba(255, 255, 255, 0.7);
   --color-text-muted: rgba(255, 255, 255, 0.45);
-  /* Modern cyan/blue accent */
+  /* Modern cyan/blue accent (default) */
   --color-accent: #22d3ee;
   --color-accent-hover: #67e8f9;
   --color-accent-subtle: rgba(34, 211, 238, 0.2);
@@ -53,6 +53,121 @@
   --gradient-glossy: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 50%);
 }
+
+/* ============================================
+   Light Theme
+   ============================================ */
+.theme-light {
+  --color-bg: transparent;
+  --color-bg-primary: rgba(255, 255, 255, 0.85);
+  --color-bg-darker: rgba(245, 245, 247, 0.9);
+  --color-bg-sidebar: rgba(248, 248, 250, 0.92);
+  --color-bg-elevated: rgba(255, 255, 255, 0.95);
+  --color-bg-secondary: rgba(240, 240, 242, 0.8);
+  --color-bg-tertiary: rgba(235, 235, 238, 0.7);
+  --color-bg-hover: rgba(0, 0, 0, 0.04);
+  --color-bg-input: rgba(0, 0, 0, 0.04);
+  --color-bg-glass: rgba(0, 0, 0, 0.03);
+  --color-bg-glass-hover: rgba(0, 0, 0, 0.06);
+  --color-border: rgba(0, 0, 0, 0.1);
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-light: rgba(0, 0, 0, 0.12);
+  --color-text: #1a1a1a;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: rgba(0, 0, 0, 0.65);
+  --color-text-muted: rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --gradient-glossy: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 100%);
+  --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 50%);
+}
+
+/* ============================================
+   Accent Color Themes
+   ============================================ */
+
+/* Cyan (Default) */
+.accent-cyan {
+  --color-accent: #22d3ee;
+  --color-accent-hover: #67e8f9;
+  --color-accent-subtle: rgba(34, 211, 238, 0.2);
+  --color-accent-dark: #0891b2;
+  --shadow-glow: 0 0 20px rgba(34, 211, 238, 0.15);
+}
+
+/* Blue */
+.accent-blue {
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-subtle: rgba(59, 130, 246, 0.2);
+  --color-accent-dark: #2563eb;
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+/* Purple */
+.accent-purple {
+  --color-accent: #a78bfa;
+  --color-accent-hover: #c4b5fd;
+  --color-accent-subtle: rgba(167, 139, 250, 0.2);
+  --color-accent-dark: #7c3aed;
+  --shadow-glow: 0 0 20px rgba(167, 139, 250, 0.15);
+}
+
+/* Pink */
+.accent-pink {
+  --color-accent: #f472b6;
+  --color-accent-hover: #f9a8d4;
+  --color-accent-subtle: rgba(244, 114, 182, 0.2);
+  --color-accent-dark: #db2777;
+  --shadow-glow: 0 0 20px rgba(244, 114, 182, 0.15);
+}
+
+/* Rose */
+.accent-rose {
+  --color-accent: #fb7185;
+  --color-accent-hover: #fda4af;
+  --color-accent-subtle: rgba(251, 113, 133, 0.2);
+  --color-accent-dark: #e11d48;
+  --shadow-glow: 0 0 20px rgba(251, 113, 133, 0.15);
+}
+
+/* Orange */
+.accent-orange {
+  --color-accent: #fb923c;
+  --color-accent-hover: #fdba74;
+  --color-accent-subtle: rgba(251, 146, 60, 0.2);
+  --color-accent-dark: #ea580c;
+  --shadow-glow: 0 0 20px rgba(251, 146, 60, 0.15);
+}
+
+/* Green */
+.accent-green {
+  --color-accent: #34d399;
+  --color-accent-hover: #6ee7b7;
+  --color-accent-subtle: rgba(52, 211, 153, 0.2);
+  --color-accent-dark: #059669;
+  --shadow-glow: 0 0 20px rgba(52, 211, 153, 0.15);
+}
+
+/* Teal */
+.accent-teal {
+  --color-accent: #2dd4bf;
+  --color-accent-hover: #5eead4;
+  --color-accent-subtle: rgba(45, 212, 191, 0.2);
+  --color-accent-dark: #0d9488;
+  --shadow-glow: 0 0 20px rgba(45, 212, 191, 0.15);
+}
+
+/* Light theme adjustments for accent colors */
+.theme-light.accent-cyan { --shadow-glow: 0 0 20px rgba(34, 211, 238, 0.25); }
+.theme-light.accent-blue { --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.25); }
+.theme-light.accent-purple { --shadow-glow: 0 0 20px rgba(167, 139, 250, 0.25); }
+.theme-light.accent-pink { --shadow-glow: 0 0 20px rgba(244, 114, 182, 0.25); }
+.theme-light.accent-rose { --shadow-glow: 0 0 20px rgba(251, 113, 133, 0.25); }
+.theme-light.accent-orange { --shadow-glow: 0 0 20px rgba(251, 146, 60, 0.25); }
+.theme-light.accent-green { --shadow-glow: 0 0 20px rgba(52, 211, 153, 0.25); }
+.theme-light.accent-teal { --shadow-glow: 0 0 20px rgba(45, 212, 191, 0.25); }
 
 html, body {
   height: 100%;
@@ -5322,4 +5437,187 @@ button {
 .goal-mode-attempts input[type="number"]:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* ==================== APPEARANCE SETTINGS ==================== */
+.appearance-section {
+  margin-bottom: 24px;
+}
+
+.appearance-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.theme-switcher {
+  display: flex;
+  gap: 12px;
+}
+
+.theme-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.theme-option:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.theme-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.theme-option-preview {
+  width: 64px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-option-preview.dark {
+  background: linear-gradient(135deg, #1e1e1e 0%, #2d2d30 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.theme-option-preview.light {
+  background: linear-gradient(135deg, #ffffff 0%, #f5f5f7 100%);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.theme-option-preview.system {
+  background: linear-gradient(135deg, #1e1e1e 0%, #1e1e1e 50%, #ffffff 50%, #f5f5f7 100%);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.theme-option-preview-line {
+  position: absolute;
+  left: 8px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.theme-option-preview.dark .theme-option-preview-line {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.theme-option-preview.light .theme-option-preview-line {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.theme-option-preview-line:nth-child(1) { top: 10px; width: 28px; }
+.theme-option-preview-line:nth-child(2) { top: 18px; width: 40px; }
+.theme-option-preview-line:nth-child(3) { top: 26px; width: 20px; }
+
+.theme-option-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.theme-option.selected .theme-option-label {
+  color: var(--color-accent);
+}
+
+/* Color Palette Grid */
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.color-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.color-option:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.color-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+
+.color-swatch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.2);
+}
+
+.color-option.selected .color-swatch::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  opacity: 0.3;
+}
+
+.color-swatch.cyan { background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%); }
+.color-swatch.blue { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
+.color-swatch.purple { background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%); }
+.color-swatch.pink { background: linear-gradient(135deg, #f472b6 0%, #db2777 100%); }
+.color-swatch.rose { background: linear-gradient(135deg, #fb7185 0%, #e11d48 100%); }
+.color-swatch.orange { background: linear-gradient(135deg, #fb923c 0%, #ea580c 100%); }
+.color-swatch.green { background: linear-gradient(135deg, #34d399 0%, #059669 100%); }
+.color-swatch.teal { background: linear-gradient(135deg, #2dd4bf 0%, #0d9488 100%); }
+
+.color-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-transform: capitalize;
+}
+
+.color-option.selected .color-label {
+  color: var(--color-accent);
+}
+
+/* System Theme Detection Badge */
+.system-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  margin-top: 4px;
 }

@@ -1,5 +1,25 @@
 // Core types shared between main and renderer processes
 
+// Theme and Appearance types
+export type ThemeMode = 'light' | 'dark' | 'system';
+export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+
+export interface AppearanceSettings {
+  themeMode: ThemeMode;
+  accentColor: AccentColor;
+}
+
+export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
+  { id: 'cyan', label: 'Cyan' },
+  { id: 'blue', label: 'Blue' },
+  { id: 'purple', label: 'Purple' },
+  { id: 'pink', label: 'Pink' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'orange', label: 'Orange' },
+  { id: 'green', label: 'Green' },
+  { id: 'teal', label: 'Teal' },
+];
+
 export type TaskStatus = 'pending' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type EventType =

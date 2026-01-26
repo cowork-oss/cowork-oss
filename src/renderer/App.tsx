@@ -4,7 +4,19 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo } from '../shared/types';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor } from '../shared/types';
+
+// Theme storage keys
+const THEME_STORAGE_KEY = 'cowork-theme-mode';
+const ACCENT_STORAGE_KEY = 'cowork-accent-color';
+
+// Helper to get effective theme based on system preference
+function getEffectiveTheme(themeMode: ThemeMode): 'light' | 'dark' {
+  if (themeMode === 'system') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return themeMode;
+}
 
 type AppView = 'workspace-selector' | 'main' | 'settings';
 
@@ -23,6 +35,16 @@ export function App() {
   // Update notification state
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+
+  // Theme state
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return (saved as ThemeMode) || 'dark';
+  });
+  const [accentColor, setAccentColor] = useState<AccentColor>(() => {
+    const saved = localStorage.getItem(ACCENT_STORAGE_KEY);
+    return (saved as AccentColor) || 'cyan';
+  });
 
   // Load LLM config status
   const loadLLMConfig = async () => {
@@ -58,6 +80,43 @@ export function App() {
     const timeoutId = setTimeout(checkUpdates, 3000);
     return () => clearTimeout(timeoutId);
   }, []);
+
+  // Apply theme classes to root element
+  useEffect(() => {
+    const root = document.documentElement;
+    const effectiveTheme = getEffectiveTheme(themeMode);
+
+    // Remove existing theme classes
+    root.classList.remove('theme-light', 'theme-dark');
+
+    // Apply theme class (only light needs explicit class, dark is default)
+    if (effectiveTheme === 'light') {
+      root.classList.add('theme-light');
+    }
+
+    // Remove existing accent classes
+    root.classList.remove('accent-cyan', 'accent-blue', 'accent-purple', 'accent-pink', 'accent-rose', 'accent-orange', 'accent-green', 'accent-teal');
+
+    // Apply accent class
+    root.classList.add(`accent-${accentColor}`);
+  }, [themeMode, accentColor]);
+
+  // Listen for system theme changes when in 'system' mode
+  useEffect(() => {
+    if (themeMode !== 'system') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      const root = document.documentElement;
+      root.classList.remove('theme-light', 'theme-dark');
+      if (!mediaQuery.matches) {
+        root.classList.add('theme-light');
+      }
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [themeMode]);
 
   useEffect(() => {
     console.log('App mounted');
@@ -205,6 +264,16 @@ export function App() {
     }
   };
 
+  const handleThemeChange = (theme: ThemeMode) => {
+    setThemeMode(theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  };
+
+  const handleAccentChange = (accent: AccentColor) => {
+    setAccentColor(accent);
+    localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+  };
+
   return (
     <div className="app">
       <div className="title-bar" />
@@ -276,7 +345,14 @@ export function App() {
         </div>
       )}
       {currentView === 'settings' && (
-        <Settings onBack={() => setCurrentView('main')} onSettingsChanged={loadLLMConfig} />
+        <Settings
+          onBack={() => setCurrentView('main')}
+          onSettingsChanged={loadLLMConfig}
+          themeMode={themeMode}
+          accentColor={accentColor}
+          onThemeChange={handleThemeChange}
+          onAccentChange={handleAccentChange}
+        />
       )}
     </div>
   );
