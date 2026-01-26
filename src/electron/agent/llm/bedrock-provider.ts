@@ -27,11 +27,15 @@ import {
 export class BedrockProvider implements LLMProvider {
   readonly type = 'bedrock' as const;
   private client: BedrockRuntimeClient;
+  private model: string;
 
   constructor(config: LLMProviderConfig) {
     const clientConfig: BedrockRuntimeClientConfig = {
       region: config.awsRegion || 'us-east-1',
     };
+
+    // Store the model for use in testConnection
+    this.model = config.model || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
 
     // Use explicit credentials if provided
     if (config.awsAccessKeyId && config.awsSecretAccessKey) {
@@ -83,9 +87,10 @@ export class BedrockProvider implements LLMProvider {
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      // Send a minimal request to test the connection
+      // Send a minimal request to test the connection using the configured model
+      console.log(`[Bedrock] Testing connection with model: ${this.model}`);
       const command = new ConverseCommand({
-        modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelId: this.model,
         messages: [
           {
             role: 'user',
@@ -100,9 +105,18 @@ export class BedrockProvider implements LLMProvider {
       await this.client.send(command);
       return { success: true };
     } catch (error: any) {
+      // Provide helpful error message for common issues
+      let errorMessage = error.message || 'Failed to connect to AWS Bedrock';
+
+      // Check for inference profile requirement
+      if (errorMessage.includes('inference profile')) {
+        errorMessage = `Model ${this.model} requires an inference profile. ` +
+          `Try selecting a different model or create an inference profile in AWS Console.`;
+      }
+
       return {
         success: false,
-        error: error.message || 'Failed to connect to AWS Bedrock',
+        error: errorMessage,
       };
     }
   }
