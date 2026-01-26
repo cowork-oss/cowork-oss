@@ -213,8 +213,17 @@ Format your plan as a JSON object with this structure:
       try {
         // Try to extract and parse JSON from the response
         const json = this.extractJsonObject(textContent.text);
-        if (json) {
-          this.plan = json;
+        // Validate that the JSON has a valid steps array
+        if (json && Array.isArray(json.steps) && json.steps.length > 0) {
+          // Ensure each step has required fields
+          this.plan = {
+            description: json.description || 'Execution plan',
+            steps: json.steps.map((s: any, i: number) => ({
+              id: s.id || String(i + 1),
+              description: s.description || s.step || s.task || String(s),
+              status: 'pending' as const,
+            })),
+          };
           this.daemon.logEvent(this.task.id, 'plan_created', { plan: this.plan });
         } else {
           // Fallback: create simple plan from text
