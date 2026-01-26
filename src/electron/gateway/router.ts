@@ -317,9 +317,20 @@ export class MessageRouter {
     message: IncomingMessage,
     securityResult: { reason?: string; pairingRequired?: boolean }
   ): Promise<void> {
-    // If pairing is required, check if the message IS a pairing code
+    // If pairing is required, check if the message IS a pairing code or /pair command
     if (securityResult.pairingRequired) {
       const text = message.text.trim();
+
+      // Check if it's a /pair command
+      if (text.toLowerCase().startsWith('/pair ')) {
+        const code = text.slice(6).trim(); // Remove '/pair ' prefix
+        if (code) {
+          await this.handlePairingAttempt(adapter, message, code);
+          return;
+        }
+      }
+
+      // Check if the raw text looks like a pairing code
       if (this.looksLikePairingCode(text)) {
         // This looks like a pairing code - try to verify it
         await this.handlePairingAttempt(adapter, message, text);
@@ -434,6 +445,20 @@ export class MessageRouter {
 
       case '/provider':
         await this.handleProviderCommand(adapter, message, args);
+        break;
+
+      case '/pair':
+        // Handle pairing code
+        if (args.length === 0) {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: '🔐 Please provide a pairing code.\n\nUsage: `/pair <code>`',
+            parseMode: 'markdown',
+          });
+        } else {
+          const code = args[0].trim();
+          await this.handlePairingAttempt(adapter, message, code);
+        }
         break;
 
       default:
