@@ -5,6 +5,7 @@ import { SkillTools } from './skill-tools';
 import { SearchTools } from './search-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
+import { ImageTools } from './image-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 
@@ -17,6 +18,7 @@ export class ToolRegistry {
   private searchTools: SearchTools;
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
+  private imageTools: ImageTools;
 
   constructor(
     private workspace: Workspace,
@@ -28,6 +30,7 @@ export class ToolRegistry {
     this.searchTools = new SearchTools(workspace, daemon, taskId);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
+    this.imageTools = new ImageTools(workspace, daemon, taskId);
   }
 
   /**
@@ -48,6 +51,11 @@ export class ToolRegistry {
     // Only add shell tool if workspace has shell permission
     if (this.workspace.permissions.shell) {
       tools.push(...this.getShellToolDefinitions());
+    }
+
+    // Only add image tools if Gemini API is configured
+    if (ImageTools.isAvailable()) {
+      tools.push(...ImageTools.getToolDefinitions());
     }
 
     return tools;
@@ -107,6 +115,16 @@ Shell Commands:
 - run_command: Execute shell commands (requires user approval)`;
     }
 
+    // Add image generation if Gemini is configured
+    if (ImageTools.isAvailable()) {
+      descriptions += `
+
+Image Generation (Nano Banana):
+- generate_image: Generate images from text descriptions using AI
+  - nano-banana: Fast generation for quick iterations
+  - nano-banana-pro: High-quality generation for production use`;
+    }
+
     return descriptions.trim();
   }
 
@@ -139,6 +157,9 @@ Shell Commands:
 
     // Shell tools
     if (name === 'run_command') return await this.shellTools.runCommand(input.command, input);
+
+    // Image tools
+    if (name === 'generate_image') return await this.imageTools.generateImage(input);
 
     throw new Error(`Unknown tool: ${name}`);
   }
