@@ -16,6 +16,7 @@ import {
 } from 'docx';
 import PDFDocument from 'pdfkit';
 import * as mammoth from 'mammoth';
+import JSZip from 'jszip';
 import { Workspace } from '../../../shared/types';
 
 export interface ContentBlock {
@@ -40,6 +41,18 @@ export interface DocumentOptions {
     left?: number;
     right?: number;
   };
+}
+
+/**
+ * Represents a document section identified by a heading
+ */
+interface DocumentSection {
+  headingLevel: number;
+  headingText: string;
+  sectionNumber?: string;
+  startIndex: number;
+  endIndex: number;
+  xmlContent: string;
 }
 
 /**
@@ -450,9 +463,8 @@ export class DocumentBuilder {
 
   /**
    * Appends new content sections to an existing DOCX file.
-   * Note: Due to DOCX format complexity, this creates a new document with
-   * the original content (converted to plain text sections) plus the new content.
-   * Some formatting may be lost in the process.
+   * This method directly manipulates the DOCX XML structure to preserve
+   * the original document formatting while adding new content at the end.
    */
   async appendToDocument(
     inputPath: string,
@@ -460,22 +472,486 @@ export class DocumentBuilder {
     newContent: ContentBlock[],
     options: DocumentOptions = {}
   ): Promise<{ success: boolean; sectionsAdded: number }> {
-    // Read existing document
-    const existingContent = await this.readDocument(inputPath);
+    console.log(`[DocumentBuilder] appendToDocument: ${inputPath} -> ${outputPath}, ${newContent.length} blocks`);
 
-    // Convert existing HTML to basic content blocks
-    const existingBlocks = this.htmlToContentBlocks(existingContent.html);
+    // Read the DOCX file as a ZIP
+    const docxBuffer = await fsPromises.readFile(inputPath);
+    const zip = await JSZip.loadAsync(docxBuffer);
 
-    // Combine with new content
-    const allContent = [...existingBlocks, ...newContent];
+    // Get the main document.xml
+    const documentXml = zip.file('word/document.xml');
+    if (!documentXml) {
+      throw new Error('Invalid DOCX file: missing word/document.xml');
+    }
 
-    // Create new document with all content
-    await this.createDocx(outputPath, allContent, options);
+    let xmlContent = await documentXml.async('text');
+
+    // Generate OOXML for the new content
+    const newXmlContent = this.contentBlocksToOoxml(newContent);
+
+    // Find the insertion point - before </w:body> or before <w:sectPr
+    // The sectPr element contains section properties and must stay at the end
+    const sectPrMatch = xmlContent.match(/<w:sectPr[^>]*>[\s\S]*?<\/w:sectPr>/);
+    const bodyEndMatch = xmlContent.match(/<\/w:body>/);
+
+    if (sectPrMatch && sectPrMatch.index !== undefined) {
+      // Insert before sectPr
+      xmlContent =
+        xmlContent.slice(0, sectPrMatch.index) +
+        newXmlContent +
+        xmlContent.slice(sectPrMatch.index);
+      console.log(`[DocumentBuilder] Inserted content before <w:sectPr>`);
+    } else if (bodyEndMatch && bodyEndMatch.index !== undefined) {
+      // Insert before </w:body>
+      xmlContent =
+        xmlContent.slice(0, bodyEndMatch.index) +
+        newXmlContent +
+        xmlContent.slice(bodyEndMatch.index);
+      console.log(`[DocumentBuilder] Inserted content before </w:body>`);
+    } else {
+      throw new Error('Could not find insertion point in document.xml');
+    }
+
+    // Update the document.xml in the ZIP
+    zip.file('word/document.xml', xmlContent);
+
+    // Write the modified DOCX
+    const outputBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 }
+    });
+    await fsPromises.writeFile(outputPath, outputBuffer);
+
+    console.log(`[DocumentBuilder] Successfully appended ${newContent.length} sections to ${outputPath}`);
 
     return {
       success: true,
       sectionsAdded: newContent.length
     };
+  }
+
+  /**
+   * Converts ContentBlocks to OOXML (Office Open XML) format
+   * This creates proper Word paragraph/table elements
+   */
+  private contentBlocksToOoxml(blocks: ContentBlock[]): string {
+    const xmlParts: string[] = [];
+
+    for (const block of blocks) {
+      switch (block.type) {
+        case 'heading': {
+          const level = Math.min(Math.max(block.level || 1, 1), 6);
+          // Word heading styles are "Heading1" through "Heading6"
+          const styleId = `Heading${level}`;
+          xmlParts.push(this.createOoxmlParagraph(block.text, styleId));
+          break;
+        }
+
+        case 'paragraph':
+          xmlParts.push(this.createOoxmlParagraph(block.text));
+          break;
+
+        case 'list': {
+          const items = block.items || block.text.split('\n').filter(line => line.trim());
+          for (const item of items) {
+            xmlParts.push(this.createOoxmlListItem(item));
+          }
+          break;
+        }
+
+        case 'table': {
+          if (block.rows && block.rows.length > 0) {
+            xmlParts.push(this.createOoxmlTable(block.rows));
+          }
+          break;
+        }
+
+        default:
+          xmlParts.push(this.createOoxmlParagraph(block.text));
+      }
+    }
+
+    return xmlParts.join('\n');
+  }
+
+  /**
+   * Creates an OOXML paragraph element
+   */
+  private createOoxmlParagraph(text: string, styleId?: string): string {
+    const escapedText = this.escapeXml(text);
+    const styleXml = styleId ? `<w:pPr><w:pStyle w:val="${styleId}"/></w:pPr>` : '';
+    return `<w:p>${styleXml}<w:r><w:t>${escapedText}</w:t></w:r></w:p>`;
+  }
+
+  /**
+   * Creates an OOXML list item (bullet point)
+   */
+  private createOoxmlListItem(text: string): string {
+    const escapedText = this.escapeXml(text);
+    // Simple bullet using a bullet character - more compatible than numPr
+    return `<w:p><w:pPr><w:ind w:left="720"/></w:pPr><w:r><w:t>• ${escapedText}</w:t></w:r></w:p>`;
+  }
+
+  /**
+   * Creates an OOXML table element
+   */
+  private createOoxmlTable(rows: string[][]): string {
+    const tableRows = rows.map((row, rowIndex) => {
+      const cells = row.map(cellText => {
+        const escapedText = this.escapeXml(cellText);
+        const boldStyle = rowIndex === 0 ? '<w:rPr><w:b/></w:rPr>' : '';
+        return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:tcBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:right w:val="single" w:sz="4"/></w:tcBorders></w:tcPr><w:p><w:r>${boldStyle}<w:t>${escapedText}</w:t></w:r></w:p></w:tc>`;
+      }).join('');
+      return `<w:tr>${cells}</w:tr>`;
+    }).join('');
+
+    return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:right w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr>${tableRows}</w:tbl>`;
+  }
+
+  /**
+   * Escapes special XML characters
+   */
+  private escapeXml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  /**
+   * Parses the document.xml content and identifies sections based on headings.
+   * Sections are delimited by heading paragraphs (Heading1, Heading2, etc.)
+   */
+  private parseSections(xmlContent: string): DocumentSection[] {
+    const sections: DocumentSection[] = [];
+
+    // Find all paragraphs that are headings (have w:pStyle with Heading1-6)
+    // Pattern: <w:p ...>...<w:pStyle w:val="Heading[1-6]"/>...</w:p>
+    const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+    const headingStyleRegex = /<w:pStyle\s+w:val="Heading([1-6])"\s*\/>/;
+    const textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+
+    let match;
+    const headingPositions: Array<{
+      level: number;
+      text: string;
+      sectionNumber?: string;
+      startIndex: number;
+      endIndex: number;
+    }> = [];
+
+    // Find all heading paragraphs
+    while ((match = paragraphRegex.exec(xmlContent)) !== null) {
+      const paragraph = match[0];
+      const styleMatch = paragraph.match(headingStyleRegex);
+
+      if (styleMatch) {
+        const level = parseInt(styleMatch[1], 10);
+
+        // Extract text from the paragraph
+        let text = '';
+        let textMatch;
+        const textRegexLocal = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+        while ((textMatch = textRegexLocal.exec(paragraph)) !== null) {
+          text += textMatch[1];
+        }
+
+        // Try to extract section number (e.g., "8. " or "8 ")
+        const sectionNumMatch = text.match(/^(\d+(?:\.\d+)*)[.\s]/);
+        const sectionNumber = sectionNumMatch ? sectionNumMatch[1] : undefined;
+
+        headingPositions.push({
+          level,
+          text: text.trim(),
+          sectionNumber,
+          startIndex: match.index,
+          endIndex: match.index + paragraph.length
+        });
+      }
+    }
+
+    // Now create sections from heading positions
+    // Each section spans from its heading to the next same-level or higher-level heading
+    for (let i = 0; i < headingPositions.length; i++) {
+      const current = headingPositions[i];
+      let endIndex: number;
+
+      // Find the end of this section
+      // It ends at the next heading of same or higher level (lower number)
+      // Or at the sectPr element, or end of body
+      let nextSectionStart: number | undefined;
+
+      for (let j = i + 1; j < headingPositions.length; j++) {
+        if (headingPositions[j].level <= current.level) {
+          nextSectionStart = headingPositions[j].startIndex;
+          break;
+        }
+      }
+
+      if (nextSectionStart !== undefined) {
+        endIndex = nextSectionStart;
+      } else {
+        // This is the last section at this level
+        // End at sectPr or end of body
+        const sectPrMatch = xmlContent.match(/<w:sectPr[^>]*>/);
+        const bodyEndMatch = xmlContent.match(/<\/w:body>/);
+
+        if (sectPrMatch && sectPrMatch.index !== undefined) {
+          endIndex = sectPrMatch.index;
+        } else if (bodyEndMatch && bodyEndMatch.index !== undefined) {
+          endIndex = bodyEndMatch.index;
+        } else {
+          endIndex = xmlContent.length;
+        }
+      }
+
+      sections.push({
+        headingLevel: current.level,
+        headingText: current.text,
+        sectionNumber: current.sectionNumber,
+        startIndex: current.startIndex,
+        endIndex,
+        xmlContent: xmlContent.slice(current.startIndex, endIndex)
+      });
+    }
+
+    return sections;
+  }
+
+  /**
+   * Moves a section to a new position in the document.
+   * @param inputPath Path to the source DOCX file
+   * @param outputPath Path to save the modified DOCX file
+   * @param sectionIdentifier The section to move (can be section number like "8" or heading text)
+   * @param afterSection The section after which to place it (section number or heading text)
+   */
+  async moveSectionAfter(
+    inputPath: string,
+    outputPath: string,
+    sectionIdentifier: string,
+    afterSection: string
+  ): Promise<{ success: boolean; message: string }> {
+    console.log(`[DocumentBuilder] moveSectionAfter: Moving "${sectionIdentifier}" after "${afterSection}"`);
+
+    // Read the DOCX file
+    const docxBuffer = await fsPromises.readFile(inputPath);
+    const zip = await JSZip.loadAsync(docxBuffer);
+
+    const documentXml = zip.file('word/document.xml');
+    if (!documentXml) {
+      throw new Error('Invalid DOCX file: missing word/document.xml');
+    }
+
+    let xmlContent = await documentXml.async('text');
+
+    // Parse sections
+    const sections = this.parseSections(xmlContent);
+    console.log(`[DocumentBuilder] Found ${sections.length} sections:`,
+      sections.map(s => `${s.sectionNumber || 'N/A'}: ${s.headingText.substring(0, 50)}`));
+
+    // Find the section to move
+    const sectionToMove = this.findSection(sections, sectionIdentifier);
+    if (!sectionToMove) {
+      return {
+        success: false,
+        message: `Could not find section "${sectionIdentifier}". Available sections: ${sections.map(s => s.sectionNumber || s.headingText).join(', ')}`
+      };
+    }
+
+    // Find the target section (after which to insert)
+    const targetSection = this.findSection(sections, afterSection);
+    if (!targetSection) {
+      return {
+        success: false,
+        message: `Could not find target section "${afterSection}". Available sections: ${sections.map(s => s.sectionNumber || s.headingText).join(', ')}`
+      };
+    }
+
+    // Check if move is needed
+    if (sectionToMove.startIndex === targetSection.endIndex) {
+      return { success: true, message: 'Section is already in the correct position' };
+    }
+
+    // Perform the move
+    const sectionContent = sectionToMove.xmlContent;
+
+    // Remove the section from its current position
+    let newXmlContent: string;
+
+    if (sectionToMove.startIndex > targetSection.endIndex) {
+      // Section is after target - remove it first, then insert
+      newXmlContent =
+        xmlContent.slice(0, sectionToMove.startIndex) +
+        xmlContent.slice(sectionToMove.endIndex);
+
+      // Insert at target position (unchanged since it's before the removed section)
+      newXmlContent =
+        newXmlContent.slice(0, targetSection.endIndex) +
+        sectionContent +
+        newXmlContent.slice(targetSection.endIndex);
+    } else {
+      // Section is before target - need to adjust indices
+      // First, calculate where target ends after section removal
+      const sectionLength = sectionToMove.endIndex - sectionToMove.startIndex;
+      const adjustedTargetEnd = targetSection.endIndex - sectionLength;
+
+      // Remove section first
+      newXmlContent =
+        xmlContent.slice(0, sectionToMove.startIndex) +
+        xmlContent.slice(sectionToMove.endIndex);
+
+      // Insert at adjusted target position
+      newXmlContent =
+        newXmlContent.slice(0, adjustedTargetEnd) +
+        sectionContent +
+        newXmlContent.slice(adjustedTargetEnd);
+    }
+
+    // Update the document.xml in the ZIP
+    zip.file('word/document.xml', newXmlContent);
+
+    // Write the modified DOCX
+    const outputBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 }
+    });
+    await fsPromises.writeFile(outputPath, outputBuffer);
+
+    console.log(`[DocumentBuilder] Successfully moved section "${sectionIdentifier}" after "${afterSection}"`);
+
+    return {
+      success: true,
+      message: `Moved section "${sectionToMove.headingText}" after "${targetSection.headingText}"`
+    };
+  }
+
+  /**
+   * Finds a section by its number or heading text
+   */
+  private findSection(sections: DocumentSection[], identifier: string): DocumentSection | undefined {
+    const normalizedId = identifier.trim().toLowerCase();
+
+    // First try exact section number match
+    const byNumber = sections.find(s =>
+      s.sectionNumber === identifier ||
+      s.sectionNumber === normalizedId
+    );
+    if (byNumber) return byNumber;
+
+    // Try with "Section " prefix
+    const withPrefix = sections.find(s =>
+      s.headingText.toLowerCase().startsWith(`section ${normalizedId}`) ||
+      s.headingText.toLowerCase().startsWith(`${normalizedId}.`) ||
+      s.headingText.toLowerCase().startsWith(`${normalizedId} `)
+    );
+    if (withPrefix) return withPrefix;
+
+    // Try partial heading text match
+    const byText = sections.find(s =>
+      s.headingText.toLowerCase().includes(normalizedId)
+    );
+    if (byText) return byText;
+
+    return undefined;
+  }
+
+  /**
+   * Inserts new content after a specific section in the document.
+   * @param inputPath Path to the source DOCX file
+   * @param outputPath Path to save the modified DOCX file
+   * @param afterSection Section identifier (number or heading text) after which to insert
+   * @param newContent Content blocks to insert
+   */
+  async insertAfterSection(
+    inputPath: string,
+    outputPath: string,
+    afterSection: string,
+    newContent: ContentBlock[]
+  ): Promise<{ success: boolean; message: string; sectionsAdded: number }> {
+    console.log(`[DocumentBuilder] insertAfterSection: After "${afterSection}", inserting ${newContent.length} blocks`);
+
+    // Read the DOCX file
+    const docxBuffer = await fsPromises.readFile(inputPath);
+    const zip = await JSZip.loadAsync(docxBuffer);
+
+    const documentXml = zip.file('word/document.xml');
+    if (!documentXml) {
+      throw new Error('Invalid DOCX file: missing word/document.xml');
+    }
+
+    let xmlContent = await documentXml.async('text');
+
+    // Parse sections
+    const sections = this.parseSections(xmlContent);
+
+    // Find the target section
+    const targetSection = this.findSection(sections, afterSection);
+    if (!targetSection) {
+      return {
+        success: false,
+        message: `Could not find section "${afterSection}". Available sections: ${sections.map(s => s.sectionNumber || s.headingText).join(', ')}`,
+        sectionsAdded: 0
+      };
+    }
+
+    // Generate OOXML for the new content
+    const newXmlContent = this.contentBlocksToOoxml(newContent);
+
+    // Insert after the target section
+    const insertionPoint = targetSection.endIndex;
+    xmlContent =
+      xmlContent.slice(0, insertionPoint) +
+      newXmlContent +
+      xmlContent.slice(insertionPoint);
+
+    // Update the document.xml in the ZIP
+    zip.file('word/document.xml', xmlContent);
+
+    // Write the modified DOCX
+    const outputBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 }
+    });
+    await fsPromises.writeFile(outputPath, outputBuffer);
+
+    console.log(`[DocumentBuilder] Successfully inserted ${newContent.length} blocks after section "${afterSection}"`);
+
+    return {
+      success: true,
+      message: `Inserted ${newContent.length} content blocks after "${targetSection.headingText}"`,
+      sectionsAdded: newContent.length
+    };
+  }
+
+  /**
+   * Lists all sections in a document
+   */
+  async listSections(inputPath: string): Promise<Array<{
+    number?: string;
+    title: string;
+    level: number;
+  }>> {
+    const docxBuffer = await fsPromises.readFile(inputPath);
+    const zip = await JSZip.loadAsync(docxBuffer);
+
+    const documentXml = zip.file('word/document.xml');
+    if (!documentXml) {
+      throw new Error('Invalid DOCX file: missing word/document.xml');
+    }
+
+    const xmlContent = await documentXml.async('text');
+    const sections = this.parseSections(xmlContent);
+
+    return sections.map(s => ({
+      number: s.sectionNumber,
+      title: s.headingText,
+      level: s.headingLevel
+    }));
   }
 
   /**

@@ -105,6 +105,9 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Real-Time Timeline**: Live activity feed showing agent actions and tool calls
 - **Artifact Tracking**: All created/modified files are tracked and viewable
 - **Model Selection**: Choose between Opus, Sonnet, or Haiku models
+- **Parallel Task Queue**: Run multiple tasks concurrently with configurable limits (1-10, default 3)
+- **Quick Task FAB**: Floating action button for rapid task creation
+- **Toast Notifications**: Real-time notifications for task completion and failures
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
 - **Discord Bot**: Run tasks via Discord with slash commands and direct messages
 - **Web Search**: Multi-provider web search (Tavily, Brave, SerpAPI, Google) with fallback support
@@ -139,7 +142,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
                       ↕ IPC
 ┌─────────────────────────────────────────────────┐
 │            Agent Daemon (Main Process)           │
-│  - Task Orchestration                            │
+│  - Task Queue Manager (Parallel Execution)       │
 │  - Agent Executor (Plan-Execute Loop)            │
 │  - Tool Registry                                 │
 │  - Permission Manager                            │
@@ -365,6 +368,56 @@ Settings are stored locally and persist across app restarts.
 
 ---
 
+## Parallel Task Queue
+
+CoWork-OSS supports running multiple tasks in parallel with a configurable concurrency limit. This allows you to queue up several tasks and have them execute automatically without waiting for each one to complete.
+
+### How It Works
+
+1. **Concurrency Limit**: Set the maximum number of tasks that can run simultaneously (1-10, default: 3)
+2. **FIFO Queue**: Tasks beyond the limit are queued and processed in the order they were created
+3. **Auto-Start**: When a running task completes, the next queued task automatically starts
+4. **Persistence**: Queued tasks survive app restarts - they'll resume when you reopen CoWork-OSS
+
+### Queue Panel
+
+When tasks are running or queued, a panel appears showing:
+- **Running tasks** with a spinner indicator
+- **Queued tasks** with their position in the queue (#1, #2, etc.)
+- **View** button to see task details
+- **Cancel** button to stop or remove tasks
+
+### Quick Task FAB
+
+A floating action button (FAB) in the bottom-right corner lets you quickly create new tasks:
+1. Click the **+** button
+2. Type your task prompt
+3. Press Enter or click submit
+4. The task is created and queued automatically
+
+### Toast Notifications
+
+Real-time notifications appear when:
+- A task **completes successfully** (green toast)
+- A task **fails** with an error (red toast)
+
+Click a toast to jump to that task's details.
+
+### Configuration
+
+1. Open **Settings** (gear icon)
+2. Navigate to the **Task Queue** tab
+3. Adjust the **Maximum concurrent tasks** slider (1-10)
+4. Click **Save Settings**
+
+### Use Cases
+
+- **Batch Processing**: Queue multiple file organization or document generation tasks
+- **Research Tasks**: Run several web search or analysis tasks in parallel
+- **Multi-Project Work**: Work on tasks across different parts of your workspace simultaneously
+
+---
+
 ## Compliance
 
 This project requires users to comply with their model provider's terms and policies:
@@ -404,11 +457,13 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **Auto-approve trusted commands** - Skip approval for safe shell commands matching patterns
 - [x] **Broader filesystem access** - Optional access to files outside workspace boundaries
 - [x] **Update notifications** - In-app banner when new releases are available
+- [x] **Parallel task queue** - Run multiple tasks concurrently with configurable limits and queue management
+- [x] **Quick Task FAB** - Floating action button for rapid task creation
+- [x] **Toast notifications** - Real-time notifications for task completion and failures
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework
 - [ ] MCP connector host and registry
-- [ ] Sub-agent coordination for parallel tasks
 - [ ] Network egress controls with proxy
 - [ ] Skill marketplace/loader
 
@@ -831,6 +886,7 @@ cowork-oss/
 │   │   ├── agent/             # Agent orchestration
 │   │   │   ├── daemon.ts      # Task coordinator
 │   │   │   ├── executor.ts    # Agent execution loop
+│   │   │   ├── queue-manager.ts # Parallel task queue
 │   │   │   ├── llm/           # Provider abstraction
 │   │   │   ├── search/        # Web search providers
 │   │   │   ├── tools/         # Tool implementations

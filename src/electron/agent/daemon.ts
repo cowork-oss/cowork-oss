@@ -7,8 +7,9 @@ import {
   WorkspaceRepository,
   ApprovalRepository,
 } from '../database/repositories';
-import { Task, IPC_CHANNELS } from '../../shared/types';
+import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus } from '../../shared/types';
 import { TaskExecutor } from './executor';
+import { TaskQueueManager } from './queue-manager';
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -32,6 +33,7 @@ export class AgentDaemon extends EventEmitter {
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
+  private queueManager: TaskQueueManager;
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -41,8 +43,27 @@ export class AgentDaemon extends EventEmitter {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.approvalRepo = new ApprovalRepository(db);
 
+    // Initialize queue manager with callbacks
+    this.queueManager = new TaskQueueManager({
+      startTaskImmediate: (task: Task) => this.startTaskImmediate(task),
+      emitQueueUpdate: (status: QueueStatus) => this.emitQueueUpdate(status),
+      getTaskById: (taskId: string) => this.taskRepo.findById(taskId),
+      updateTaskStatus: (taskId: string, status: TaskStatus) => this.taskRepo.update(taskId, { status }),
+    });
+
     // Start periodic cleanup of old executors
     this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 5 * 60 * 1000); // Run every 5 minutes
+  }
+
+  /**
+   * Initialize the daemon - call after construction to set up queue
+   */
+  async initialize(): Promise<void> {
+    // Find queued and running tasks from database for queue recovery
+    const queuedTasks = this.taskRepo.findByStatus('queued');
+    const runningTasks = this.taskRepo.findByStatus(['planning', 'executing']);
+
+    await this.queueManager.initialize(queuedTasks, runningTasks);
   }
 
   /**
@@ -91,9 +112,17 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Start executing a task
+   * Queue a task for execution
+   * The task will either start immediately or be queued based on concurrency limits
    */
   async startTask(task: Task): Promise<void> {
+    await this.queueManager.enqueue(task);
+  }
+
+  /**
+   * Start executing a task immediately (internal - called by queue manager)
+   */
+  async startTaskImmediate(task: Task): Promise<void> {
     console.log(`Starting task ${task.id}: ${task.title}`);
 
     // Get workspace details
@@ -124,17 +153,31 @@ export class AgentDaemon extends EventEmitter {
       });
       this.emitTaskEvent(task.id, 'error', { error: error.message });
       this.activeTasks.delete(task.id);
+      // Notify queue manager so it can start next task
+      this.queueManager.onTaskFinished(task.id);
     });
   }
 
   /**
-   * Cancel a running task
+   * Cancel a running or queued task
    */
   async cancelTask(taskId: string): Promise<void> {
+    // Check if task is queued (not yet started)
+    if (this.queueManager.cancelQueuedTask(taskId)) {
+      this.taskRepo.update(taskId, { status: 'cancelled', completedAt: Date.now() });
+      this.emitTaskEvent(taskId, 'task_cancelled', {
+        message: 'Task removed from queue',
+      });
+      return;
+    }
+
+    // Task is running - cancel it
     const cached = this.activeTasks.get(taskId);
     if (cached) {
       await cached.executor.cancel();
       this.activeTasks.delete(taskId);
+      // Notify queue manager so it can start next task
+      this.queueManager.onTaskFinished(taskId);
     }
     // Always emit cancelled event so UI updates (even if task wasn't in cache)
     this.emitTaskEvent(taskId, 'task_cancelled', {
@@ -305,6 +348,8 @@ export class AgentDaemon extends EventEmitter {
       cached.lastAccessed = Date.now();
     }
     this.emitTaskEvent(taskId, 'task_completed', { message: 'Task completed successfully' });
+    // Notify queue manager so it can start next task
+    this.queueManager.onTaskFinished(taskId);
   }
 
   /**
@@ -351,6 +396,45 @@ export class AgentDaemon extends EventEmitter {
 
     // Send the message
     await executor.sendMessage(message);
+  }
+
+  // ===== Queue Management Methods =====
+
+  /**
+   * Get current queue status
+   */
+  getQueueStatus(): QueueStatus {
+    return this.queueManager.getStatus();
+  }
+
+  /**
+   * Get queue settings
+   */
+  getQueueSettings(): QueueSettings {
+    return this.queueManager.getSettings();
+  }
+
+  /**
+   * Save queue settings
+   */
+  saveQueueSettings(settings: Partial<QueueSettings>): void {
+    this.queueManager.saveSettings(settings);
+  }
+
+  /**
+   * Emit queue update event to all windows
+   */
+  private emitQueueUpdate(status: QueueStatus): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(window => {
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.QUEUE_UPDATE, status);
+        }
+      } catch (error) {
+        console.error(`[AgentDaemon] Error sending queue update to window:`, error);
+      }
+    });
   }
 
   /**

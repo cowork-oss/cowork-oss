@@ -437,7 +437,7 @@ Plan Control:
       },
       {
         name: 'edit_document',
-        description: 'Edit an existing Word document (DOCX) by appending new content sections. Use this to modify existing documents without recreating them from scratch.',
+        description: 'Edit an existing Word document (DOCX). Supports multiple actions: append (default), move_section, insert_after_section, list_sections. Use this to modify existing documents without recreating them from scratch.',
         input_schema: {
           type: 'object',
           properties: {
@@ -449,9 +449,14 @@ Plan Control:
               type: 'string',
               description: 'Optional: Path for the output file. If not specified, the source file will be overwritten.',
             },
+            action: {
+              type: 'string',
+              enum: ['append', 'move_section', 'insert_after_section', 'list_sections'],
+              description: 'Action to perform: append (default) adds content at end, move_section moves a section to a new position, insert_after_section inserts content after a specific section, list_sections lists all sections',
+            },
             newContent: {
               type: 'array',
-              description: 'New content blocks to append to the document',
+              description: 'For append/insert_after_section: Content blocks to add',
               items: {
                 type: 'object',
                 properties: {
@@ -485,8 +490,20 @@ Plan Control:
                 required: ['type', 'text'],
               },
             },
+            sectionToMove: {
+              type: 'string',
+              description: 'For move_section: Section number or heading text to move (e.g., "8" or "Ticket Indexing")',
+            },
+            afterSection: {
+              type: 'string',
+              description: 'For move_section: Section number or heading text after which to place the moved section (e.g., "7" or "Data Storage")',
+            },
+            insertAfterSection: {
+              type: 'string',
+              description: 'For insert_after_section: Section number or heading text after which to insert new content',
+            },
           },
-          required: ['sourcePath', 'newContent'],
+          required: ['sourcePath'],
         },
       },
       {

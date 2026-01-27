@@ -82,6 +82,7 @@ app.whenReady().then(async () => {
 
   // Initialize agent daemon
   agentDaemon = new AgentDaemon(dbManager);
+  await agentDaemon.initialize();
 
   // Initialize channel gateway with agent daemon for task processing
   channelGateway = new ChannelGateway(dbManager.getDatabase(), {

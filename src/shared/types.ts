@@ -20,7 +20,7 @@ export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'teal', label: 'Teal' },
 ];
 
-export type TaskStatus = 'pending' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'queued' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type EventType =
   | 'task_created'
@@ -49,6 +49,9 @@ export type EventType =
   | 'verification_failed'
   | 'retry_started'
   | 'task_cancelled'
+  | 'task_queued'
+  | 'task_dequeued'
+  | 'queue_updated'
   | 'plan_revision_blocked'
   | 'step_timeout'
   | 'tool_blocked'
@@ -286,6 +289,12 @@ export const IPC_CHANNELS = {
   GUARDRAIL_GET_SETTINGS: 'guardrail:getSettings',
   GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
   GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
+
+  // Task Queue
+  QUEUE_GET_STATUS: 'queue:getStatus',
+  QUEUE_GET_SETTINGS: 'queue:getSettings',
+  QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
+  QUEUE_UPDATE: 'queue:update',
 } as const;
 
 // LLM Provider types
@@ -560,4 +569,30 @@ export interface AppVersionInfo {
   isGitRepo: boolean;
   gitBranch?: string;
   gitCommit?: string;
+}
+
+// Task Queue types
+export interface QueueSettings {
+  maxConcurrentTasks: number;  // Default: 3, min: 1, max: 10
+}
+
+export interface QueueStatus {
+  runningCount: number;
+  queuedCount: number;
+  runningTaskIds: string[];
+  queuedTaskIds: string[];
+  maxConcurrent: number;
+}
+
+export const DEFAULT_QUEUE_SETTINGS: QueueSettings = {
+  maxConcurrentTasks: 3,
+};
+
+// Toast notification types for UI
+export interface ToastNotification {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message?: string;
+  taskId?: string;
 }
