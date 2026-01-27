@@ -278,6 +278,7 @@ export interface MCPTransport {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   send(message: JSONRPCRequest | JSONRPCNotification): Promise<void>;
+  sendRequest(method: string, params?: Record<string, any>): Promise<any>;
   onMessage(handler: (message: JSONRPCResponse | JSONRPCNotification) => void): void;
   onClose(handler: (error?: Error) => void): void;
   onError(handler: (error: Error) => void): void;

@@ -21,6 +21,8 @@ import {
   JSONRPCResponse,
 } from '../types';
 import { StdioTransport } from './transports/StdioTransport';
+import { SSETransport } from './transports/SSETransport';
+import { WebSocketTransport } from './transports/WebSocketTransport';
 
 // MCP Protocol version we support
 const PROTOCOL_VERSION = '2024-11-05';
@@ -181,7 +183,7 @@ export class MCPServerConnection extends EventEmitter {
     console.log(`[MCPServerConnection] Calling tool ${name} on ${this.config.name}`);
 
     try {
-      const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.TOOLS_CALL, {
+      const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_CALL, {
         name,
         arguments: args,
       });
@@ -209,11 +211,15 @@ export class MCPServerConnection extends EventEmitter {
       case 'stdio':
         return new StdioTransport(this.config);
       case 'sse':
-        // TODO: Implement SSETransport
-        throw new Error('SSE transport not yet implemented');
+        if (!this.config.url) {
+          throw new Error('URL is required for SSE transport');
+        }
+        return new SSETransport(this.config);
       case 'websocket':
-        // TODO: Implement WebSocketTransport
-        throw new Error('WebSocket transport not yet implemented');
+        if (!this.config.url) {
+          throw new Error('URL is required for WebSocket transport');
+        }
+        return new WebSocketTransport(this.config);
       default:
         throw new Error(`Unknown transport type: ${this.config.transport}`);
     }
@@ -253,7 +259,7 @@ export class MCPServerConnection extends EventEmitter {
 
     console.log(`[MCPServerConnection] Initializing connection to ${this.config.name}`);
 
-    const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.INITIALIZE, {
+    const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {
         // We support receiving tool/resource/prompt list change notifications
@@ -291,7 +297,7 @@ export class MCPServerConnection extends EventEmitter {
     // Discover tools
     if (this.serverInfo?.capabilities?.tools) {
       try {
-        const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.TOOLS_LIST);
+        const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_LIST);
         this.tools = result.tools || [];
         console.log(`[MCPServerConnection] Discovered ${this.tools.length} tools from ${this.config.name}`);
         this.emit('tools_changed', this.tools);
@@ -303,7 +309,7 @@ export class MCPServerConnection extends EventEmitter {
     // Discover resources
     if (this.serverInfo?.capabilities?.resources) {
       try {
-        const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.RESOURCES_LIST);
+        const result = await this.transport!.sendRequest(MCP_METHODS.RESOURCES_LIST);
         this.resources = result.resources || [];
         console.log(`[MCPServerConnection] Discovered ${this.resources.length} resources from ${this.config.name}`);
         this.emit('resources_changed', this.resources);
@@ -315,7 +321,7 @@ export class MCPServerConnection extends EventEmitter {
     // Discover prompts
     if (this.serverInfo?.capabilities?.prompts) {
       try {
-        const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.PROMPTS_LIST);
+        const result = await this.transport!.sendRequest(MCP_METHODS.PROMPTS_LIST);
         this.prompts = result.prompts || [];
         console.log(`[MCPServerConnection] Discovered ${this.prompts.length} prompts from ${this.config.name}`);
         this.emit('prompts_changed', this.prompts);
@@ -367,7 +373,7 @@ export class MCPServerConnection extends EventEmitter {
     if (!this.transport || this.status !== 'connected') return;
 
     try {
-      const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.TOOLS_LIST);
+      const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_LIST);
       this.tools = result.tools || [];
       this.emit('tools_changed', this.tools);
     } catch (error) {
@@ -382,7 +388,7 @@ export class MCPServerConnection extends EventEmitter {
     if (!this.transport || this.status !== 'connected') return;
 
     try {
-      const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.RESOURCES_LIST);
+      const result = await this.transport!.sendRequest(MCP_METHODS.RESOURCES_LIST);
       this.resources = result.resources || [];
       this.emit('resources_changed', this.resources);
     } catch (error) {
@@ -397,7 +403,7 @@ export class MCPServerConnection extends EventEmitter {
     if (!this.transport || this.status !== 'connected') return;
 
     try {
-      const result = await (this.transport as StdioTransport).sendRequest(MCP_METHODS.PROMPTS_LIST);
+      const result = await this.transport!.sendRequest(MCP_METHODS.PROMPTS_LIST);
       this.prompts = result.prompts || [];
       this.emit('prompts_changed', this.prompts);
     } catch (error) {
