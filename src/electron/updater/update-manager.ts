@@ -111,17 +111,21 @@ export class UpdateManager {
       let updateMode: 'git' | 'electron-updater' = versionInfo.isGitRepo ? 'git' : 'electron-updater';
 
       if (versionInfo.isGitRepo && !available) {
-        // Check for new commits even if version tag is same
-        const hasNewCommits = await this.checkForNewCommits();
-        if (hasNewCommits) {
-          return {
-            available: true,
-            currentVersion: `${currentVersion} (${versionInfo.gitCommit})`,
-            latestVersion: `${latestVersion} (new commits)`,
-            releaseNotes: 'New commits available on the main branch.',
-            releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
-            updateMode: 'git',
-          };
+        // Only check for new commits if versions are equal (not if local version is newer)
+        const localIsNewer = this.isNewerVersion(currentVersion, latestVersion);
+        if (!localIsNewer) {
+          // Check for new commits even if version tag is same
+          const hasNewCommits = await this.checkForNewCommits();
+          if (hasNewCommits) {
+            return {
+              available: true,
+              currentVersion: `${currentVersion} (${versionInfo.gitCommit})`,
+              latestVersion: `${latestVersion} (new commits)`,
+              releaseNotes: 'New commits available on the main branch.',
+              releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
+              updateMode: 'git',
+            };
+          }
         }
       }
 
