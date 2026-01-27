@@ -1135,6 +1135,13 @@ Areas where help is especially needed:
 
 ---
 
+## Contact
+
+- **X/Twitter**: [@CoWorkOS](https://x.com/CoWorkOS)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/CoWork-OS/cowork-oss/issues)
+- **Discussions**: [Ask questions or share ideas](https://github.com/CoWork-OS/cowork-oss/discussions)
+
+---
 
 ## License
 
