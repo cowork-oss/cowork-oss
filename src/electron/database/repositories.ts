@@ -189,6 +189,21 @@ export class TaskRepository {
     return rows.map(row => this.mapRowToTask(row));
   }
 
+  /**
+   * Find tasks by status (single status or array of statuses)
+   */
+  findByStatus(status: string | string[]): Task[] {
+    const statuses = Array.isArray(status) ? status : [status];
+    const placeholders = statuses.map(() => '?').join(', ');
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE status IN (${placeholders})
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all(...statuses) as any[];
+    return rows.map(row => this.mapRowToTask(row));
+  }
+
   delete(id: string): void {
     // Use transaction to ensure atomic deletion
     const deleteTransaction = this.db.transaction((taskId: string) => {

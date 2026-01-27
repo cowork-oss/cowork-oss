@@ -60,6 +60,11 @@ const IPC_CHANNELS = {
   GUARDRAIL_GET_SETTINGS: 'guardrail:getSettings',
   GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
   GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
+  // Task Queue
+  QUEUE_GET_STATUS: 'queue:getStatus',
+  QUEUE_GET_SETTINGS: 'queue:getSettings',
+  QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
+  QUEUE_UPDATE: 'queue:update',
 } as const;
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -179,6 +184,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getGuardrailSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_SETTINGS),
   saveGuardrailSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, settings),
   getGuardrailDefaults: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS),
+
+  // Queue APIs
+  getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
+  getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
+  saveQueueSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
+  onQueueUpdate: (callback: (status: any) => void) => {
+    const subscription = (_: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.QUEUE_UPDATE, subscription);
+  },
 });
 
 // Type declarations for TypeScript
@@ -314,6 +329,25 @@ export interface ElectronAPI {
     maxIterationsPerTask: number;
     iterationLimitEnabled: boolean;
   }>;
+  // Queue APIs
+  getQueueStatus: () => Promise<{
+    runningCount: number;
+    queuedCount: number;
+    runningTaskIds: string[];
+    queuedTaskIds: string[];
+    maxConcurrent: number;
+  }>;
+  getQueueSettings: () => Promise<{
+    maxConcurrentTasks: number;
+  }>;
+  saveQueueSettings: (settings: { maxConcurrentTasks?: number }) => Promise<{ success: boolean }>;
+  onQueueUpdate: (callback: (status: {
+    runningCount: number;
+    queuedCount: number;
+    runningTaskIds: string[];
+    queuedTaskIds: string[];
+    maxConcurrent: number;
+  }) => void) => () => void;
 }
 
 declare global {

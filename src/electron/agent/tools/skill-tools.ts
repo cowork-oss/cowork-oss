@@ -110,16 +110,20 @@ export class SkillTools {
   }
 
   /**
-   * Edit/append to an existing document
+   * Edit an existing document with various operations
+   * Supports: append (default), move_section, insert_after_section, list_sections
    */
   async editDocument(input: {
     sourcePath: string;
     destPath?: string;
-    newContent: Array<{ type: string; text: string; level?: number; items?: string[]; rows?: string[][] }>;
-  }): Promise<{ success: boolean; path: string; sectionsAdded: number }> {
-    if (!this.workspace.permissions.write) {
-      throw new Error('Write permission not granted');
-    }
+    action?: 'append' | 'move_section' | 'insert_after_section' | 'list_sections';
+    newContent?: Array<{ type: string; text: string; level?: number; items?: string[]; rows?: string[][] }>;
+    // For move_section action:
+    sectionToMove?: string;
+    afterSection?: string;
+    // For insert_after_section action:
+    insertAfterSection?: string;
+  }): Promise<{ success: boolean; path?: string; sectionsAdded?: number; message?: string; sections?: Array<{ number?: string; title: string; level: number }> }> {
     if (!this.workspace.permissions.read) {
       throw new Error('Read permission not granted');
     }
@@ -128,6 +132,111 @@ export class SkillTools {
     if (!input.sourcePath) {
       throw new Error('Missing required "sourcePath" parameter - the path to the existing document to edit');
     }
+
+    const action = input.action || 'append';
+    const inputPath = path.join(this.workspace.path, input.sourcePath);
+    const outputPath = input.destPath
+      ? path.join(this.workspace.path, input.destPath)
+      : inputPath;
+
+    console.log(`[SkillTools] editDocument called: action=${action}, source=${input.sourcePath}`);
+
+    // Handle list_sections action (read-only)
+    if (action === 'list_sections') {
+      const sections = await this.documentBuilder.listSections(inputPath);
+      console.log(`[SkillTools] Listed ${sections.length} sections in ${input.sourcePath}`);
+      return {
+        success: true,
+        path: input.sourcePath,
+        sections,
+        message: `Found ${sections.length} sections`,
+      };
+    }
+
+    // All other actions require write permission
+    if (!this.workspace.permissions.write) {
+      throw new Error('Write permission not granted');
+    }
+
+    // Handle move_section action
+    if (action === 'move_section') {
+      if (!input.sectionToMove) {
+        throw new Error('Missing required "sectionToMove" parameter for move_section action');
+      }
+      if (!input.afterSection) {
+        throw new Error('Missing required "afterSection" parameter for move_section action');
+      }
+
+      const result = await this.documentBuilder.moveSectionAfter(
+        inputPath,
+        outputPath,
+        input.sectionToMove,
+        input.afterSection
+      );
+
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+
+      console.log(`[SkillTools] Section moved: ${result.message}`);
+
+      this.daemon.logEvent(this.taskId, 'file_modified', {
+        path: input.destPath || input.sourcePath,
+        type: 'document',
+        action: 'move_section',
+        sectionMoved: input.sectionToMove,
+        afterSection: input.afterSection,
+      });
+
+      return {
+        success: true,
+        path: input.destPath || input.sourcePath,
+        message: result.message,
+      };
+    }
+
+    // Handle insert_after_section action
+    if (action === 'insert_after_section') {
+      if (!input.insertAfterSection) {
+        throw new Error('Missing required "insertAfterSection" parameter for insert_after_section action');
+      }
+      if (!input.newContent || !Array.isArray(input.newContent) || input.newContent.length === 0) {
+        throw new Error(
+          'Missing or empty "newContent" parameter for insert_after_section action. ' +
+          'Please provide content blocks to insert.'
+        );
+      }
+
+      const result = await this.documentBuilder.insertAfterSection(
+        inputPath,
+        outputPath,
+        input.insertAfterSection,
+        input.newContent
+      );
+
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+
+      console.log(`[SkillTools] Content inserted after section: ${result.message}`);
+
+      this.daemon.logEvent(this.taskId, 'file_modified', {
+        path: input.destPath || input.sourcePath,
+        type: 'document',
+        action: 'insert_after_section',
+        afterSection: input.insertAfterSection,
+        sectionsAdded: result.sectionsAdded,
+      });
+
+      return {
+        success: true,
+        path: input.destPath || input.sourcePath,
+        sectionsAdded: result.sectionsAdded,
+        message: result.message,
+      };
+    }
+
+    // Default action: append
     if (!input.newContent || !Array.isArray(input.newContent) || input.newContent.length === 0) {
       throw new Error(
         'Missing or empty "newContent" parameter. ' +
@@ -136,12 +245,7 @@ export class SkillTools {
       );
     }
 
-    const inputPath = path.join(this.workspace.path, input.sourcePath);
-    const outputPath = input.destPath
-      ? path.join(this.workspace.path, input.destPath)
-      : inputPath;
-
-    console.log(`[SkillTools] editDocument called: source=${input.sourcePath}, dest=${input.destPath || 'same'}, newContent=${input.newContent.length} blocks`);
+    console.log(`[SkillTools] editDocument append: dest=${input.destPath || 'same'}, newContent=${input.newContent.length} blocks`);
 
     const result = await this.documentBuilder.appendToDocument(inputPath, outputPath, input.newContent);
 

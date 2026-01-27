@@ -4,7 +4,10 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor } from '../shared/types';
+import { TaskQueuePanel } from './components/TaskQueuePanel';
+import { ToastContainer } from './components/Toast';
+import { QuickTaskFAB } from './components/QuickTaskFAB';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
 
 // Theme storage keys
 const THEME_STORAGE_KEY = 'cowork-theme-mode';
@@ -46,6 +49,10 @@ export function App() {
     return (saved as AccentColor) || 'cyan';
   });
 
+  // Queue state
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
   // Load LLM config status
   const loadLLMConfig = async () => {
     try {
@@ -61,6 +68,26 @@ export function App() {
   // Load LLM config on mount
   useEffect(() => {
     loadLLMConfig();
+  }, []);
+
+  // Load queue status and subscribe to updates
+  useEffect(() => {
+    const loadQueueStatus = async () => {
+      try {
+        const status = await window.electronAPI.getQueueStatus();
+        setQueueStatus(status);
+      } catch (error) {
+        console.error('Failed to load queue status:', error);
+      }
+    };
+
+    loadQueueStatus();
+
+    const unsubscribe = window.electronAPI.onQueueUpdate((status) => {
+      setQueueStatus(status);
+    });
+
+    return unsubscribe;
   }, []);
 
   // Check for updates on mount
@@ -134,12 +161,27 @@ export function App() {
     }
   }, [currentWorkspace]);
 
+  // Toast helper functions
+  const addToast = (toast: Omit<ToastNotification, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newToast: ToastNotification = { ...toast, id };
+    setToasts(prev => [...prev, newToast]);
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => dismissToast(id), 5000);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
   // Subscribe to all task events to update task status
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTaskEvent((event: TaskEvent) => {
       // Update task status based on event type
       const statusMap: Record<string, Task['status']> = {
         'task_created': 'pending',
+        'task_queued': 'queued',
+        'task_dequeued': 'planning',
         'executing': 'executing',
         'step_started': 'executing',
         'step_completed': 'executing',
@@ -154,6 +196,31 @@ export function App() {
         setTasks(prev => prev.map(t =>
           t.id === event.taskId ? { ...t, status: newStatus } : t
         ));
+      }
+
+      // Show toast notifications for task completion/failure
+      if (event.type === 'task_completed') {
+        setTasks(prev => {
+          const task = prev.find(t => t.id === event.taskId);
+          addToast({
+            type: 'success',
+            title: 'Task Completed',
+            message: task?.title || 'Task finished successfully',
+            taskId: event.taskId,
+          });
+          return prev;
+        });
+      } else if (event.type === 'error') {
+        setTasks(prev => {
+          const task = prev.find(t => t.id === event.taskId);
+          addToast({
+            type: 'error',
+            title: 'Task Failed',
+            message: task?.title || 'Task encountered an error',
+            taskId: event.taskId,
+          });
+          return prev;
+        });
       }
 
       // Add event to events list if it's for the selected task
@@ -256,6 +323,21 @@ export function App() {
     }
   };
 
+  const handleCancelTaskById = async (taskId: string) => {
+    try {
+      await window.electronAPI.cancelTask(taskId);
+    } catch (error: unknown) {
+      console.error('Failed to cancel task:', error);
+    }
+  };
+
+  const handleQuickTask = async (prompt: string) => {
+    if (!currentWorkspace) return;
+
+    const title = prompt.slice(0, 50) + (prompt.length > 50 ? '...' : '');
+    await handleCreateTask(title, prompt);
+  };
+
   const handleModelChange = (modelKey: string) => {
     setSelectedModel(modelKey);
     // When model changes during a task, clear the current task to start fresh
@@ -321,29 +403,53 @@ export function App() {
         <WorkspaceSelector onWorkspaceSelected={handleWorkspaceSelected} />
       )}
       {currentView === 'main' && (
-        <div className="app-layout">
-          <Sidebar
-            workspace={currentWorkspace}
-            tasks={tasks}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={setSelectedTaskId}
-            onOpenSettings={() => setCurrentView('settings')}
-            onTasksChanged={loadTasks}
+        <>
+          <div className="app-layout">
+            <Sidebar
+              workspace={currentWorkspace}
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={setSelectedTaskId}
+              onOpenSettings={() => setCurrentView('settings')}
+              onTasksChanged={loadTasks}
+            />
+            <MainContent
+              task={selectedTask}
+              workspace={currentWorkspace}
+              events={events}
+              onSendMessage={handleSendMessage}
+              onCreateTask={handleCreateTask}
+              onChangeWorkspace={() => setCurrentView('workspace-selector')}
+              onStopTask={handleCancelTask}
+              selectedModel={selectedModel}
+              availableModels={availableModels}
+              onModelChange={handleModelChange}
+            />
+            <RightPanel task={selectedTask} workspace={currentWorkspace} events={events} />
+          </div>
+
+          {/* Task Queue Panel */}
+          {queueStatus && (queueStatus.runningCount > 0 || queueStatus.queuedCount > 0) && (
+            <TaskQueuePanel
+              tasks={tasks}
+              queueStatus={queueStatus}
+              onSelectTask={setSelectedTaskId}
+              onCancelTask={handleCancelTaskById}
+            />
+          )}
+
+          {/* Quick Task FAB */}
+          {currentWorkspace && (
+            <QuickTaskFAB onCreateTask={handleQuickTask} />
+          )}
+
+          {/* Toast Notifications */}
+          <ToastContainer
+            toasts={toasts}
+            onDismiss={dismissToast}
+            onTaskClick={setSelectedTaskId}
           />
-          <MainContent
-            task={selectedTask}
-            workspace={currentWorkspace}
-            events={events}
-            onSendMessage={handleSendMessage}
-            onCreateTask={handleCreateTask}
-            onChangeWorkspace={() => setCurrentView('workspace-selector')}
-            onStopTask={handleCancelTask}
-            selectedModel={selectedModel}
-            availableModels={availableModels}
-            onModelChange={handleModelChange}
-          />
-          <RightPanel task={selectedTask} workspace={currentWorkspace} events={events} />
-        </div>
+        </>
       )}
       {currentView === 'settings' && (
         <Settings

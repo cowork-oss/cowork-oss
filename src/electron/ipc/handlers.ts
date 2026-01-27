@@ -684,4 +684,19 @@ export function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS, async () => {
     return GuardrailManager.getDefaults();
   });
+
+  // Queue handlers
+  ipcMain.handle(IPC_CHANNELS.QUEUE_GET_STATUS, async () => {
+    return agentDaemon.getQueueStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUEUE_GET_SETTINGS, async () => {
+    return agentDaemon.getQueueSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.QUEUE_SAVE_SETTINGS);
+    agentDaemon.saveQueueSettings(settings);
+    return { success: true };
+  });
 }
