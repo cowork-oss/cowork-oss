@@ -722,12 +722,8 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   onClick={onStopTask}
                   title="Stop task"
                 >
-                  <svg className="spinner-ring" viewBox="0 0 36 36">
-                    <circle className="spinner-track" cx="18" cy="18" r="16" fill="none" strokeWidth="3" />
-                    <circle className="spinner-progress" cx="18" cy="18" r="16" fill="none" strokeWidth="3" strokeLinecap="round" />
-                  </svg>
                   <svg className="stop-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                    <rect x="6" y="6" width="12" height="12" rx="3" />
                   </svg>
                 </button>
               )}
