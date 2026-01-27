@@ -258,6 +258,10 @@ body {
   text-decoration: none;
   cursor: pointer;
   transition: background 0.15s ease;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1000;
 }
 
 .update-banner-link:hover {
@@ -303,13 +307,16 @@ a,
 .app-layout {
   display: flex;
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ==================== LEFT SIDEBAR ==================== */
 .sidebar {
   width: var(--sidebar-width);
   height: 100%;
+  min-height: 0;
   background: var(--color-bg-sidebar);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
@@ -405,6 +412,7 @@ a,
 
 .task-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 8px;
 }
@@ -604,9 +612,12 @@ a,
 .sidebar-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+  min-height: 48px;
 }
 
 .user-profile {
@@ -4685,9 +4696,14 @@ button {
 
 /* CLI Sidebar Footer */
 .cli-sidebar-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   background: rgba(0, 0, 0, 0.2) !important;
   border-top: 1px solid var(--color-border-subtle) !important;
   padding: 12px 16px !important;
+  flex-shrink: 0 !important;
+  min-height: 48px !important;
 }
 
 .cli-footer-info {
