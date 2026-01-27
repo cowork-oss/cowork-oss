@@ -892,11 +892,15 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       )}
 
       {selectedSkillForParams && (
-        <SkillParameterModal
-          skill={selectedSkillForParams}
-          onSubmit={handleSkillParamSubmit}
-          onCancel={handleSkillParamCancel}
-        />
+        <>
+          {console.log('[JSX] About to render SkillParameterModal')}
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'red', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: 'white', padding: '20px', borderRadius: '8px' }}>
+              <h2>DEBUG: Modal should appear here for {selectedSkillForParams.name}</h2>
+              <button onClick={handleSkillParamCancel}>Close</button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
