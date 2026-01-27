@@ -4,7 +4,7 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { WorkspaceSelector } from './components/WorkspaceSelector';
 import { Settings } from './components/Settings';
-import { TaskQueuePanel } from './components/TaskQueuePanel';
+// TaskQueuePanel moved to RightPanel
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
@@ -420,18 +420,16 @@ export function App() {
               availableModels={availableModels}
               onModelChange={handleModelChange}
             />
-            <RightPanel task={selectedTask} workspace={currentWorkspace} events={events} />
-          </div>
-
-          {/* Task Queue Panel */}
-          {queueStatus && (queueStatus.runningCount > 0 || queueStatus.queuedCount > 0) && (
-            <TaskQueuePanel
+            <RightPanel
+              task={selectedTask}
+              workspace={currentWorkspace}
+              events={events}
               tasks={tasks}
               queueStatus={queueStatus}
               onSelectTask={setSelectedTaskId}
               onCancelTask={handleCancelTaskById}
             />
-          )}
+          </div>
 
           {/* Quick Task FAB */}
           {currentWorkspace && (

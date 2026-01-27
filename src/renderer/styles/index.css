@@ -4721,6 +4721,83 @@ button {
   border-radius: var(--radius-sm);
 }
 
+/* CLI Queue Section */
+.cli-queue-badge {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-radius: 4px;
+}
+
+.cli-queue-group {
+  margin-bottom: 8px;
+}
+
+.cli-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.cli-queue-item.running {
+  border-left: 2px solid var(--color-accent);
+}
+
+.cli-queue-item.queued {
+  border-left: 2px solid var(--color-text-muted);
+}
+
+.cli-queue-status {
+  color: var(--color-text-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.cli-queue-item.running .cli-queue-status {
+  color: var(--color-accent);
+}
+
+.cli-queue-title {
+  flex: 1;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cli-queue-title:hover {
+  color: var(--color-accent);
+}
+
+.cli-queue-cancel {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.cli-queue-item:hover .cli-queue-cancel {
+  opacity: 1;
+}
+
+.cli-queue-cancel:hover {
+  color: var(--color-error);
+}
+
 /* CLI Panel Footer */
 .cli-panel-footer {
   display: flex;
@@ -7696,15 +7773,16 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
+  backdrop-filter: blur(4px);
 }
 
 .skill-param-modal {
-  background: var(--color-bg-secondary);
+  background: #1a1a1a;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   width: 90%;
@@ -7713,7 +7791,7 @@ button {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: slideUp 0.2s ease;
 }
 

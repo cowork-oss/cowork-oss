@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Task, Workspace, TaskEvent, PlanStep } from '../../shared/types';
+import { Task, Workspace, TaskEvent, PlanStep, QueueStatus } from '../../shared/types';
 
 // Clickable file path component
 function ClickableFilePath({ path, workspacePath, className = '' }: { path: string; workspacePath?: string; className?: string }) {
@@ -44,6 +44,10 @@ interface RightPanelProps {
   task: Task | undefined;
   workspace: Workspace | null;
   events: TaskEvent[];
+  tasks?: Task[];
+  queueStatus?: QueueStatus | null;
+  onSelectTask?: (taskId: string) => void;
+  onCancelTask?: (taskId: string) => void;
 }
 
 interface FileInfo {
@@ -58,12 +62,24 @@ interface ToolUsage {
   lastUsed: number;
 }
 
-export function RightPanel({ task, workspace, events }: RightPanelProps) {
+export function RightPanel({ task, workspace, events, tasks = [], queueStatus, onSelectTask, onCancelTask }: RightPanelProps) {
   const [expandedSections, setExpandedSections] = useState({
     progress: true,
+    queue: true,
     folder: true,
     context: true,
   });
+
+  // Queue data
+  const runningTasks = useMemo(() =>
+    queueStatus ? tasks.filter(t => queueStatus.runningTaskIds.includes(t.id)) : [],
+    [tasks, queueStatus]
+  );
+  const queuedTasks = useMemo(() =>
+    queueStatus ? tasks.filter(t => queueStatus.queuedTaskIds.includes(t.id)) : [],
+    [tasks, queueStatus]
+  );
+  const totalQueueActive = (queueStatus?.runningCount || 0) + (queueStatus?.queuedCount || 0);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({
@@ -233,6 +249,50 @@ export function RightPanel({ task, workspace, events }: RightPanelProps) {
           </div>
         )}
       </div>
+
+      {/* Task Queue Section */}
+      {totalQueueActive > 0 && (
+        <div className="right-panel-section cli-section">
+          <div className="cli-section-header" onClick={() => toggleSection('queue')}>
+            <span className="cli-section-prompt">&gt;</span>
+            <span className="cli-section-title">QUEUE</span>
+            <span className="cli-queue-badge">{queueStatus?.runningCount}/{queueStatus?.maxConcurrent}{queueStatus && queueStatus.queuedCount > 0 && ` +${queueStatus.queuedCount}`}</span>
+            <span className="cli-section-toggle">{expandedSections.queue ? '[-]' : '[+]'}</span>
+          </div>
+          {expandedSections.queue && (
+            <div className="cli-section-content">
+              {runningTasks.length > 0 && (
+                <div className="cli-queue-group">
+                  <div className="cli-context-label"># running:</div>
+                  {runningTasks.map(t => (
+                    <div key={t.id} className="cli-queue-item running">
+                      <span className="cli-queue-status">[~]</span>
+                      <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
+                        {(t.title || t.prompt).slice(0, 25)}{(t.title || t.prompt).length > 25 ? '...' : ''}
+                      </span>
+                      <button className="cli-queue-cancel" onClick={() => onCancelTask?.(t.id)} title="Cancel">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {queuedTasks.length > 0 && (
+                <div className="cli-queue-group">
+                  <div className="cli-context-label"># queued:</div>
+                  {queuedTasks.map((t, i) => (
+                    <div key={t.id} className="cli-queue-item queued">
+                      <span className="cli-queue-status">[{i + 1}]</span>
+                      <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
+                        {(t.title || t.prompt).slice(0, 25)}{(t.title || t.prompt).length > 25 ? '...' : ''}
+                      </span>
+                      <button className="cli-queue-cancel" onClick={() => onCancelTask?.(t.id)} title="Cancel">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Working Folder Section */}
       <div className="right-panel-section cli-section">
