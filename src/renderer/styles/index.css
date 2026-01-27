@@ -2490,6 +2490,19 @@ button {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
 }
 
+/* Welcome Logo */
+.welcome-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.welcome-logo-img {
+  width: 80px;
+  height: auto;
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.4));
+}
+
 .cli-header {
   text-align: center;
   margin-bottom: 32px;
@@ -2611,6 +2624,63 @@ button {
 .cli-cmd-text {
   font-size: 13px;
   color: var(--color-text-secondary);
+}
+
+/* Quick Start Grid */
+.quick-start-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .quick-start-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .quick-start-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quick-start-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.quick-start-card:hover {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: var(--color-border);
+  transform: translateY(-2px);
+}
+
+.quick-start-icon {
+  font-size: 28px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.quick-start-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.quick-start-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 
 /* CLI Input Styles */

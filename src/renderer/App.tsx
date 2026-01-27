@@ -156,8 +156,9 @@ export function App() {
   // Load tasks when workspace is selected
   useEffect(() => {
     if (currentWorkspace) {
-      loadTasks();
-      setCurrentView('main');
+      loadTasks().then(() => {
+        setCurrentView('main');
+      });
     }
   }, [currentWorkspace]);
 

@@ -436,6 +436,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       <div className="main-content">
         <div className="main-body welcome-view">
           <div className="welcome-content cli-style">
+            {/* Logo */}
+            <div className="welcome-logo">
+              <img src="./cowork-oss-logo.png" alt="CoWork-OSS" className="welcome-logo-img" />
+            </div>
+
             {/* ASCII Terminal Header */}
             <div className="cli-header">
               <pre className="ascii-art">{`
@@ -464,36 +469,42 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
               </div>
             </div>
 
-            {/* Quick Commands */}
+            {/* Quick Start */}
             <div className="cli-commands">
               <div className="cli-commands-header">
                 <span className="cli-prompt">&gt;</span>
-                <span>QUICK COMMANDS</span>
+                <span>QUICK START</span>
               </div>
-              <div className="cli-commands-grid">
-                <button className="cli-command" onClick={() => handleQuickAction('Create a file')}>
-                  <span className="cli-cmd-prefix">01</span>
-                  <span className="cli-cmd-text">create-file</span>
+              <div className="quick-start-grid">
+                <button className="quick-start-card" onClick={() => handleQuickAction('Help me organize the files in this folder. Sort them by type and rename them with clear, consistent names.')}>
+                  <span className="quick-start-icon">📁</span>
+                  <span className="quick-start-title">Organize files</span>
+                  <span className="quick-start-desc">Sort and rename files in the workspace</span>
                 </button>
-                <button className="cli-command" onClick={() => handleQuickAction('Crunch data')}>
-                  <span className="cli-cmd-prefix">02</span>
-                  <span className="cli-cmd-text">crunch-data</span>
+                <button className="quick-start-card" onClick={() => handleQuickAction('Help me write a document. I\'ll describe what I need and you can create it for me.')}>
+                  <span className="quick-start-icon">📝</span>
+                  <span className="quick-start-title">Write a document</span>
+                  <span className="quick-start-desc">Create reports, summaries, or notes</span>
                 </button>
-                <button className="cli-command" onClick={() => handleQuickAction('Make a prototype')}>
-                  <span className="cli-cmd-prefix">03</span>
-                  <span className="cli-cmd-text">prototype</span>
+                <button className="quick-start-card" onClick={() => handleQuickAction('Help me analyze the data files in this folder. Summarize the key findings and create a report.')}>
+                  <span className="quick-start-icon">📊</span>
+                  <span className="quick-start-title">Analyze data</span>
+                  <span className="quick-start-desc">Process spreadsheets or data files</span>
                 </button>
-                <button className="cli-command" onClick={() => handleQuickAction('Organize files')}>
-                  <span className="cli-cmd-prefix">04</span>
-                  <span className="cli-cmd-text">organize</span>
+                <button className="quick-start-card" onClick={() => handleQuickAction('Generate documentation for this project. Create a README, API docs, or code comments as needed.')}>
+                  <span className="quick-start-icon">📖</span>
+                  <span className="quick-start-title">Generate docs</span>
+                  <span className="quick-start-desc">Create documentation for the project</span>
                 </button>
-                <button className="cli-command" onClick={() => handleQuickAction('Prep for a meeting')}>
-                  <span className="cli-cmd-prefix">05</span>
-                  <span className="cli-cmd-text">prep-meeting</span>
+                <button className="quick-start-card" onClick={() => handleQuickAction('Help me research and summarize information from the files in this folder.')}>
+                  <span className="quick-start-icon">🔍</span>
+                  <span className="quick-start-title">Research & summarize</span>
+                  <span className="quick-start-desc">Gather info from multiple files</span>
                 </button>
-                <button className="cli-command" onClick={() => handleQuickAction('Draft a message')}>
-                  <span className="cli-cmd-prefix">06</span>
-                  <span className="cli-cmd-text">draft-msg</span>
+                <button className="quick-start-card" onClick={() => handleQuickAction('Help me prepare for a meeting. Create an agenda, talking points, gather relevant documents, and organize materials needed to run a clean meeting.')}>
+                  <span className="quick-start-icon">📋</span>
+                  <span className="quick-start-title">Meeting Preparation</span>
+                  <span className="quick-start-desc">Prepare everything needed to run a clean meeting</span>
                 </button>
               </div>
             </div>
