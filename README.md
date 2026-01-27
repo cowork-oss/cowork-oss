@@ -481,6 +481,8 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **MCP Client** - Connect to external MCP servers and use their tools
 - [x] **MCP Host** - Expose CoWork's tools as an MCP server for external clients
 - [x] **MCP Registry** - Browse and install MCP servers from a catalog with one-click installation
+- [x] **MCP SSE Transport** - Connect to web-based MCP servers via Server-Sent Events
+- [x] **MCP WebSocket Transport** - Real-time bidirectional MCP communication
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework

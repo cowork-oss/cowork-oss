@@ -86,7 +86,7 @@ Feature suggestions are welcome! Please:
 
 Areas where help is especially needed:
 - VM sandbox implementation using macOS Virtualization.framework
-- Additional MCP server integrations and transport types (SSE, WebSocket)
+- Additional MCP server integrations
 - Enhanced document creation (proper Excel/Word/PowerPoint libraries)
 - Network security controls
 - Sub-agent coordination
