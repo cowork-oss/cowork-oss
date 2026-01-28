@@ -92,9 +92,20 @@ export class ChannelGateway {
     const onAssistantMessage = (data: { taskId: string; message?: string }) => {
       const message = data.message;
       if (message && message.length > 10) {
-        // Save the last message as the result
-        lastMessages.set(data.taskId, message);
-        // Stream update to channel
+        // Keep the BEST (longest substantive) answer, not just the last one
+        // This prevents confused step messages from overwriting good answers
+        const existingMessage = lastMessages.get(data.taskId);
+        const isConfusedMessage = message.toLowerCase().includes("don't have") ||
+                                  message.toLowerCase().includes("please provide") ||
+                                  message.toLowerCase().includes("i cannot") ||
+                                  message.toLowerCase().includes("not available");
+
+        // Only overwrite if new message is better (longer and not confused)
+        if (!existingMessage || (!isConfusedMessage && message.length >= existingMessage.length)) {
+          lastMessages.set(data.taskId, message);
+        }
+
+        // Always stream updates to channel (so user sees progress)
         this.router.sendTaskUpdate(data.taskId, message);
       }
     };

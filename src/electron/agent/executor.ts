@@ -2005,10 +2005,11 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 
 CRITICAL - FINAL ANSWER REQUIREMENT:
-- After completing the work or gathering information, you MUST output a text response with your findings or results.
-- For research tasks: summarize what you found and directly answer the user's question in your text response.
-- Do NOT just execute tools and stay silent. The user needs a TEXT ANSWER from you.
-- If you gathered information from web pages, synthesize it and provide the answer as TEXT output.
+- You MUST ALWAYS output a text response at the end. NEVER finish silently with just tool calls.
+- After using tools, IMMEDIATELY provide your findings as TEXT. Don't keep calling tools indefinitely.
+- For research tasks: summarize what you found and directly answer the user's question.
+- If you couldn't find the information, SAY SO explicitly (e.g., "I couldn't find lap times for today's testing").
+- After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
 WEB ACCESS:
 - To access the internet, use browser_navigate to visit URLs directly.
@@ -2426,10 +2427,11 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 
 CRITICAL - FINAL ANSWER REQUIREMENT:
-- After completing the work or gathering information, you MUST output a text response with your findings or results.
-- For research tasks: summarize what you found and directly answer the user's question in your text response.
-- Do NOT just execute tools and stay silent. The user needs a TEXT ANSWER from you.
-- If you gathered information from web pages, synthesize it and provide the answer as TEXT output.
+- You MUST ALWAYS output a text response at the end. NEVER finish silently with just tool calls.
+- After using tools, IMMEDIATELY provide your findings as TEXT. Don't keep calling tools indefinitely.
+- For research tasks: summarize what you found and directly answer the user's question.
+- If you couldn't find the information, SAY SO explicitly (e.g., "I couldn't find lap times for today's testing").
+- After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
 WEB ACCESS:
 - To access the internet, use browser_navigate to visit URLs directly.
