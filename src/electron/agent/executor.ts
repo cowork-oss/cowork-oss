@@ -1693,7 +1693,7 @@ COMMON WORKFLOWS (follow these patterns):
 3. WEB RESEARCH (when needing current information):
    Step 1: Use browser_navigate to visit relevant websites or search engines
    Step 2: Use browser_get_content to extract information from the page
-   Step 3: Process the gathered information
+   Step 3: Provide the answer - OUTPUT THE FINDINGS AS TEXT (no tool needed, just respond with the answer)
 
 4. FILE ORGANIZATION:
    Step 1: List directory contents to see current structure
@@ -2003,7 +2003,12 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
-- After completing the work, provide a brief summary of what was done.
+
+CRITICAL - FINAL ANSWER REQUIREMENT:
+- After completing the work or gathering information, you MUST output a text response with your findings or results.
+- For research tasks: summarize what you found and directly answer the user's question in your text response.
+- Do NOT just execute tools and stay silent. The user needs a TEXT ANSWER from you.
+- If you gathered information from web pages, synthesize it and provide the answer as TEXT output.
 
 WEB ACCESS:
 - To access the internet, use browser_navigate to visit URLs directly.
@@ -2419,7 +2424,12 @@ IMPORTANT INSTRUCTIONS:
 - Always use tools to accomplish tasks. Do not just describe what you would do - actually call the tools.
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
-- After completing the work, provide a brief summary of what was done.
+
+CRITICAL - FINAL ANSWER REQUIREMENT:
+- After completing the work or gathering information, you MUST output a text response with your findings or results.
+- For research tasks: summarize what you found and directly answer the user's question in your text response.
+- Do NOT just execute tools and stay silent. The user needs a TEXT ANSWER from you.
+- If you gathered information from web pages, synthesize it and provide the answer as TEXT output.
 
 WEB ACCESS:
 - To access the internet, use browser_navigate to visit URLs directly.
