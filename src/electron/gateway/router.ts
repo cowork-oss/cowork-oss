@@ -776,13 +776,22 @@ export class MessageRouter {
       }
       text += '\n💡 Use `/model <name>` to switch (e.g., `/model gpt-oss:20b`)';
     } else {
-      text += '*Available Claude Models:*\n';
+      // Dynamic heading based on provider
+      const providerModelNames: Record<string, string> = {
+        'anthropic': 'Claude',
+        'bedrock': 'Claude',
+        'openai': 'OpenAI',
+        'gemini': 'Gemini',
+        'openrouter': 'OpenRouter',
+      };
+      const modelBrand = providerModelNames[status.currentProvider] || 'Available';
+      text += `*Available ${modelBrand} Models:*\n`;
       status.models.forEach((model, index) => {
         const isActive = model.key === status.currentModel ? ' ✓' : '';
         text += `${index + 1}. ${model.displayName}${isActive}\n`;
       });
       text += '\n💡 Use `/model <name>` to switch\n';
-      text += 'Example: `/model sonnet-4` or `/model 2`';
+      text += 'Example: `/model 2` or `/model <model-name>`';
     }
 
     await adapter.sendMessage({
