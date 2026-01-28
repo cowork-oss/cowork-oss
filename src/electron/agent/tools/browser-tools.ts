@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { BrowserService } from '../browser/browser-service';
@@ -15,7 +16,7 @@ export class BrowserTools {
   ) {
     this.browserService = new BrowserService(workspace, {
       headless: true,
-      timeout: 60000  // 60 seconds - enough time for browser launch + navigation
+      timeout: 90000  // 90 seconds - time for browser launch + navigation + consent popup handling
     });
   }
 
@@ -291,7 +292,6 @@ export class BrowserTools {
           input.full_page || false
         );
         // Construct full path for the screenshot
-        const path = require('path');
         const fullPath = path.join(this.workspace.path, result.path);
 
         this.daemon.logEvent(this.taskId, 'file_created', {

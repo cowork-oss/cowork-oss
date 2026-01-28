@@ -749,11 +749,17 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       <div className="main-header">
         <div className="main-header-title">{task.title}</div>
         <div className="main-header-actions">
-          <button className="button-secondary" style={{ padding: '6px 8px' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-            </svg>
-          </button>
+          {task.status === 'executing' && onStopTask && (
+            <button
+              className="stop-btn-header"
+              onClick={onStopTask}
+              title="Stop task"
+            >
+              <svg className="stop-icon" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="3" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -868,17 +874,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
-              {task.status === 'executing' && onStopTask && (
-                <button
-                  className="stop-btn-spinner"
-                  onClick={onStopTask}
-                  title="Stop task"
-                >
-                  <svg className="stop-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="3" />
-                  </svg>
-                </button>
-              )}
               {task.status === 'executing' ? (
                 <button
                   className="send-btn send-btn-queue"

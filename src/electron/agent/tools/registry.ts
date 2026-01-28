@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
+import * as path from 'path';
 import { Workspace, GatewayContextType } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
@@ -385,10 +388,6 @@ Plan Control:
   private async formatMCPResult(result: any, toolName?: string, input?: any): Promise<any> {
     if (!result) return { success: true };
 
-    const fs = require('fs').promises;
-    const fsSync = require('fs');
-    const path = require('path');
-
     // Check if it's an MCP CallResult format
     if (result.content && Array.isArray(result.content)) {
       if (result.isError) {
@@ -406,7 +405,7 @@ Plan Control:
 
           try {
             const imageBuffer = Buffer.from(content.data, 'base64');
-            await fs.writeFile(outputPath, imageBuffer);
+            await fsPromises.writeFile(outputPath, imageBuffer);
 
             // Emit file_created event
             this.daemon.logEvent(this.taskId, 'file_created', {
@@ -454,10 +453,10 @@ Plan Control:
 
       for (const sourcePath of possiblePaths) {
         try {
-          if (fsSync.existsSync(sourcePath)) {
+          if (fs.existsSync(sourcePath)) {
             // File found - copy to workspace if not already there
             if (sourcePath !== workspacePath && !sourcePath.startsWith(this.workspace.path)) {
-              await fs.copyFile(sourcePath, workspacePath);
+              await fsPromises.copyFile(sourcePath, workspacePath);
               console.log(`[ToolRegistry] Copied MCP file to workspace: ${sourcePath} -> ${workspacePath}`);
             }
 

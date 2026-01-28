@@ -25,8 +25,8 @@ const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 // Per-step timeout (5 minutes max per step)
 const STEP_TIMEOUT_MS = 5 * 60 * 1000;
 
-// Per-tool execution timeout (60 seconds - increased for browser tools which need time to launch)
-const TOOL_TIMEOUT_MS = 60 * 1000;
+// Per-tool execution timeout (90 seconds - browser tools need time for launch + navigation + consent popup handling)
+const TOOL_TIMEOUT_MS = 90 * 1000;
 
 // Maximum consecutive failures for the same tool before giving up
 const MAX_TOOL_FAILURES = 2;
@@ -2913,7 +2913,11 @@ EFFICIENCY RULES (CRITICAL):
       // Save updated conversation history
       this.conversationHistory = messages;
       this.daemon.updateTaskStatus(this.task.id, 'completed');
-      // Emit follow_up_completed event to signal the follow-up is done
+      // Log visible task_completed event for UI
+      this.daemon.logEvent(this.task.id, 'task_completed', {
+        message: 'Task completed',
+      });
+      // Emit internal follow_up_completed event for gateway (to send artifacts, etc.)
       this.daemon.logEvent(this.task.id, 'follow_up_completed', {
         message: 'Follow-up message processed',
       });

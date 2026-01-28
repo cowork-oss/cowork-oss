@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import { BrowserWindow } from 'electron';
+import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { DatabaseManager } from '../database/schema';
 import {
   TaskRepository,
@@ -362,9 +364,6 @@ export class AgentDaemon extends EventEmitter {
    * This allows files like screenshots to be sent back to the user
    */
   registerArtifact(taskId: string, filePath: string, mimeType: string): void {
-    const fs = require('fs');
-    const crypto = require('crypto');
-
     try {
       if (!fs.existsSync(filePath)) {
         console.error(`[AgentDaemon] Artifact file not found: ${filePath}`);

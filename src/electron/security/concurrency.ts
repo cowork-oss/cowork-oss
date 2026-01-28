@@ -121,7 +121,7 @@ interface IdempotencyEntry {
 export class IdempotencyManager {
   private entries: Map<string, IdempotencyEntry> = new Map();
   private defaultTTLMs: number;
-  private cleanupIntervalId?: NodeJS.Timeout;
+  private cleanupIntervalId?: ReturnType<typeof setInterval>;
 
   constructor(defaultTTLMs = 5 * 60 * 1000) { // 5 minutes default
     this.defaultTTLMs = defaultTTLMs;

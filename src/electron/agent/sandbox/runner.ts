@@ -274,8 +274,8 @@ export class SandboxRunner {
   /**
    * Build a minimal, safe environment for command execution
    */
-  private buildSafeEnvironment(passthrough: string[]): NodeJS.ProcessEnv {
-    const safeEnv: NodeJS.ProcessEnv = {};
+  private buildSafeEnvironment(passthrough: string[]): Record<string, string | undefined> {
+    const safeEnv: Record<string, string | undefined> = {};
 
     // Only pass through allowed environment variables
     for (const key of passthrough) {

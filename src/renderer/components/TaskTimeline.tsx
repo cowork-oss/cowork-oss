@@ -5,10 +5,14 @@ interface TaskTimelineProps {
 }
 
 export function TaskTimeline({ events }: TaskTimelineProps) {
-  // Filter out tool_blocked events - they're internal implementation details
-  // that don't provide value to end users (e.g., deduplication blocks)
+  // Filter out internal events that don't provide value to end users
+  const internalEventTypes = [
+    'tool_blocked',        // deduplication blocks
+    'follow_up_completed', // internal follow-up tracking
+    'follow_up_failed',    // internal follow-up tracking
+  ];
   const blockedEvents = events.filter(e => e.type === 'tool_blocked');
-  const visibleEvents = events.filter(e => e.type !== 'tool_blocked');
+  const visibleEvents = events.filter(e => !internalEventTypes.includes(e.type));
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
@@ -43,6 +47,12 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return '🛑';
       case 'approval_requested':
         return '⚠️';
+      case 'executing':
+        return '⚡';
+      case 'task_completed':
+        return '✅';
+      case 'follow_up_completed':
+        return '✅';
       default:
         return '•';
     }
@@ -74,6 +84,12 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return 'Task stopped by user';
       case 'approval_requested':
         return `Approval needed: ${event.payload.approval?.description}`;
+      case 'executing':
+        return event.payload.message || 'Executing';
+      case 'task_completed':
+        return 'Task completed';
+      case 'follow_up_completed':
+        return 'Task completed';
       case 'log':
         return event.payload.message;
       default:

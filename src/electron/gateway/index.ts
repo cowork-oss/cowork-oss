@@ -161,7 +161,7 @@ export class ChannelGateway {
     const onFollowUpCompleted = async (data: { taskId: string }) => {
       // If no assistant messages were sent during the follow-up, send a confirmation
       if (!followUpMessagesSent.get(data.taskId)) {
-        this.router.sendTaskUpdate(data.taskId, '✅ Done');
+        this.router.sendTaskUpdate(data.taskId, '✅ Task completed!');
       }
       followUpMessagesSent.delete(data.taskId);
 
