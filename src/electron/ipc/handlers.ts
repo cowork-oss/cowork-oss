@@ -779,6 +779,25 @@ export function setupIpcHandlers(
       };
     }
 
+    if (validated.type === 'slack') {
+      const channel = await gateway.addSlackChannel(
+        validated.name,
+        validated.botToken,
+        validated.appToken,
+        validated.signingSecret,
+        validated.securityMode || 'pairing'
+      );
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: channel.status,
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+      };
+    }
+
     // TypeScript exhaustiveness check - should never reach here due to discriminated union
     throw new Error(`Unsupported channel type`);
   });

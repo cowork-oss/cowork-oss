@@ -182,9 +182,19 @@ export const AddDiscordChannelSchema = z.object({
   securityMode: SecurityModeSchema.optional(),
 });
 
+export const AddSlackChannelSchema = z.object({
+  type: z.literal('slack'),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  botToken: z.string().min(1).max(500),
+  appToken: z.string().min(1).max(500),
+  signingSecret: z.string().max(500).optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
 export const AddChannelSchema = z.discriminatedUnion('type', [
   AddTelegramChannelSchema,
   AddDiscordChannelSchema,
+  AddSlackChannelSchema,
 ]);
 
 export const UpdateChannelSchema = z.object({

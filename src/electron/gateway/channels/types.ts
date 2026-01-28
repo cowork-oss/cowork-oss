@@ -107,6 +107,18 @@ export interface DiscordConfig extends ChannelConfig {
 }
 
 /**
+ * Slack-specific configuration
+ */
+export interface SlackConfig extends ChannelConfig {
+  /** Bot token (xoxb-...) */
+  botToken: string;
+  /** App token for Socket Mode (xapp-...) */
+  appToken: string;
+  /** Signing secret for verifying requests */
+  signingSecret?: string;
+}
+
+/**
  * Channel adapter interface
  * All channel implementations must implement this interface
  */

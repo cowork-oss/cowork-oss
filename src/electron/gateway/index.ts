@@ -15,10 +15,12 @@ import {
   ChannelType,
   TelegramConfig,
   DiscordConfig,
+  SlackConfig,
   GatewayEventHandler,
 } from './channels/types';
 import { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
 import { DiscordAdapter, createDiscordAdapter } from './channels/discord';
+import { SlackAdapter, createSlackAdapter } from './channels/slack';
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -274,6 +276,40 @@ export class ChannelGateway {
       name,
       enabled: false, // Don't enable until tested
       config: { botToken, applicationId, guildIds },
+      securityConfig: {
+        mode: securityMode,
+        pairingCodeTTL: 300, // 5 minutes
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
+   * Add a new Slack channel
+   */
+  async addSlackChannel(
+    name: string,
+    botToken: string,
+    appToken: string,
+    signingSecret?: string,
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing'
+  ): Promise<Channel> {
+    // Check if Slack channel already exists
+    const existing = this.channelRepo.findByType('slack');
+    if (existing) {
+      throw new Error('Slack channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'slack',
+      name,
+      enabled: false, // Don't enable until tested
+      config: { botToken, appToken, signingSecret },
       securityConfig: {
         mode: securityMode,
         pairingCodeTTL: 300, // 5 minutes
@@ -547,6 +583,14 @@ export class ChannelGateway {
           guildIds: channel.config.guildIds as string[] | undefined,
         });
 
+      case 'slack':
+        return createSlackAdapter({
+          enabled: channel.enabled,
+          botToken: channel.config.botToken as string,
+          appToken: channel.config.appToken as string,
+          signingSecret: channel.config.signingSecret as string | undefined,
+        });
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -560,3 +604,4 @@ export * from './session';
 export * from './security';
 export { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
 export { DiscordAdapter, createDiscordAdapter } from './channels/discord';
+export { SlackAdapter, createSlackAdapter } from './channels/slack';
