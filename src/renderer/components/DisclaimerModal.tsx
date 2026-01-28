@@ -5,79 +5,124 @@ interface DisclaimerModalProps {
 }
 
 export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
-  const [understood, setUnderstood] = useState(false);
+  const [selectedOption, setSelectedOption] = useState<'yes' | 'no' | null>(null);
+
+  const handleContinue = () => {
+    if (selectedOption === 'yes') {
+      onAccept();
+    }
+  };
 
   return (
-    <div className="disclaimer-overlay">
-      <div className="disclaimer-modal">
-        <div className="disclaimer-header">
-          <div className="disclaimer-icon">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <h1>Security Notice</h1>
+    <div className="disclaimer-terminal">
+      <div className="disclaimer-terminal-content">
+        {/* ASCII Art Logo */}
+        <pre className="disclaimer-ascii-art">
+{`
+ ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗
+██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝
+██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝
+██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗
+╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗
+ ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+`}
+        </pre>
+        <div className="disclaimer-subtitle">Agentic Task Automation</div>
+
+        {/* Terminal prompt line */}
+        <div className="disclaimer-prompt">
+          <span className="disclaimer-prompt-symbol">┌</span>
+          <span className="disclaimer-prompt-text">  CoWork onboarding</span>
+        </div>
+        <div className="disclaimer-prompt">
+          <span className="disclaimer-prompt-symbol">│</span>
         </div>
 
-        <div className="disclaimer-content">
-          <div className="disclaimer-box">
-            <h3>Please read carefully before proceeding</h3>
-
-            <div className="disclaimer-section">
-              <h4>What CoWork agents can do:</h4>
-              <ul>
-                <li>Execute shell commands on your system</li>
-                <li>Read, write, and delete files in your workspace</li>
-                <li>Access the network and external services</li>
-                <li>Control browser automation</li>
-                <li>Interact with any tools you enable</li>
-              </ul>
+        {/* Security Box */}
+        <div className="disclaimer-box-terminal">
+          <div className="disclaimer-box-header">
+            <span className="disclaimer-prompt-symbol">◇</span>
+            <span className="disclaimer-box-title">  Security </span>
+            <span className="disclaimer-box-line">{'─'.repeat(60)}</span>
+            <span>╮</span>
+          </div>
+          <div className="disclaimer-box-content">
+            <div className="disclaimer-box-row">│</div>
+            <div className="disclaimer-box-row">
+              │  <span className="disclaimer-highlight">CoWork agents can run commands, read/write files, and act through</span>
             </div>
-
-            <div className="disclaimer-section">
-              <h4>Risks to understand:</h4>
-              <ul>
-                <li>AI agents can make mistakes or be manipulated</li>
-                <li>Commands may have unintended side effects</li>
-                <li>Sensitive data could be exposed if not careful</li>
-                <li>Always review commands before approving them</li>
-              </ul>
+            <div className="disclaimer-box-row">
+              │  <span className="disclaimer-highlight">any tools you enable.</span>
             </div>
-
-            <div className="disclaimer-section">
-              <h4>Recommendations:</h4>
-              <ul>
-                <li>Start with restrictive workspace permissions</li>
-                <li>Use the Guardrails settings to limit agent capabilities</li>
-                <li>Review and understand each approval request</li>
-                <li>Keep sensitive files outside your workspace</li>
-              </ul>
+            <div className="disclaimer-box-row">│</div>
+            <div className="disclaimer-box-row">
+              │  If you're new to this, start with restrictive workspace permissions
+            </div>
+            <div className="disclaimer-box-row">
+              │  and use the Guardrails settings. It helps limit what an agent can do
+            </div>
+            <div className="disclaimer-box-row">
+              │  if it makes a mistake or is given malicious instructions.
+            </div>
+            <div className="disclaimer-box-row">│</div>
+            <div className="disclaimer-box-row">
+              │  <span className="disclaimer-link">Learn more: Settings → Guardrails</span>
+            </div>
+            <div className="disclaimer-box-row">│</div>
+            <div className="disclaimer-box-footer">
+              ├{'─'.repeat(76)}╯
             </div>
           </div>
+        </div>
 
-          <label className="disclaimer-checkbox">
-            <input
-              type="checkbox"
-              checked={understood}
-              onChange={(e) => setUnderstood(e.target.checked)}
-            />
-            <span className="checkbox-custom"></span>
-            <span className="checkbox-label">
-              I understand that CoWork is powerful and inherently risky. I will review
-              agent actions carefully and take responsibility for their effects.
-            </span>
+        {/* Selection prompt */}
+        <div className="disclaimer-prompt">
+          <span className="disclaimer-prompt-symbol">│</span>
+        </div>
+        <div className="disclaimer-selection">
+          <span className="disclaimer-prompt-symbol">◆</span>
+          <span className="disclaimer-question">  I understand this is powerful and inherently risky. Continue?</span>
+        </div>
+
+        {/* Options */}
+        <div className="disclaimer-options">
+          <label
+            className={`disclaimer-option ${selectedOption === 'yes' ? 'selected' : ''}`}
+            onClick={() => setSelectedOption('yes')}
+          >
+            <span className="disclaimer-prompt-symbol">│</span>
+            <span className="disclaimer-radio">{selectedOption === 'yes' ? '●' : '○'}</span>
+            <span>Yes</span>
+          </label>
+          <label
+            className={`disclaimer-option ${selectedOption === 'no' ? 'selected' : ''}`}
+            onClick={() => setSelectedOption('no')}
+          >
+            <span className="disclaimer-prompt-symbol">│</span>
+            <span className="disclaimer-radio">{selectedOption === 'no' ? '●' : '○'}</span>
+            <span>No</span>
           </label>
         </div>
 
-        <div className="disclaimer-footer">
-          <button
-            className="disclaimer-button"
-            disabled={!understood}
-            onClick={onAccept}
-          >
-            I Understand, Continue
-          </button>
+        {/* Footer */}
+        <div className="disclaimer-prompt">
+          <span className="disclaimer-prompt-symbol">└</span>
         </div>
+
+        {/* Continue button */}
+        {selectedOption === 'yes' && (
+          <div className="disclaimer-continue">
+            <button onClick={handleContinue} className="disclaimer-continue-btn">
+              Press Enter to continue →
+            </button>
+          </div>
+        )}
+
+        {selectedOption === 'no' && (
+          <div className="disclaimer-exit-message">
+            <span className="disclaimer-muted">You must accept to use CoWork. Close the app if you disagree.</span>
+          </div>
+        )}
       </div>
     </div>
   );
