@@ -8360,7 +8360,7 @@ button {
 .disclaimer-terminal-content {
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', 'Source Code Pro', monospace;
   color: #e0e0e0;
-  max-width: 640px;
+  max-width: 720px;
   width: 100%;
   font-size: 13px;
   line-height: 1.5;
@@ -8368,7 +8368,7 @@ button {
 
 .disclaimer-ascii-art {
   color: var(--color-accent);
-  font-size: 10px;
+  font-size: 8px;
   line-height: 1.15;
   text-align: center;
   margin-bottom: 4px;
