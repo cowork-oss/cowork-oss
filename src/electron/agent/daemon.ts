@@ -124,20 +124,23 @@ export class AgentDaemon extends EventEmitter {
    * Start executing a task immediately (internal - called by queue manager)
    */
   async startTaskImmediate(task: Task): Promise<void> {
-    console.log(`Starting task ${task.id}: ${task.title}`);
+    console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
 
     // Get workspace details
     const workspace = this.workspaceRepo.findById(task.workspaceId);
     if (!workspace) {
       throw new Error(`Workspace ${task.workspaceId} not found`);
     }
+    console.log(`[AgentDaemon] Workspace found: ${workspace.name}`);
 
     // Create task executor - wrapped in try-catch to handle provider initialization errors
     let executor: TaskExecutor;
     try {
+      console.log(`[AgentDaemon] Creating TaskExecutor...`);
       executor = new TaskExecutor(task, workspace, this);
+      console.log(`[AgentDaemon] TaskExecutor created successfully`);
     } catch (error: any) {
-      console.error(`Task ${task.id} failed to initialize:`, error);
+      console.error(`[AgentDaemon] Task ${task.id} failed to initialize:`, error);
       this.taskRepo.update(task.id, {
         status: 'failed',
         error: error.message || 'Failed to initialize task executor',
@@ -158,10 +161,11 @@ export class AgentDaemon extends EventEmitter {
     // Update task status
     this.taskRepo.update(task.id, { status: 'planning' });
     this.emitTaskEvent(task.id, 'task_created', { task });
+    console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
     // Start execution (non-blocking)
     executor.execute().catch(error => {
-      console.error(`Task ${task.id} failed:`, error);
+      console.error(`[AgentDaemon] Task ${task.id} execution failed:`, error);
       this.taskRepo.update(task.id, {
         status: 'failed',
         error: error.message,

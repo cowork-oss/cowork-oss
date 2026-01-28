@@ -487,6 +487,13 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] **MCP Registry** - Browse and install MCP servers from a catalog with one-click installation
 - [x] **MCP SSE Transport** - Connect to web-based MCP servers via Server-Sent Events
 - [x] **MCP WebSocket Transport** - Real-time bidirectional MCP communication
+- [x] **Advanced Security Framework** - Comprehensive security improvements:
+  - **Tool Groups & Risk Levels** - Tools categorized by risk (read/write/destructive/system/network)
+  - **Monotonic Policy Precedence** - Deny-wins policy system across multiple security layers
+  - **Context-Aware Tool Isolation** - Memory/clipboard tools blocked in shared gateway contexts
+  - **Concurrent Access Safety** - Mutex locks and idempotency for critical operations
+  - **macOS Sandbox Profiles** - Shell command sandboxing with filesystem/network restrictions
+  - **118 Security Unit Tests** - Comprehensive test suite for security components
 
 ### Planned
 - [ ] VM sandbox using macOS Virtualization.framework

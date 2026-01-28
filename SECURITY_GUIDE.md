@@ -380,6 +380,81 @@ See [SECURITY.md](SECURITY.md) for full details.
 
 ---
 
+## Advanced Security Framework (v0.3.8.7+)
+
+CoWork-OSS includes a comprehensive security framework inspired by formal verification techniques.
+
+### Tool Groups & Risk Levels
+
+Tools are categorized by risk level for policy-based access control:
+
+| Risk Level | Tools | Description |
+|------------|-------|-------------|
+| **Read** | `read_file`, `list_directory`, `search_files` | Low risk, read-only operations |
+| **Write** | `write_file`, `copy_file`, `create_directory` | Medium risk, creates/modifies files |
+| **Destructive** | `delete_file`, `run_command` | High risk, always requires approval |
+| **System** | `read_clipboard`, `take_screenshot`, `open_application` | System-level access |
+| **Network** | `web_search`, `browser_*` | External network operations |
+
+### Monotonic Policy Precedence (Deny-Wins)
+
+Security policies are evaluated across multiple layers in order:
+
+1. **Global Guardrails** - Blocked commands, patterns
+2. **Workspace Permissions** - Read, write, delete, shell, network flags
+3. **Context Restrictions** - Gateway context (private/group/public)
+4. **Tool-Specific Rules** - Per-tool overrides
+
+**Key invariant**: Once denied by any layer, a tool cannot be re-enabled by later layers. This prevents policy bypasses.
+
+### Context-Aware Tool Isolation
+
+When tasks originate from gateway bots (Telegram/Discord/Slack), tools are restricted based on context:
+
+| Context | Restrictions |
+|---------|-------------|
+| **Private** | Full access (with approvals) |
+| **Group** | Memory tools blocked (clipboard), destructive tools blocked |
+| **Public** | System tools blocked, all destructive operations blocked |
+
+This prevents accidental exposure of sensitive data in shared contexts.
+
+### Concurrent Access Safety
+
+Critical operations use mutex locks and idempotency guarantees to prevent race conditions:
+
+| Operation | Protection |
+|-----------|------------|
+| Pairing code verification | Mutex per channel + idempotency check |
+| Approval responses | Idempotency prevents double-approval |
+| Task creation | Deduplication via idempotency keys |
+
+### Shell Command Sandboxing
+
+On macOS, shell commands execute within a `sandbox-exec` profile that:
+
+- Restricts filesystem access to workspace + temp directories
+- Blocks network access unless workspace has `network` permission
+- Limits write access based on workspace permissions
+- Uses minimal, safe environment variables
+
+**Implementation**: `src/electron/agent/sandbox/runner.ts`
+
+### Running Security Tests
+
+```bash
+npm test                    # Run all 118 security tests
+npm run test:coverage       # With coverage report
+```
+
+Test files:
+- `tests/security/tool-groups.test.ts` - Tool categorization tests
+- `tests/security/policy-manager.test.ts` - Policy evaluation tests
+- `tests/security/concurrency.test.ts` - Mutex and idempotency tests
+- `tests/security/sandbox-runner.test.ts` - Sandbox execution tests
+
+---
+
 ## Summary
 
 CoWork-OSS is designed with security in mind:
@@ -388,11 +463,14 @@ CoWork-OSS is designed with security in mind:
 |--------|--------|
 | API key storage | Encrypted (OS keychain) |
 | File access | Sandboxed to workspace |
-| Shell execution | Requires approval |
+| Shell execution | Requires approval + sandbox |
 | Network access | Only configured providers |
 | Telemetry | None |
 | Electron security | Best practices followed |
 | Guardrails | Configurable limits on tokens, cost, iterations, commands, file size, and domains |
+| Policy system | Monotonic deny-wins precedence |
+| Gateway security | Context-aware tool isolation |
+| Concurrency | Mutex locks + idempotency guarantees |
 
 **The security model is transparent and consent-based.** You remain in control of what the AI can do on your machine.
 
