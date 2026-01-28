@@ -223,11 +223,21 @@ export class TaskRepository {
   delete(id: string): void {
     // Use transaction to ensure atomic deletion
     const deleteTransaction = this.db.transaction((taskId: string) => {
-      // First delete related task events
+      // Delete related records from all tables with foreign keys to tasks
       const deleteEvents = this.db.prepare('DELETE FROM task_events WHERE task_id = ?');
       deleteEvents.run(taskId);
 
-      // Then delete the task
+      const deleteArtifacts = this.db.prepare('DELETE FROM artifacts WHERE task_id = ?');
+      deleteArtifacts.run(taskId);
+
+      const deleteApprovals = this.db.prepare('DELETE FROM approvals WHERE task_id = ?');
+      deleteApprovals.run(taskId);
+
+      // Nullify task_id in channel_sessions rather than deleting the session
+      const clearSessionTaskId = this.db.prepare('UPDATE channel_sessions SET task_id = NULL WHERE task_id = ?');
+      clearSessionTaskId.run(taskId);
+
+      // Finally delete the task
       const deleteTask = this.db.prepare('DELETE FROM tasks WHERE id = ?');
       deleteTask.run(taskId);
     });
