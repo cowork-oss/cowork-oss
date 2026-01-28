@@ -1473,10 +1473,10 @@ a,
   position: relative;
   padding: 6px 8px;
   border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  border: 2px solid transparent;
-  background: rgba(220, 53, 69, 0.1);
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: rgba(220, 53, 69, 0.15);
   color: #dc3545;
   cursor: pointer;
   display: flex;
@@ -1488,19 +1488,21 @@ a,
 .stop-btn-simple::before {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: -3px;
   border-radius: 50%;
-  border: 2px solid rgba(220, 53, 69, 0.2);
+  border: 3px solid rgba(220, 53, 69, 0.3);
 }
 
 .stop-btn-simple::after {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: -3px;
   border-radius: 50%;
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   border-top-color: #dc3545;
-  animation: spin 1s linear infinite;
+  border-right-color: #dc3545;
+  animation: spin 0.8s linear infinite;
+  filter: drop-shadow(0 0 2px rgba(220, 53, 69, 0.5));
 }
 
 @keyframes spin {
@@ -1510,7 +1512,11 @@ a,
 }
 
 .stop-btn-simple:hover {
-  background: rgba(220, 53, 69, 0.2);
+  background: rgba(220, 53, 69, 0.25);
+}
+
+.stop-btn-simple:hover::after {
+  filter: drop-shadow(0 0 4px rgba(220, 53, 69, 0.7));
 }
 
 .stop-btn-simple:active {
