@@ -199,7 +199,7 @@ export class SecurityPolicyManager {
    */
   static isToolInGroup(toolName: string, groupName: ToolGroupName): boolean {
     const tools = TOOL_GROUPS[groupName];
-    return tools ? tools.includes(toolName as any) : false;
+    return tools ? (tools as readonly string[]).includes(toolName) : false;
   }
 
   /**
