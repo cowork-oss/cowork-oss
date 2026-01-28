@@ -389,6 +389,60 @@ export class SystemTools {
   }
 
   /**
+   * Execute AppleScript code on macOS
+   * This enables powerful automation capabilities for controlling applications and system features
+   */
+  async runAppleScript(script: string): Promise<{
+    success: boolean;
+    result: string;
+  }> {
+    if (!script || typeof script !== 'string') {
+      throw new Error('Invalid script: must be a non-empty string');
+    }
+
+    // Only available on macOS
+    if (os.platform() !== 'darwin') {
+      throw new Error('AppleScript is only available on macOS');
+    }
+
+    this.daemon.logEvent(this.taskId, 'tool_call', {
+      tool: 'run_applescript',
+      scriptLength: script.length,
+    });
+
+    try {
+      // Execute using osascript command
+      // Use -e flag for inline script execution
+      const { stdout, stderr } = await execAsync(`osascript -e ${JSON.stringify(script)}`, {
+        timeout: DEFAULT_TIMEOUT,
+        maxBuffer: 1024 * 1024, // 1MB buffer
+      });
+
+      const result = stdout.trim() || stderr.trim() || '(no output)';
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'run_applescript',
+        success: true,
+        outputLength: result.length,
+      });
+
+      return {
+        success: true,
+        result,
+      };
+    } catch (error: any) {
+      this.daemon.logEvent(this.taskId, 'tool_error', {
+        tool: 'run_applescript',
+        error: error.message,
+      });
+
+      // Extract meaningful error message from osascript errors
+      const errorMessage = error.stderr?.trim() || error.message || 'Unknown error';
+      throw new Error(`AppleScript execution failed: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Static method to get tool definitions
    */
   static getToolDefinitions(): LLMTool[] {
@@ -516,6 +570,26 @@ export class SystemTools {
           type: 'object',
           properties: {},
           required: [],
+        },
+      },
+      {
+        name: 'run_applescript',
+        description:
+          'Execute AppleScript code on macOS to automate applications and system tasks. ' +
+          'Examples: control apps (Safari, Finder, Mail), manage windows, click UI elements, ' +
+          'get/set system preferences, interact with files, send keystrokes. ' +
+          'Only available on macOS.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            script: {
+              type: 'string',
+              description:
+                'The AppleScript code to execute. Can be a single line or multi-line script. ' +
+                'Example: \'tell application "Finder" to get name of front window\'',
+            },
+          },
+          required: ['script'],
         },
       },
     ];

@@ -269,6 +269,7 @@ System Tools:
 - show_in_folder: Reveal file in Finder/Explorer
 - get_env: Read environment variable
 - get_app_paths: Get system paths (home, downloads, etc.)
+- run_applescript: Execute AppleScript on macOS (control apps, automate tasks)
 
 Plan Control:
 - revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered`;
@@ -322,6 +323,7 @@ Plan Control:
     if (name === 'show_in_folder') return await this.systemTools.showInFolder(input.path);
     if (name === 'get_env') return await this.systemTools.getEnvVariable(input.name);
     if (name === 'get_app_paths') return this.systemTools.getAppPaths();
+    if (name === 'run_applescript') return await this.systemTools.runAppleScript(input.script);
 
     // Meta tools
     if (name === 'revise_plan') {

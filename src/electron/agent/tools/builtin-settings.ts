@@ -124,6 +124,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   show_in_folder: 'system',
   get_env: 'system',
   get_app_paths: 'system',
+  run_applescript: 'system',
   // File tools
   read_file: 'file',
   write_file: 'file',
