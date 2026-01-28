@@ -529,6 +529,11 @@ export const IPC_CHANNELS = {
 
   // MCP Events
   MCP_SERVER_STATUS_CHANGE: 'mcp:serverStatusChange',
+
+  // Built-in Tools Settings
+  BUILTIN_TOOLS_GET_SETTINGS: 'builtinTools:getSettings',
+  BUILTIN_TOOLS_SAVE_SETTINGS: 'builtinTools:saveSettings',
+  BUILTIN_TOOLS_GET_CATEGORIES: 'builtinTools:getCategories',
 } as const;
 
 // LLM Provider types

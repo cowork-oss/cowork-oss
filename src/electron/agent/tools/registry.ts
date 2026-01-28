@@ -12,6 +12,7 @@ import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
 import { MCPSettingsManager } from '../../mcp/settings';
 import { isToolAllowedQuick } from '../../security/policy-manager';
+import { BuiltinToolsSettingsManager } from './builtin-settings';
 
 /**
  * ToolRegistry manages all available tools and their execution
@@ -60,7 +61,8 @@ export class ToolRegistry {
 
   /**
    * Get all available tools in provider-agnostic format
-   * Filters tools based on workspace permissions and gateway context
+   * Filters tools based on workspace permissions, gateway context, and user settings
+   * Sorts tools by priority (high priority tools first)
    */
   getTools(): LLMTool[] {
     const allTools: LLMTool[] = [
@@ -94,7 +96,28 @@ export class ToolRegistry {
     allTools.push(...this.getMCPToolDefinitions());
 
     // Filter tools based on security policy (workspace + gateway context)
-    const filteredTools = allTools.filter(tool => this.isToolAllowed(tool.name));
+    let filteredTools = allTools.filter(tool => this.isToolAllowed(tool.name));
+
+    // Filter tools based on user's built-in tool settings
+    const disabledBySettings: string[] = [];
+    filteredTools = filteredTools.filter(tool => {
+      // MCP tools are not affected by built-in settings
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || 'mcp_';
+      if (tool.name.startsWith(prefix)) {
+        return true;
+      }
+      // Meta tools are always enabled
+      if (tool.name === 'revise_plan') {
+        return true;
+      }
+      // Check built-in tool settings
+      const isEnabled = BuiltinToolsSettingsManager.isToolEnabled(tool.name);
+      if (!isEnabled) {
+        disabledBySettings.push(tool.name);
+      }
+      return isEnabled;
+    });
 
     // Log filtered tools for debugging
     const blockedTools = allTools.filter(tool => !this.isToolAllowed(tool.name));
@@ -102,6 +125,33 @@ export class ToolRegistry {
       console.log(`[ToolRegistry] Blocked ${blockedTools.length} tools for ${this.gatewayContext} context:`,
         blockedTools.map(t => t.name).join(', '));
     }
+    if (disabledBySettings.length > 0) {
+      console.log(`[ToolRegistry] Disabled ${disabledBySettings.length} tools by user settings:`,
+        disabledBySettings.join(', '));
+    }
+
+    // Sort tools by priority (high first, then normal, then low)
+    // This helps influence which tools the LLM is more likely to choose
+    const priorityOrder = { high: 0, normal: 1, low: 2 };
+    filteredTools.sort((a, b) => {
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || 'mcp_';
+      // MCP tools always come after built-in tools at the same priority
+      const aIsMcp = a.name.startsWith(prefix);
+      const bIsMcp = b.name.startsWith(prefix);
+
+      const aPriority = aIsMcp ? 'normal' : BuiltinToolsSettingsManager.getToolPriority(a.name);
+      const bPriority = bIsMcp ? 'normal' : BuiltinToolsSettingsManager.getToolPriority(b.name);
+
+      const diff = priorityOrder[aPriority] - priorityOrder[bPriority];
+      if (diff !== 0) return diff;
+
+      // Within same priority, put built-in tools first
+      if (aIsMcp && !bIsMcp) return 1;
+      if (!aIsMcp && bIsMcp) return -1;
+
+      return 0;
+    });
 
     return filteredTools;
   }
