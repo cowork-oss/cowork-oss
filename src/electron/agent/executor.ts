@@ -2499,6 +2499,14 @@ AUTONOMOUS OPERATION (CRITICAL):
 - If you need information from a page, USE your tools to extract it - don't ask the user to find it for you.
 - Your job is to DO the work, not to tell the user what they need to do.
 
+FOLLOW-UP MESSAGE HANDLING (CRITICAL):
+- This is a FOLLOW-UP message. The user is continuing an existing conversation.
+- DO NOT ask clarifying questions - just do the work based on context from the conversation.
+- DO NOT say "Would you like me to..." or "Should I..." - just DO IT.
+- DO NOT ask for confirmation or permission - use your tools and complete the task.
+- If the user's follow-up is ambiguous, make a reasonable interpretation and execute it.
+- ONLY ask a question if you truly cannot proceed (e.g., need credentials, critical missing info).
+
 CRITICAL - FINAL ANSWER REQUIREMENT:
 - You MUST ALWAYS output a text response at the end. NEVER finish silently with just tool calls.
 - After using tools, IMMEDIATELY provide your findings as TEXT. Don't keep calling tools indefinitely.
@@ -2525,6 +2533,7 @@ ANTI-PATTERNS (NEVER DO THESE):
 - DO NOT: Navigate to page then ask user for URLs or content
 - DO NOT: Open multiple sources then claim you can't access them
 - DO NOT: Say "I need access to the articles" when you already navigated there
+- DO NOT: Ask "Would you like me to..." or "Should I..." - just do it
 - DO: Navigate -> browser_get_content -> process -> repeat for each source -> summarize all findings
 
 EFFICIENCY RULES (CRITICAL):
@@ -2846,11 +2855,15 @@ EFFICIENCY RULES (CRITICAL):
           }
         }
 
-        // If assistant asked a question and there are no tool calls, stop and wait for user
-        if (assistantAskedQuestion && toolResults.length === 0) {
-          console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
-          continueLoop = false;
-        }
+        // For follow-ups, do NOT stop just because the agent asked a question.
+        // The system prompt instructs the agent not to ask questions, so if it does,
+        // we should continue working. Only truly blocking questions (needing credentials etc.)
+        // will cause the agent to not use any tools, which will naturally end the loop.
+        // REMOVED: Question detection stopping for follow-ups
+        // if (assistantAskedQuestion && toolResults.length === 0) {
+        //   console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
+        //   continueLoop = false;
+        // }
       }
 
       // Save updated conversation history
