@@ -3971,6 +3971,92 @@ button {
   }
 }
 
+/* Auth Method Tabs for OAuth vs API Key */
+.auth-method-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.auth-method-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-method-tab:hover {
+  background: var(--color-bg-glass-hover);
+  border-color: var(--color-border-light);
+  color: var(--color-text);
+}
+
+.auth-method-tab.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-accent) inset;
+}
+
+.auth-method-tab svg {
+  opacity: 0.7;
+}
+
+.auth-method-tab.active svg {
+  opacity: 1;
+}
+
+/* OAuth Connected Status */
+.oauth-connected {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.oauth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-success, #22c55e);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.oauth-status svg {
+  flex-shrink: 0;
+}
+
+/* OAuth Login Section */
+.oauth-login {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.oauth-login-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.oauth-login-btn .spinner {
+  animation: spin 0.8s linear infinite;
+}
+
 /* Settings button in sidebar footer */
 .settings-btn {
   display: flex;
@@ -8261,28 +8347,29 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  background: #0a0a0a;
+  background: #0d0d0d;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
   padding: 20px;
   padding-top: 48px;
+  overflow-y: auto;
 }
 
 .disclaimer-terminal-content {
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', 'Source Code Pro', monospace;
   color: #e0e0e0;
-  max-width: 800px;
+  max-width: 640px;
   width: 100%;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .disclaimer-ascii-art {
   color: var(--color-accent);
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 10px;
+  line-height: 1.15;
   text-align: center;
   margin-bottom: 4px;
   white-space: pre;
@@ -8290,149 +8377,175 @@ button {
 
 .disclaimer-subtitle {
   text-align: center;
-  color: #666;
-  font-size: 12px;
-  margin-bottom: 32px;
-  letter-spacing: 2px;
+  color: #555;
+  font-size: 11px;
+  margin-bottom: 28px;
+  letter-spacing: 3px;
   text-transform: uppercase;
 }
 
-.disclaimer-prompt {
+/* Card container */
+.disclaimer-card {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.disclaimer-card-header {
   display: flex;
   align-items: center;
-  gap: 0;
-  margin-bottom: 2px;
+  gap: 10px;
+  padding: 14px 18px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
 }
 
-.disclaimer-prompt-symbol {
-  color: #666;
-  margin-right: 0;
+.disclaimer-card-icon {
+  font-size: 18px;
+  color: #f59e0b;
 }
 
-.disclaimer-prompt-text {
-  color: #e0e0e0;
+.disclaimer-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
 }
 
-.disclaimer-box-terminal {
-  margin: 8px 0;
+.disclaimer-card-body {
+  padding: 18px;
 }
 
-.disclaimer-box-header {
-  display: flex;
-  align-items: center;
-  color: #666;
-}
-
-.disclaimer-box-title {
-  color: #e0e0e0;
-  font-weight: 500;
-}
-
-.disclaimer-box-line {
-  color: #444;
-}
-
-.disclaimer-box-content {
+.disclaimer-intro {
   color: #888;
+  margin: 0 0 16px 0;
+  font-size: 13px;
 }
 
-.disclaimer-box-row {
-  color: #666;
-  padding-left: 0;
+.disclaimer-section {
+  margin-bottom: 16px;
 }
 
-.disclaimer-box-row .disclaimer-highlight {
-  color: #e0e0e0;
+.disclaimer-section:last-child {
+  margin-bottom: 0;
 }
 
-.disclaimer-box-row .disclaimer-link {
+.disclaimer-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #bbb;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.disclaimer-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.disclaimer-section li {
+  position: relative;
+  padding: 3px 0 3px 18px;
+  color: #888;
+  font-size: 12px;
+}
+
+.disclaimer-section li::before {
+  content: "›";
+  position: absolute;
+  left: 4px;
   color: var(--color-accent);
-  text-decoration: underline;
-  cursor: pointer;
+  font-weight: bold;
 }
 
-.disclaimer-box-footer {
-  color: #444;
-}
-
-.disclaimer-selection {
-  display: flex;
-  align-items: center;
-  margin: 16px 0 8px;
+/* Question section */
+.disclaimer-question-section {
+  margin-bottom: 20px;
 }
 
 .disclaimer-question {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
   color: #e0e0e0;
+  margin-bottom: 12px;
+}
+
+.disclaimer-diamond {
+  color: var(--color-accent);
+  font-size: 10px;
 }
 
 .disclaimer-options {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-left: 0;
+  gap: 6px;
+  margin-left: 20px;
 }
 
 .disclaimer-option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
-  padding: 4px 0;
-  transition: color 0.15s ease;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  color: #888;
 }
 
 .disclaimer-option:hover {
+  background: #1a1a1a;
   color: #fff;
 }
 
 .disclaimer-option.selected {
+  background: rgba(34, 211, 238, 0.1);
   color: var(--color-accent);
 }
 
 .disclaimer-radio {
-  margin-left: 16px;
-  font-size: 12px;
+  font-size: 10px;
 }
 
-.disclaimer-option.selected .disclaimer-radio {
-  color: var(--color-accent);
-}
-
+/* Continue button */
 .disclaimer-continue {
-  margin-top: 24px;
   text-align: center;
 }
 
 .disclaimer-continue-btn {
-  background: transparent;
-  border: 1px solid var(--color-accent);
-  color: var(--color-accent);
-  padding: 12px 32px;
+  background: var(--color-accent);
+  border: none;
+  color: #0d0d0d;
+  padding: 12px 36px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .disclaimer-continue-btn:hover {
-  background: var(--color-accent);
-  color: #0a0a0a;
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
+/* Exit message */
 .disclaimer-exit-message {
-  margin-top: 24px;
   text-align: center;
-}
-
-.disclaimer-muted {
   color: #666;
+  font-size: 12px;
   font-style: italic;
 }
 
-/* Light theme adjustments */
+/* Light theme */
 .theme-light .disclaimer-terminal {
-  background: #fafafa;
+  background: #f5f5f5;
 }
 
 .theme-light .disclaimer-terminal-content {
@@ -8444,49 +8557,56 @@ button {
 }
 
 .theme-light .disclaimer-subtitle {
-  color: #888;
-}
-
-.theme-light .disclaimer-prompt-symbol {
   color: #999;
 }
 
-.theme-light .disclaimer-prompt-text {
+.theme-light .disclaimer-card {
+  background: #fff;
+  border-color: #e0e0e0;
+}
+
+.theme-light .disclaimer-card-header {
+  background: #fafafa;
+  border-color: #e0e0e0;
+}
+
+.theme-light .disclaimer-card-title {
   color: #1a1a1a;
 }
 
-.theme-light .disclaimer-box-line {
-  color: #ccc;
-}
-
-.theme-light .disclaimer-box-content {
+.theme-light .disclaimer-intro {
   color: #666;
 }
 
-.theme-light .disclaimer-box-row {
-  color: #999;
+.theme-light .disclaimer-section h4 {
+  color: #555;
 }
 
-.theme-light .disclaimer-box-row .disclaimer-highlight {
-  color: #1a1a1a;
-}
-
-.theme-light .disclaimer-box-footer {
-  color: #ccc;
+.theme-light .disclaimer-section li {
+  color: #666;
 }
 
 .theme-light .disclaimer-question {
   color: #1a1a1a;
 }
 
-.theme-light .disclaimer-option:hover {
-  color: #000;
+.theme-light .disclaimer-option {
+  color: #666;
 }
 
-.theme-light .disclaimer-continue-btn:hover {
+.theme-light .disclaimer-option:hover {
+  background: #f0f0f0;
+  color: #1a1a1a;
+}
+
+.theme-light .disclaimer-option.selected {
+  background: rgba(8, 145, 178, 0.1);
+}
+
+.theme-light .disclaimer-continue-btn {
   color: #fff;
 }
 
-.theme-light .disclaimer-muted {
+.theme-light .disclaimer-exit-message {
   color: #888;
 }
