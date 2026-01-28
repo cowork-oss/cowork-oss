@@ -145,6 +145,9 @@ export class BrowserService {
       console.warn(`[BrowserService] Navigation to ${url} returned ${statusMessage}`);
     }
 
+    // Auto-dismiss cookie consent popups
+    await this.dismissConsentPopups();
+
     return {
       url: this.page!.url(),
       title: await this.page!.title(),
@@ -152,6 +155,148 @@ export class BrowserService {
       // Include error flag for status codes >= 400
       isError: status !== null && status >= 400
     };
+  }
+
+  /**
+   * Attempt to dismiss cookie consent popups
+   * Tries common patterns found on most websites
+   */
+  private async dismissConsentPopups(): Promise<void> {
+    if (!this.page) return;
+
+    try {
+      // Common consent button selectors and text patterns
+      const consentButtonSelectors = [
+        // Common button IDs and classes
+        '#onetrust-accept-btn-handler',
+        '#accept-all-cookies',
+        '#acceptAllCookies',
+        '.accept-cookies',
+        '.accept-all',
+        '[data-testid="cookie-policy-dialog-accept-button"]',
+        '[data-testid="GDPR-accept"]',
+        '.cookie-consent-accept',
+        '.cookie-banner-accept',
+        '.consent-accept',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+        '.cc-accept',
+        '.cc-btn.cc-allow',
+        '#didomi-notice-agree-button',
+        '.evidon-barrier-acceptall',
+        // Aria labels
+        '[aria-label="Accept all cookies"]',
+        '[aria-label="Accept cookies"]',
+        '[aria-label="Accept all"]',
+        // Data attributes
+        '[data-action="accept"]',
+        '[data-consent="accept"]',
+      ];
+
+      // Try each selector
+      for (const selector of consentButtonSelectors) {
+        try {
+          const button = await this.page.$(selector);
+          if (button) {
+            await button.click();
+            console.log(`[BrowserService] Dismissed consent popup using selector: ${selector}`);
+            // Wait a bit for the popup to close
+            await this.page.waitForTimeout(500);
+            return;
+          }
+        } catch {
+          // Selector not found or not clickable, continue
+        }
+      }
+
+      // Try text-based matching for common button texts
+      const buttonTexts = [
+        'Accept all',
+        'Accept All',
+        'Accept all cookies',
+        'Accept All Cookies',
+        'Allow all',
+        'Allow All',
+        'Allow all cookies',
+        'I agree',
+        'I Accept',
+        'Got it',
+        'OK',
+        'Agree',
+        'Accept',
+        'Consent',
+        'Continue',
+        'Yes, I agree',
+        'Accetto',
+        'Akzeptieren',
+        'Accepter',
+        'Aceptar',
+      ];
+
+      for (const text of buttonTexts) {
+        try {
+          // Look for buttons with exact or partial text match
+          const button = await this.page.$(`button:has-text("${text}"), a:has-text("${text}"), [role="button"]:has-text("${text}")`);
+          if (button) {
+            // Verify the button is visible and in a consent-like context
+            const isVisible = await button.isVisible();
+            if (isVisible) {
+              await button.click();
+              console.log(`[BrowserService] Dismissed consent popup with button text: "${text}"`);
+              await this.page.waitForTimeout(500);
+              return;
+            }
+          }
+        } catch {
+          // Not found, continue
+        }
+      }
+
+      // As a last resort, try to remove common overlay elements via JavaScript
+      await this.page.evaluate(`
+        (() => {
+          // Common consent popup container selectors
+          const overlaySelectors = [
+            '#onetrust-consent-sdk',
+            '#onetrust-banner-sdk',
+            '.cookie-consent',
+            '.cookie-banner',
+            '.consent-banner',
+            '.gdpr-consent',
+            '.privacy-consent',
+            '[class*="cookie-consent"]',
+            '[class*="cookie-banner"]',
+            '[class*="consent-modal"]',
+            '[id*="cookie-consent"]',
+            '[id*="cookie-banner"]',
+            '#CybotCookiebotDialog',
+            '.cc-window',
+            '#didomi-host',
+            '.evidon-consent-banner',
+          ];
+
+          for (const selector of overlaySelectors) {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => el.remove());
+          }
+
+          // Also remove any fixed/sticky overlays that might be blocking
+          document.querySelectorAll('[style*="position: fixed"], [style*="position:fixed"]').forEach(el => {
+            const text = el.textContent?.toLowerCase() || '';
+            if (text.includes('cookie') || text.includes('consent') || text.includes('privacy') || text.includes('gdpr')) {
+              el.remove();
+            }
+          });
+
+          // Re-enable scrolling if it was disabled
+          document.body.style.overflow = '';
+          document.documentElement.style.overflow = '';
+        })()
+      `);
+
+    } catch (error) {
+      // Silently fail - consent popup handling is best-effort
+      console.log('[BrowserService] Could not dismiss consent popup:', error);
+    }
   }
 
   /**
