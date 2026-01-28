@@ -268,6 +268,19 @@ class ToolCallDeduplicator {
   checkDuplicate(toolName: string, input: any): { isDuplicate: boolean; reason?: string; cachedResult?: string } {
     const now = Date.now();
 
+    // 0. Exclude stateful browser tools from duplicate detection
+    // These tools depend on current page state, not just parameters
+    // browser_get_content, browser_screenshot have no/minimal params but return different results per page
+    const statefulBrowserTools = [
+      'browser_get_content',
+      'browser_screenshot',
+      'browser_get_text',
+      'browser_evaluate',
+    ];
+    if (statefulBrowserTools.includes(toolName)) {
+      return { isDuplicate: false };
+    }
+
     // 1. Check rate limit first
     const rateLimitCheck = this.checkRateLimit(toolName);
     if (rateLimitCheck.exceeded) {
@@ -1695,14 +1708,20 @@ COMMON WORKFLOWS (follow these patterns):
    Step 2: Create the document with create_document tool
 
 3. WEB RESEARCH (MANDATORY PATTERN when needing current information):
-   Step A1: browser_navigate to the URL
-   Step A2: browser_get_content to extract text content (REQUIRED - never skip this step)
-   Step A3: If content is insufficient or page is dynamic, use browser_screenshot to see visual layout
-   Step A4: If you need more pages, click links and repeat A1-A3
-   Alternative: If browser tools unavailable, use web_search
-   Final: OUTPUT THE FINDINGS AS TEXT summarizing what you extracted
+   FOR EACH SOURCE - process completely before moving to next:
+   Step 1: browser_navigate to URL
+   Step 2: browser_get_content IMMEDIATELY after navigate (these are ONE ATOMIC operation)
+   Step 3: Process and store the relevant information
+   Step 4: Repeat steps 1-3 for additional sources
+   Step 5: Compile all findings into your response
 
-   CRITICAL: NEVER navigate to a page and then ask the user for content. You have the tools - USE THEM.
+   If content is insufficient: use browser_screenshot to see visual layout
+   If browser tools unavailable: use web_search as alternative
+
+   CRITICAL:
+   - NEVER navigate to multiple pages first and then try to extract. Process each page fully.
+   - NEVER ask the user for content you can extract with browser_get_content.
+   - NEVER say "I opened the pages but need access to the content" - you HAVE access via browser_get_content.
 
 4. FILE ORGANIZATION:
    Step 1: List directory contents to see current structure
@@ -2013,6 +2032,12 @@ IMPORTANT INSTRUCTIONS:
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 
+TOOL CALL STYLE:
+- Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.
+- Narrate only when it helps: multi-step work, complex problems, or sensitive actions (e.g., deletions).
+- Keep narration brief and value-dense; avoid repeating obvious steps.
+- For web research: navigate and extract in rapid succession without commentary between each step.
+
 AUTONOMOUS OPERATION (CRITICAL):
 - You are an AUTONOMOUS agent. You have tools to gather information yourself.
 - NEVER ask the user to provide content, URLs, or data that you can extract using your available tools.
@@ -2028,19 +2053,27 @@ CRITICAL - FINAL ANSWER REQUIREMENT:
 - After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
 WEB ACCESS & CONTENT EXTRACTION (CRITICAL):
-- After browser_navigate, you MUST call browser_get_content to read the page text.
-- NEVER navigate to a page and then stop or ask the user for content. YOU extract the content using your tools.
+- Treat browser_navigate + browser_get_content as ONE ATOMIC OPERATION. Never navigate without immediately extracting.
+- For EACH page you visit: navigate -> browser_get_content -> process the result. Then move to next page.
 - If browser_get_content returns insufficient info, use browser_screenshot to see the visual layout.
 - For dynamic content (JavaScript-heavy pages), wait with browser_wait then try browser_get_content again.
 - If browser tools are unavailable, use web_search as an alternative.
 - NEVER use run_command with curl, wget, or other network commands.
-- NEVER say "I can't extract the content" or "please provide the content" when you have browser_get_content available.
+
+MULTI-PAGE RESEARCH PATTERN:
+- When researching from multiple sources, process each source COMPLETELY before moving to the next:
+  1. browser_navigate to source 1 -> browser_get_content -> extract relevant info
+  2. browser_navigate to source 2 -> browser_get_content -> extract relevant info
+  3. browser_navigate to source 3 -> browser_get_content -> extract relevant info
+  4. Compile findings from all sources into your response
+- Do NOT navigate to all sources first and then try to extract. Process each one fully.
 
 ANTI-PATTERNS (NEVER DO THESE):
+- DO NOT: Navigate to multiple pages without extracting content from each
 - DO NOT: Navigate to page then ask user for URLs or content
 - DO NOT: Open multiple sources then claim you can't access them
 - DO NOT: Say "I need access to the articles" when you already navigated there
-- DO: Navigate -> browser_get_content -> Extract info -> Summarize findings
+- DO: Navigate -> browser_get_content -> process -> repeat for each source -> summarize all findings
 
 CRITICAL TOOL PARAMETER REQUIREMENTS:
 - edit_document: MUST provide 'sourcePath' (path to existing DOCX file) and 'newContent' (array of content blocks)
@@ -2453,6 +2486,12 @@ IMPORTANT INSTRUCTIONS:
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 
+TOOL CALL STYLE:
+- Default: do NOT narrate routine, low-risk tool calls. Just call the tool silently.
+- Narrate only when it helps: multi-step work, complex problems, or sensitive actions (e.g., deletions).
+- Keep narration brief and value-dense; avoid repeating obvious steps.
+- For web research: navigate and extract in rapid succession without commentary between each step.
+
 AUTONOMOUS OPERATION (CRITICAL):
 - You are an AUTONOMOUS agent. You have tools to gather information yourself.
 - NEVER ask the user to provide content, URLs, or data that you can extract using your available tools.
@@ -2468,18 +2507,25 @@ CRITICAL - FINAL ANSWER REQUIREMENT:
 - After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
 WEB ACCESS & CONTENT EXTRACTION (CRITICAL):
-- After browser_navigate, you MUST call browser_get_content to read the page text.
-- NEVER navigate to a page and then stop or ask the user for content. YOU extract the content using your tools.
+- Treat browser_navigate + browser_get_content as ONE ATOMIC OPERATION. Never navigate without immediately extracting.
+- For EACH page you visit: navigate -> browser_get_content -> process the result. Then move to next page.
 - If browser_get_content returns insufficient info, use browser_screenshot to see the visual layout.
 - If browser tools are unavailable, use web_search as an alternative.
 - NEVER use run_command with curl, wget, or other network commands.
-- NEVER say "I can't extract the content" or "please provide the content" when you have browser_get_content available.
+
+MULTI-PAGE RESEARCH PATTERN:
+- When researching from multiple sources, process each source COMPLETELY before moving to the next:
+  1. browser_navigate to source 1 -> browser_get_content -> extract relevant info
+  2. browser_navigate to source 2 -> browser_get_content -> extract relevant info
+  3. Compile findings from all sources into your response
+- Do NOT navigate to all sources first and then try to extract. Process each one fully.
 
 ANTI-PATTERNS (NEVER DO THESE):
+- DO NOT: Navigate to multiple pages without extracting content from each
 - DO NOT: Navigate to page then ask user for URLs or content
 - DO NOT: Open multiple sources then claim you can't access them
 - DO NOT: Say "I need access to the articles" when you already navigated there
-- DO: Navigate -> browser_get_content -> Extract info -> Summarize findings
+- DO: Navigate -> browser_get_content -> process -> repeat for each source -> summarize all findings
 
 EFFICIENCY RULES (CRITICAL):
 - DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
@@ -2489,10 +2535,17 @@ EFFICIENCY RULES (CRITICAL):
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 
+    // Build message with knowledge context from previous steps
+    let messageWithContext = message;
+    const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
+    if (knowledgeSummary) {
+      messageWithContext = `${message}\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this context):\n${knowledgeSummary}`;
+    }
+
     // Add user message to conversation history
     this.conversationHistory.push({
       role: 'user',
-      content: message,
+      content: messageWithContext,
     });
 
     let messages = this.conversationHistory;

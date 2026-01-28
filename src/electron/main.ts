@@ -9,6 +9,7 @@ import { ChannelGateway } from './gateway';
 import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
+import { MCPClientManager } from './mcp/client/MCPClientManager';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -84,6 +85,16 @@ app.whenReady().then(async () => {
   agentDaemon = new AgentDaemon(dbManager);
   await agentDaemon.initialize();
 
+  // Initialize MCP Client Manager - auto-connects enabled servers on startup
+  try {
+    const mcpClientManager = MCPClientManager.getInstance();
+    await mcpClientManager.initialize();
+    console.log('[Main] MCP Client Manager initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize MCP Client Manager:', error);
+    // Don't fail app startup if MCP init fails
+  }
+
   // Initialize channel gateway with agent daemon for task processing
   channelGateway = new ChannelGateway(dbManager.getDatabase(), {
     autoConnect: true, // Auto-connect enabled channels on startup
@@ -136,6 +147,13 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   if (channelGateway) {
     await channelGateway.shutdown();
+  }
+  // Disconnect all MCP servers
+  try {
+    const mcpClientManager = MCPClientManager.getInstance();
+    await mcpClientManager.shutdown();
+  } catch (error) {
+    console.error('[Main] Failed to shutdown MCP servers:', error);
   }
   if (dbManager) {
     dbManager.close();
