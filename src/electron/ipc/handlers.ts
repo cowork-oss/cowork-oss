@@ -51,6 +51,7 @@ import { MCPSettingsManager } from '../mcp/settings';
 import { MCPClientManager } from '../mcp/client/MCPClientManager';
 import { MCPRegistryManager } from '../mcp/registry/MCPRegistryManager';
 import { MCPHostServer } from '../mcp/host/MCPHostServer';
+import { BuiltinToolsSettingsManager } from '../agent/tools/builtin-settings';
 import {
   MCPServerConfigSchema,
   MCPServerUpdateSchema,
@@ -1237,5 +1238,23 @@ function setupMCPHandlers(): void {
       running: hostServer.isRunning(),
       toolCount: hostServer.hasToolProvider() ? MCPClientManager.getInstance().getAllTools().length : 0,
     };
+  });
+
+  // =====================
+  // Built-in Tools Settings Handlers
+  // =====================
+
+  ipcMain.handle(IPC_CHANNELS.BUILTIN_TOOLS_GET_SETTINGS, async () => {
+    return BuiltinToolsSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.BUILTIN_TOOLS_SAVE_SETTINGS, async (_, settings) => {
+    BuiltinToolsSettingsManager.saveSettings(settings);
+    BuiltinToolsSettingsManager.clearCache(); // Clear cache to force reload
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES, async () => {
+    return BuiltinToolsSettingsManager.getToolsByCategory();
   });
 }

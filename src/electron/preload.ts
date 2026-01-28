@@ -104,6 +104,10 @@ const IPC_CHANNELS = {
   MCP_HOST_START: 'mcp:hostStart',
   MCP_HOST_STOP: 'mcp:hostStop',
   MCP_HOST_GET_STATUS: 'mcp:hostGetStatus',
+  // Built-in Tools Settings
+  BUILTIN_TOOLS_GET_SETTINGS: 'builtinTools:getSettings',
+  BUILTIN_TOOLS_SAVE_SETTINGS: 'builtinTools:saveSettings',
+  BUILTIN_TOOLS_GET_CATEGORIES: 'builtinTools:getCategories',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -205,6 +209,27 @@ interface MCPUpdateInfo {
   currentVersion: string;
   latestVersion: string;
   registryEntry: MCPRegistryEntry;
+}
+
+// Built-in Tools Settings types (inlined for sandboxed preload)
+interface ToolCategoryConfig {
+  enabled: boolean;
+  priority: 'high' | 'normal' | 'low';
+  description?: string;
+}
+
+interface BuiltinToolsSettings {
+  categories: {
+    browser: ToolCategoryConfig;
+    search: ToolCategoryConfig;
+    system: ToolCategoryConfig;
+    file: ToolCategoryConfig;
+    skill: ToolCategoryConfig;
+    shell: ToolCategoryConfig;
+    image: ToolCategoryConfig;
+  };
+  toolOverrides: Record<string, { enabled: boolean; priority?: 'high' | 'normal' | 'low' }>;
+  version: string;
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -388,6 +413,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startMCPHost: (port?: number) => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_START, port),
   stopMCPHost: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_STOP),
   getMCPHostStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_HOST_GET_STATUS),
+
+  // Built-in Tools Settings APIs
+  getBuiltinToolsSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_SETTINGS),
+  saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_SAVE_SETTINGS, settings),
+  getBuiltinToolsCategories: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES),
 });
 
 // Type declarations for TypeScript
@@ -597,6 +627,10 @@ export interface ElectronAPI {
   startMCPHost: (port?: number) => Promise<{ success: boolean; port?: number }>;
   stopMCPHost: () => Promise<void>;
   getMCPHostStatus: () => Promise<{ running: boolean; port?: number }>;
+  // Built-in Tools Settings
+  getBuiltinToolsSettings: () => Promise<BuiltinToolsSettings>;
+  saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => Promise<{ success: boolean }>;
+  getBuiltinToolsCategories: () => Promise<Record<string, string[]>>;
 }
 
 declare global {
