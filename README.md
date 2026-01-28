@@ -1220,6 +1220,23 @@ Example: If an MCP server provides a `read_file` tool, it appears as `mcp_read_f
 
 ---
 
+## About This Project
+
+**This entire application was built without writing a single line of code manually.**
+
+I "vibe-coded" CoWork-OSS from start to finish using AI coding assistants — primarily [Claude Code](https://claude.ai/claude-code) and OpenAI Codex. Every feature, every component, every bug fix was generated through conversations with AI. Yes, it burned through quite a lot of USD in API costs.
+
+I built this tool entirely for my own use — to automate repetitive tasks on my Mac with an AI agent I could trust to stay within boundaries I set. I have **no commercial expectations** from this project.
+
+I'm releasing it as open source so that:
+- **The community can benefit** from a local-first, privacy-respecting agent workbench
+- **Others can find and fix bugs** that I don't have time to track down myself
+- **Developers can learn** from (or be horrified by) what AI-generated code looks like at scale
+
+If you find bugs, please [open an issue](https://github.com/mesutfelat/cowork-oss/issues). If you fix them, even better — PRs are welcome!
+
+---
+
 ## Project Structure
 
 ```
