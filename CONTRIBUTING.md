@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to CoWork-OSS! This document provides guidelines and instructions for contributing.
 
+> **Note:** This entire codebase was AI-generated using Claude Code and OpenAI Codex — no code was written manually. You may encounter AI-typical patterns, inconsistencies, or areas that could use refactoring. Fresh eyes and improvements are very welcome!
+
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
