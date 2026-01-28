@@ -125,6 +125,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Open applications, URLs, and file paths
   - Show files in Finder
   - Get system information and environment variables
+  - **Run AppleScript** - Execute AppleScript to automate macOS apps and system tasks
 - **Update Notifications**: Automatic check for new releases with in-app notification banner
 - **Custom Skills**: Create and manage your own skills with custom prompts and tool configurations
   - Define reusable workflows as custom skills

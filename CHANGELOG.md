@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **AppleScript Execution** - New `run_applescript` system tool for macOS automation
+  - Execute AppleScript code to control applications and automate system tasks
+  - Control apps like Safari, Finder, Mail, and more
+  - Manage windows, click UI elements, send keystrokes
+  - Get/set system preferences and interact with files
+  - 30-second timeout with 1MB output buffer
+  - macOS only (graceful error on other platforms)
 - **Configurable Guardrails** - User-configurable safety limits in Settings > Guardrails
   - **Token Budget**: Limit total tokens per task (default: 100,000, range: 1K-10M)
   - **Cost Budget**: Limit estimated cost per task (default: $1.00, disabled by default)
