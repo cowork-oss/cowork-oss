@@ -50,6 +50,7 @@ export class AgentDaemon extends EventEmitter {
       emitQueueUpdate: (status: QueueStatus) => this.emitQueueUpdate(status),
       getTaskById: (taskId: string) => this.taskRepo.findById(taskId),
       updateTaskStatus: (taskId: string, status: TaskStatus) => this.taskRepo.update(taskId, { status }),
+      onTaskTimeout: (taskId: string) => this.handleTaskTimeout(taskId),
     });
 
     // Start periodic cleanup of old executors
@@ -499,6 +500,36 @@ export class AgentDaemon extends EventEmitter {
 
     // Now clear the queue state
     return this.queueManager.clearStuckTasks();
+  }
+
+  /**
+   * Handle a task that has timed out
+   * Called by queue manager when a task exceeds the configured timeout
+   */
+  async handleTaskTimeout(taskId: string): Promise<void> {
+    console.log(`[AgentDaemon] Task ${taskId} has timed out, cancelling...`);
+
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      try {
+        // Cancel the task (this cleans up browser sessions, etc.)
+        await cached.executor.cancel();
+        this.activeTasks.delete(taskId);
+      } catch (error) {
+        console.error(`[AgentDaemon] Error cancelling timed out task ${taskId}:`, error);
+      }
+    }
+
+    // Update task status to failed with timeout message
+    this.taskRepo.update(taskId, {
+      status: 'failed',
+      error: 'Task timed out - exceeded maximum allowed execution time',
+    });
+
+    // Emit timeout event
+    this.emitTaskEvent(taskId, 'step_timeout', {
+      message: 'Task exceeded maximum execution time and was automatically cancelled',
+    });
   }
 
   /**

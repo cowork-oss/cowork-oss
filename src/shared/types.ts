@@ -501,6 +501,7 @@ export const IPC_CHANNELS = {
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
   QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
+  QUEUE_CLEAR: 'queue:clear',
   QUEUE_UPDATE: 'queue:update',
 
   // MCP (Model Context Protocol)
@@ -819,7 +820,8 @@ export interface AppVersionInfo {
 
 // Task Queue types
 export interface QueueSettings {
-  maxConcurrentTasks: number;  // Default: 3, min: 1, max: 10
+  maxConcurrentTasks: number;  // Default: 5, min: 1, max: 10
+  taskTimeoutMinutes: number;  // Default: 30, min: 5, max: 240 (4 hours). Auto-clear stuck tasks after this time.
 }
 
 export interface QueueStatus {
@@ -831,7 +833,8 @@ export interface QueueStatus {
 }
 
 export const DEFAULT_QUEUE_SETTINGS: QueueSettings = {
-  maxConcurrentTasks: 3,
+  maxConcurrentTasks: 5,
+  taskTimeoutMinutes: 30,
 };
 
 // Toast notification types for UI

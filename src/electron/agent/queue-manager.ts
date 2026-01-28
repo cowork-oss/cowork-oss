@@ -18,21 +18,37 @@ type DaemonCallbacks = {
   emitQueueUpdate: (status: QueueStatus) => void;
   getTaskById: (taskId: string) => Task | undefined;
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
+  onTaskTimeout: (taskId: string) => Promise<void>;  // Called when a task times out
 };
 
 export class TaskQueueManager {
   private queuedTaskIds: string[] = [];           // FIFO queue of task IDs
   private runningTaskIds: Set<string> = new Set(); // Currently executing task IDs
+  private taskStartTimes: Map<string, number> = new Map(); // Track when each task started
   private settings: QueueSettings;
   private settingsPath: string;
   private callbacks: DaemonCallbacks;
   private initialized: boolean = false;
+  private timeoutCheckInterval?: ReturnType<typeof setInterval>;
 
   constructor(callbacks: DaemonCallbacks) {
     this.callbacks = callbacks;
     const userDataPath = app.getPath('userData');
     this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
     this.settings = this.loadSettings();
+
+    // Start periodic timeout check (every minute)
+    this.timeoutCheckInterval = setInterval(() => this.checkForTimedOutTasks(), 60 * 1000);
+  }
+
+  /**
+   * Cleanup resources (call on shutdown)
+   */
+  destroy(): void {
+    if (this.timeoutCheckInterval) {
+      clearInterval(this.timeoutCheckInterval);
+      this.timeoutCheckInterval = undefined;
+    }
   }
 
   /**
@@ -91,8 +107,9 @@ export class TaskQueueManager {
   async onTaskFinished(taskId: string): Promise<void> {
     console.log(`[TaskQueueManager] Task ${taskId} finished`);
 
-    // Remove from running set
+    // Remove from running set and clear start time
     this.runningTaskIds.delete(taskId);
+    this.taskStartTimes.delete(taskId);
 
     // Process next task in queue
     await this.processQueue();
@@ -141,8 +158,9 @@ export class TaskQueueManager {
 
     console.log(`[TaskQueueManager] Clearing ${clearedRunning} running tasks and ${clearedQueued} queued tasks`);
 
-    // Clear running tasks
+    // Clear running tasks and their start times
     this.runningTaskIds.clear();
+    this.taskStartTimes.clear();
 
     // Clear queued tasks
     this.queuedTaskIds = [];
@@ -180,6 +198,11 @@ export class TaskQueueManager {
     // Validate maxConcurrentTasks
     if (newSettings.maxConcurrentTasks !== undefined) {
       newSettings.maxConcurrentTasks = Math.max(1, Math.min(10, newSettings.maxConcurrentTasks));
+    }
+
+    // Validate taskTimeoutMinutes (5 min to 4 hours)
+    if (newSettings.taskTimeoutMinutes !== undefined) {
+      newSettings.taskTimeoutMinutes = Math.max(5, Math.min(240, newSettings.taskTimeoutMinutes));
     }
 
     this.settings = { ...this.settings, ...newSettings };
@@ -227,6 +250,7 @@ export class TaskQueueManager {
    */
   private async startTask(task: Task): Promise<void> {
     this.runningTaskIds.add(task.id);
+    this.taskStartTimes.set(task.id, Date.now());
     this.emitQueueUpdate();
 
     try {
@@ -234,6 +258,7 @@ export class TaskQueueManager {
     } catch (error) {
       console.error(`[TaskQueueManager] Failed to start task ${task.id}:`, error);
       this.runningTaskIds.delete(task.id);
+      this.taskStartTimes.delete(task.id);
       this.emitQueueUpdate();
     }
   }
@@ -243,6 +268,48 @@ export class TaskQueueManager {
    */
   private emitQueueUpdate(): void {
     this.callbacks.emitQueueUpdate(this.getStatus());
+  }
+
+  /**
+   * Check for tasks that have exceeded the timeout and clear them
+   */
+  private async checkForTimedOutTasks(): Promise<void> {
+    const now = Date.now();
+    const timeoutMs = this.settings.taskTimeoutMinutes * 60 * 1000;
+    const timedOutTasks: string[] = [];
+
+    // Find tasks that have exceeded the timeout
+    for (const [taskId, startTime] of this.taskStartTimes) {
+      const elapsed = now - startTime;
+      if (elapsed > timeoutMs) {
+        const elapsedMinutes = Math.round(elapsed / 60000);
+        console.log(`[TaskQueueManager] Task ${taskId} has timed out (running for ${elapsedMinutes} minutes, timeout: ${this.settings.taskTimeoutMinutes} minutes)`);
+        timedOutTasks.push(taskId);
+      }
+    }
+
+    // Process timed out tasks
+    for (const taskId of timedOutTasks) {
+      try {
+        // Notify daemon to handle the timeout (cancel task, cleanup resources)
+        await this.callbacks.onTaskTimeout(taskId);
+
+        // Remove from tracking (daemon will call onTaskFinished which also removes, but do it here just in case)
+        this.runningTaskIds.delete(taskId);
+        this.taskStartTimes.delete(taskId);
+      } catch (error) {
+        console.error(`[TaskQueueManager] Error handling timeout for task ${taskId}:`, error);
+        // Force remove from tracking even if daemon callback fails
+        this.runningTaskIds.delete(taskId);
+        this.taskStartTimes.delete(taskId);
+      }
+    }
+
+    // If any tasks were cleared, process the queue and emit update
+    if (timedOutTasks.length > 0) {
+      await this.processQueue();
+      this.emitQueueUpdate();
+    }
   }
 
   /**

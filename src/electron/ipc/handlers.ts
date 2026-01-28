@@ -1054,6 +1054,12 @@ export function setupIpcHandlers(
     return { success: true };
   });
 
+  ipcMain.handle(IPC_CHANNELS.QUEUE_CLEAR, async () => {
+    checkRateLimit(IPC_CHANNELS.QUEUE_CLEAR);
+    const result = await agentDaemon.clearStuckTasks();
+    return { success: true, ...result };
+  });
+
   // MCP handlers
   setupMCPHandlers();
 }

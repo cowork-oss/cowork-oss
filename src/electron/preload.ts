@@ -67,6 +67,7 @@ const IPC_CHANNELS = {
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
   QUEUE_SAVE_SETTINGS: 'queue:saveSettings',
+  QUEUE_CLEAR: 'queue:clear',
   QUEUE_UPDATE: 'queue:update',
   // Custom User Skills
   CUSTOM_SKILL_LIST: 'customSkill:list',
@@ -335,6 +336,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
   getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
   saveQueueSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_SAVE_SETTINGS, settings),
+  clearQueue: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_CLEAR),
   onQueueUpdate: (callback: (status: any) => void) => {
     const subscription = (_: any, data: any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.QUEUE_UPDATE, subscription);
@@ -549,8 +551,10 @@ export interface ElectronAPI {
   }>;
   getQueueSettings: () => Promise<{
     maxConcurrentTasks: number;
+    taskTimeoutMinutes: number;
   }>;
-  saveQueueSettings: (settings: { maxConcurrentTasks?: number }) => Promise<{ success: boolean }>;
+  saveQueueSettings: (settings: { maxConcurrentTasks?: number; taskTimeoutMinutes?: number }) => Promise<{ success: boolean }>;
+  clearQueue: () => Promise<{ success: boolean; clearedRunning: number; clearedQueued: number }>;
   onQueueUpdate: (callback: (status: {
     runningCount: number;
     queuedCount: number;
