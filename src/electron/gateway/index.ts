@@ -437,7 +437,7 @@ export class ChannelGateway {
   /**
    * Generate a pairing code for a user
    */
-  generatePairingCode(channelId: string, userId: string, displayName?: string): string {
+  generatePairingCode(channelId: string, userId?: string, displayName?: string): string {
     const channel = this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error('Channel not found');
