@@ -91,13 +91,28 @@ export class WorkspaceRepository {
 
   private mapRowToWorkspace(row: any): Workspace {
     // Note: network is true by default for browser tools (web access)
-    const defaultPermissions: WorkspacePermissions = { read: true, write: false, delete: false, network: true, shell: false };
+    const defaultPermissions: WorkspacePermissions = { read: true, write: true, delete: false, network: true, shell: false };
+    const storedPermissions = safeJsonParse(row.permissions, defaultPermissions, 'workspace.permissions');
+
+    // Merge with defaults to ensure new fields (like network) get proper defaults
+    // for workspaces created before those fields existed
+    const mergedPermissions: WorkspacePermissions = {
+      ...defaultPermissions,
+      ...storedPermissions,
+    };
+
+    // Migration: if network was explicitly false (old default), upgrade it to true
+    // This ensures existing workspaces get browser tool access
+    if (storedPermissions.network === false) {
+      mergedPermissions.network = true;
+    }
+
     return {
       id: row.id,
       name: row.name,
       path: row.path,
       createdAt: row.created_at,
-      permissions: safeJsonParse(row.permissions, defaultPermissions, 'workspace.permissions'),
+      permissions: mergedPermissions,
     };
   }
 }
