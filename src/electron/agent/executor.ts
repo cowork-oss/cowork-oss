@@ -91,6 +91,20 @@ function isInputDependentError(errorMessage: string): boolean {
 }
 
 /**
+ * Get current date formatted for system prompts
+ * Returns: "Tuesday, January 28, 2026"
+ */
+function getCurrentDateString(): string {
+  const now = new Date();
+  return now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+
+/**
  * Check if the assistant's response is asking a question and waiting for user input
  */
 function isAskingQuestion(text: string): boolean {
@@ -1262,9 +1276,12 @@ export class TaskExecutor {
 
     // Set system prompt
     this.systemPrompt = `You are an AI assistant helping with tasks. Use the available tools to complete the work.
+Today's date: ${getCurrentDateString()}
 Workspace: ${this.workspace.path}
 Always ask for approval before deleting files or making destructive changes.
 Be concise in your responses. When reading files, only read what you need.
+
+WEB ACCESS: To access the internet, use browser_navigate to visit URLs directly. This is the most reliable method for fetching web content.
 
 You are continuing a previous conversation. The context from the previous conversation has been provided.`;
   }
@@ -1642,6 +1659,7 @@ You are continuing a previous conversation. The context from the previous conver
 3. Execute each step using the available tools
 4. Produce high-quality outputs
 
+Today's date: ${getCurrentDateString()}
 You have access to a workspace folder at: ${this.workspace.path}
 Workspace permissions: ${JSON.stringify(this.workspace.permissions)}
 
@@ -1655,6 +1673,11 @@ PLANNING RULES:
 - DO NOT plan to create multiple versions of files - pick ONE target file.
 - DO NOT plan to read the same file multiple times in different steps.
 
+WEB ACCESS (IMPORTANT):
+- To access the internet, use browser_navigate to visit URLs directly. This is the primary method for web content.
+- If web_search tool is available, use it for searching. Otherwise, use browser_navigate to go to search engines or specific sites.
+- NEVER use run_command with curl, wget, or other network commands for web access. Always use browser tools.
+
 COMMON WORKFLOWS (follow these patterns):
 
 1. MODIFY EXISTING DOCUMENT (CRITICAL):
@@ -1667,7 +1690,12 @@ COMMON WORKFLOWS (follow these patterns):
    Step 1: Gather/research the required information
    Step 2: Create the document with create_document tool
 
-3. FILE ORGANIZATION:
+3. WEB RESEARCH (when needing current information):
+   Step 1: Use browser_navigate to visit relevant websites or search engines
+   Step 2: Use browser_get_content to extract information from the page
+   Step 3: Process the gathered information
+
+4. FILE ORGANIZATION:
    Step 1: List directory contents to see current structure
    Step 2: Create necessary directories
    Step 3: Move/rename files as needed
@@ -1968,6 +1996,7 @@ Format your plan as a JSON object with this structure:
 
     // Define system prompt once so we can track its token usage
     this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
+Today's date: ${getCurrentDateString()}
 Workspace: ${this.workspace.path}
 
 IMPORTANT INSTRUCTIONS:
@@ -1975,6 +2004,10 @@ IMPORTANT INSTRUCTIONS:
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 - After completing the work, provide a brief summary of what was done.
+
+WEB ACCESS:
+- To access the internet, use browser_navigate to visit URLs directly.
+- NEVER use run_command with curl, wget, or other network commands. Always use browser tools.
 
 CRITICAL TOOL PARAMETER REQUIREMENTS:
 - edit_document: MUST provide 'sourcePath' (path to existing DOCX file) and 'newContent' (array of content blocks)
@@ -2379,6 +2412,7 @@ ADAPTIVE PLANNING:
     // Ensure system prompt is set
     if (!this.systemPrompt) {
       this.systemPrompt = `You are an autonomous task executor. Use the available tools to complete each step.
+Today's date: ${getCurrentDateString()}
 Workspace: ${this.workspace.path}
 
 IMPORTANT INSTRUCTIONS:
@@ -2386,6 +2420,10 @@ IMPORTANT INSTRUCTIONS:
 - The delete_file tool has a built-in approval mechanism that will prompt the user. Just call the tool directly.
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 - After completing the work, provide a brief summary of what was done.
+
+WEB ACCESS:
+- To access the internet, use browser_navigate to visit URLs directly.
+- NEVER use run_command with curl, wget, or other network commands. Always use browser tools.
 
 EFFICIENCY RULES (CRITICAL):
 - DO NOT read the same file multiple times. If you've already read a file, use the content from memory.
