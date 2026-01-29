@@ -36,6 +36,8 @@ import {
   CallbackQuery,
   CallbackQueryHandler,
   InlineKeyboardButton,
+  Poll,
+  ReplyKeyboard,
 } from './types';
 
 /**
@@ -1171,6 +1173,227 @@ export class TelegramAdapter implements ChannelAdapter {
       await this.bot.api.editMessageReplyMarkup(chatId, msgId, options);
     }
   }
+
+  // ============================================================================
+  // Extended Features
+  // ============================================================================
+
+  /**
+   * Send typing indicator (chat action)
+   */
+  async sendTyping(chatId: string, threadId?: string): Promise<void> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const options: Record<string, unknown> = {};
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    await this.bot.api.sendChatAction(chatId, 'typing', options);
+  }
+
+  /**
+   * Add reaction to a message
+   */
+  async addReaction(chatId: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const msgId = parseInt(messageId, 10);
+    await this.bot.api.setMessageReaction(chatId, msgId, {
+      reaction: [{ type: 'emoji', emoji }],
+    });
+  }
+
+  /**
+   * Remove reaction from a message
+   */
+  async removeReaction(chatId: string, messageId: string): Promise<void> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const msgId = parseInt(messageId, 10);
+    await this.bot.api.setMessageReaction(chatId, msgId, {
+      reaction: [],
+    });
+  }
+
+  /**
+   * Send a poll
+   */
+  async sendPoll(chatId: string, poll: Poll, threadId?: string): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const options: Record<string, unknown> = {
+      is_anonymous: poll.isAnonymous ?? true,
+      allows_multiple_answers: poll.allowsMultipleAnswers ?? false,
+    };
+
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    if (poll.type === 'quiz' && poll.correctOptionId !== undefined) {
+      options.type = 'quiz';
+      options.correct_option_id = poll.correctOptionId;
+      if (poll.explanation) {
+        options.explanation = poll.explanation;
+      }
+    }
+
+    if (poll.openPeriod) {
+      options.open_period = poll.openPeriod;
+    } else if (poll.closeDate) {
+      options.close_date = Math.floor(poll.closeDate.getTime() / 1000);
+    }
+
+    const sent = await this.bot.api.sendPoll(
+      chatId,
+      poll.question,
+      poll.options.map(o => o.text),
+      options
+    );
+
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Send message with reply keyboard (persistent keyboard below input)
+   */
+  async sendWithReplyKeyboard(
+    chatId: string,
+    text: string,
+    keyboard: ReplyKeyboard,
+    threadId?: string
+  ): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const replyMarkup = {
+      keyboard: keyboard.buttons.map(row =>
+        row.map(btn => ({
+          text: btn.text,
+          request_contact: btn.requestContact,
+          request_location: btn.requestLocation,
+        }))
+      ),
+      resize_keyboard: keyboard.resizeKeyboard ?? true,
+      one_time_keyboard: keyboard.oneTimeKeyboard ?? false,
+      input_field_placeholder: keyboard.inputPlaceholder,
+    };
+
+    const options: Record<string, unknown> = {
+      reply_markup: replyMarkup,
+    };
+
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    const sent = await this.bot.api.sendMessage(chatId, text, options);
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Remove reply keyboard (send message that hides the keyboard)
+   */
+  async removeReplyKeyboard(chatId: string, text: string, threadId?: string): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const options: Record<string, unknown> = {
+      reply_markup: { remove_keyboard: true },
+    };
+
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    const sent = await this.bot.api.sendMessage(chatId, text, options);
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Send a sticker
+   */
+  async sendSticker(chatId: string, stickerId: string, threadId?: string): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const options: Record<string, unknown> = {};
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    const sent = await this.bot.api.sendSticker(chatId, stickerId, options);
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Send location
+   */
+  async sendLocation(
+    chatId: string,
+    latitude: number,
+    longitude: number,
+    threadId?: string
+  ): Promise<string> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const options: Record<string, unknown> = {};
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    const sent = await this.bot.api.sendLocation(chatId, latitude, longitude, options);
+    return sent.message_id.toString();
+  }
+
+  /**
+   * Send a media group (album)
+   */
+  async sendMediaGroup(
+    chatId: string,
+    media: Array<{ type: 'photo' | 'video'; filePath: string; caption?: string }>,
+    threadId?: string
+  ): Promise<string[]> {
+    if (!this.bot || this._status !== 'connected') {
+      throw new Error('Telegram bot is not connected');
+    }
+
+    const inputMedia = media.map((m, index) => {
+      const fileBuffer = fs.readFileSync(m.filePath);
+      const fileName = path.basename(m.filePath);
+      return {
+        type: m.type,
+        media: new InputFile(fileBuffer, fileName),
+        caption: index === 0 ? m.caption : undefined, // Caption on first item only
+      };
+    });
+
+    const options: Record<string, unknown> = {};
+    if (threadId) {
+      options.message_thread_id = parseInt(threadId, 10);
+    }
+
+    const sent = await this.bot.api.sendMediaGroup(chatId, inputMedia as any, options);
+    return sent.map(m => m.message_id.toString());
+  }
+
+  // ============================================================================
+  // Handler Registration
+  // ============================================================================
 
   /**
    * Register an error handler

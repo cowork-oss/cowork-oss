@@ -1046,3 +1046,592 @@ export class ChannelMessageRepository {
     };
   }
 }
+
+// ============================================================
+// Gateway Infrastructure Repositories
+// ============================================================
+
+export interface QueuedMessage {
+  id: string;
+  channelType: string;
+  chatId: string;
+  message: Record<string, unknown>;
+  priority: number;
+  status: 'pending' | 'processing' | 'sent' | 'failed';
+  attempts: number;
+  maxAttempts: number;
+  lastAttemptAt?: number;
+  error?: string;
+  createdAt: number;
+  scheduledAt?: number;
+}
+
+export interface ScheduledMessage {
+  id: string;
+  channelType: string;
+  chatId: string;
+  message: Record<string, unknown>;
+  scheduledAt: number;
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  sentMessageId?: string;
+  error?: string;
+  createdAt: number;
+}
+
+export interface DeliveryRecord {
+  id: string;
+  channelType: string;
+  chatId: string;
+  messageId: string;
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  sentAt?: number;
+  deliveredAt?: number;
+  readAt?: number;
+  error?: string;
+  createdAt: number;
+}
+
+export interface RateLimitRecord {
+  id: string;
+  channelType: string;
+  userId: string;
+  messageCount: number;
+  windowStart: number;
+  isLimited: boolean;
+  limitExpiresAt?: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: number;
+  action: string;
+  channelType?: string;
+  userId?: string;
+  chatId?: string;
+  details?: Record<string, unknown>;
+  severity: 'debug' | 'info' | 'warn' | 'error';
+}
+
+export class MessageQueueRepository {
+  constructor(private db: Database.Database) {}
+
+  enqueue(item: Omit<QueuedMessage, 'id' | 'createdAt' | 'attempts' | 'status'>): QueuedMessage {
+    const newItem: QueuedMessage = {
+      ...item,
+      id: uuidv4(),
+      status: 'pending',
+      attempts: 0,
+      createdAt: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO message_queue (id, channel_type, chat_id, message, priority, status, attempts, max_attempts, last_attempt_at, error, created_at, scheduled_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newItem.id,
+      newItem.channelType,
+      newItem.chatId,
+      JSON.stringify(newItem.message),
+      newItem.priority,
+      newItem.status,
+      newItem.attempts,
+      newItem.maxAttempts,
+      newItem.lastAttemptAt || null,
+      newItem.error || null,
+      newItem.createdAt,
+      newItem.scheduledAt || null
+    );
+
+    return newItem;
+  }
+
+  update(id: string, updates: Partial<QueuedMessage>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.status !== undefined) {
+      fields.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.attempts !== undefined) {
+      fields.push('attempts = ?');
+      values.push(updates.attempts);
+    }
+    if (updates.lastAttemptAt !== undefined) {
+      fields.push('last_attempt_at = ?');
+      values.push(updates.lastAttemptAt);
+    }
+    if (updates.error !== undefined) {
+      fields.push('error = ?');
+      values.push(updates.error);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(`UPDATE message_queue SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findPending(limit = 50): QueuedMessage[] {
+    const now = Date.now();
+    const stmt = this.db.prepare(`
+      SELECT * FROM message_queue
+      WHERE status = 'pending' AND (scheduled_at IS NULL OR scheduled_at <= ?)
+      ORDER BY priority DESC, created_at ASC
+      LIMIT ?
+    `);
+    const rows = stmt.all(now, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToItem(row));
+  }
+
+  findById(id: string): QueuedMessage | undefined {
+    const stmt = this.db.prepare('SELECT * FROM message_queue WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToItem(row) : undefined;
+  }
+
+  delete(id: string): void {
+    const stmt = this.db.prepare('DELETE FROM message_queue WHERE id = ?');
+    stmt.run(id);
+  }
+
+  deleteOld(olderThanMs: number): number {
+    const cutoff = Date.now() - olderThanMs;
+    const stmt = this.db.prepare("DELETE FROM message_queue WHERE status IN ('sent', 'failed') AND created_at < ?");
+    const result = stmt.run(cutoff);
+    return result.changes;
+  }
+
+  private mapRowToItem(row: Record<string, unknown>): QueuedMessage {
+    return {
+      id: row.id as string,
+      channelType: row.channel_type as string,
+      chatId: row.chat_id as string,
+      message: safeJsonParse(row.message as string, {}, 'queue.message'),
+      priority: row.priority as number,
+      status: row.status as QueuedMessage['status'],
+      attempts: row.attempts as number,
+      maxAttempts: row.max_attempts as number,
+      lastAttemptAt: (row.last_attempt_at as number) || undefined,
+      error: (row.error as string) || undefined,
+      createdAt: row.created_at as number,
+      scheduledAt: (row.scheduled_at as number) || undefined,
+    };
+  }
+}
+
+export class ScheduledMessageRepository {
+  constructor(private db: Database.Database) {}
+
+  create(item: Omit<ScheduledMessage, 'id' | 'createdAt' | 'status'>): ScheduledMessage {
+    const newItem: ScheduledMessage = {
+      ...item,
+      id: uuidv4(),
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO scheduled_messages (id, channel_type, chat_id, message, scheduled_at, status, sent_message_id, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newItem.id,
+      newItem.channelType,
+      newItem.chatId,
+      JSON.stringify(newItem.message),
+      newItem.scheduledAt,
+      newItem.status,
+      newItem.sentMessageId || null,
+      newItem.error || null,
+      newItem.createdAt
+    );
+
+    return newItem;
+  }
+
+  update(id: string, updates: Partial<ScheduledMessage>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.status !== undefined) {
+      fields.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.sentMessageId !== undefined) {
+      fields.push('sent_message_id = ?');
+      values.push(updates.sentMessageId);
+    }
+    if (updates.error !== undefined) {
+      fields.push('error = ?');
+      values.push(updates.error);
+    }
+    if (updates.scheduledAt !== undefined) {
+      fields.push('scheduled_at = ?');
+      values.push(updates.scheduledAt);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(`UPDATE scheduled_messages SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findDue(limit = 50): ScheduledMessage[] {
+    const now = Date.now();
+    const stmt = this.db.prepare(`
+      SELECT * FROM scheduled_messages
+      WHERE status = 'pending' AND scheduled_at <= ?
+      ORDER BY scheduled_at ASC
+      LIMIT ?
+    `);
+    const rows = stmt.all(now, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToItem(row));
+  }
+
+  findById(id: string): ScheduledMessage | undefined {
+    const stmt = this.db.prepare('SELECT * FROM scheduled_messages WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToItem(row) : undefined;
+  }
+
+  findByChatId(channelType: string, chatId: string): ScheduledMessage[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM scheduled_messages
+      WHERE channel_type = ? AND chat_id = ? AND status = 'pending'
+      ORDER BY scheduled_at ASC
+    `);
+    const rows = stmt.all(channelType, chatId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToItem(row));
+  }
+
+  cancel(id: string): void {
+    const stmt = this.db.prepare("UPDATE scheduled_messages SET status = 'cancelled' WHERE id = ? AND status = 'pending'");
+    stmt.run(id);
+  }
+
+  delete(id: string): void {
+    const stmt = this.db.prepare('DELETE FROM scheduled_messages WHERE id = ?');
+    stmt.run(id);
+  }
+
+  private mapRowToItem(row: Record<string, unknown>): ScheduledMessage {
+    return {
+      id: row.id as string,
+      channelType: row.channel_type as string,
+      chatId: row.chat_id as string,
+      message: safeJsonParse(row.message as string, {}, 'scheduled.message'),
+      scheduledAt: row.scheduled_at as number,
+      status: row.status as ScheduledMessage['status'],
+      sentMessageId: (row.sent_message_id as string) || undefined,
+      error: (row.error as string) || undefined,
+      createdAt: row.created_at as number,
+    };
+  }
+}
+
+export class DeliveryTrackingRepository {
+  constructor(private db: Database.Database) {}
+
+  create(item: Omit<DeliveryRecord, 'id' | 'createdAt'>): DeliveryRecord {
+    const newItem: DeliveryRecord = {
+      ...item,
+      id: uuidv4(),
+      createdAt: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO delivery_tracking (id, channel_type, chat_id, message_id, status, sent_at, delivered_at, read_at, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newItem.id,
+      newItem.channelType,
+      newItem.chatId,
+      newItem.messageId,
+      newItem.status,
+      newItem.sentAt || null,
+      newItem.deliveredAt || null,
+      newItem.readAt || null,
+      newItem.error || null,
+      newItem.createdAt
+    );
+
+    return newItem;
+  }
+
+  update(id: string, updates: Partial<DeliveryRecord>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.status !== undefined) {
+      fields.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.sentAt !== undefined) {
+      fields.push('sent_at = ?');
+      values.push(updates.sentAt);
+    }
+    if (updates.deliveredAt !== undefined) {
+      fields.push('delivered_at = ?');
+      values.push(updates.deliveredAt);
+    }
+    if (updates.readAt !== undefined) {
+      fields.push('read_at = ?');
+      values.push(updates.readAt);
+    }
+    if (updates.error !== undefined) {
+      fields.push('error = ?');
+      values.push(updates.error);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(id);
+    const stmt = this.db.prepare(`UPDATE delivery_tracking SET ${fields.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  findByMessageId(messageId: string): DeliveryRecord | undefined {
+    const stmt = this.db.prepare('SELECT * FROM delivery_tracking WHERE message_id = ?');
+    const row = stmt.get(messageId) as Record<string, unknown> | undefined;
+    return row ? this.mapRowToItem(row) : undefined;
+  }
+
+  findByChatId(channelType: string, chatId: string, limit = 50): DeliveryRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM delivery_tracking
+      WHERE channel_type = ? AND chat_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(channelType, chatId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToItem(row));
+  }
+
+  deleteOld(olderThanMs: number): number {
+    const cutoff = Date.now() - olderThanMs;
+    const stmt = this.db.prepare('DELETE FROM delivery_tracking WHERE created_at < ?');
+    const result = stmt.run(cutoff);
+    return result.changes;
+  }
+
+  private mapRowToItem(row: Record<string, unknown>): DeliveryRecord {
+    return {
+      id: row.id as string,
+      channelType: row.channel_type as string,
+      chatId: row.chat_id as string,
+      messageId: row.message_id as string,
+      status: row.status as DeliveryRecord['status'],
+      sentAt: (row.sent_at as number) || undefined,
+      deliveredAt: (row.delivered_at as number) || undefined,
+      readAt: (row.read_at as number) || undefined,
+      error: (row.error as string) || undefined,
+      createdAt: row.created_at as number,
+    };
+  }
+}
+
+export class RateLimitRepository {
+  constructor(private db: Database.Database) {}
+
+  getOrCreate(channelType: string, userId: string): RateLimitRecord {
+    const stmt = this.db.prepare('SELECT * FROM rate_limits WHERE channel_type = ? AND user_id = ?');
+    const row = stmt.get(channelType, userId) as Record<string, unknown> | undefined;
+
+    if (row) {
+      return this.mapRowToItem(row);
+    }
+
+    // Create new record
+    const newItem: RateLimitRecord = {
+      id: uuidv4(),
+      channelType,
+      userId,
+      messageCount: 0,
+      windowStart: Date.now(),
+      isLimited: false,
+    };
+
+    const insertStmt = this.db.prepare(`
+      INSERT INTO rate_limits (id, channel_type, user_id, message_count, window_start, is_limited, limit_expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertStmt.run(
+      newItem.id,
+      newItem.channelType,
+      newItem.userId,
+      newItem.messageCount,
+      newItem.windowStart,
+      newItem.isLimited ? 1 : 0,
+      newItem.limitExpiresAt || null
+    );
+
+    return newItem;
+  }
+
+  update(channelType: string, userId: string, updates: Partial<RateLimitRecord>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.messageCount !== undefined) {
+      fields.push('message_count = ?');
+      values.push(updates.messageCount);
+    }
+    if (updates.windowStart !== undefined) {
+      fields.push('window_start = ?');
+      values.push(updates.windowStart);
+    }
+    if (updates.isLimited !== undefined) {
+      fields.push('is_limited = ?');
+      values.push(updates.isLimited ? 1 : 0);
+    }
+    if (updates.limitExpiresAt !== undefined) {
+      fields.push('limit_expires_at = ?');
+      values.push(updates.limitExpiresAt);
+    }
+
+    if (fields.length === 0) return;
+
+    values.push(channelType, userId);
+    const stmt = this.db.prepare(`UPDATE rate_limits SET ${fields.join(', ')} WHERE channel_type = ? AND user_id = ?`);
+    stmt.run(...values);
+  }
+
+  resetWindow(channelType: string, userId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE rate_limits
+      SET message_count = 0, window_start = ?, is_limited = 0, limit_expires_at = NULL
+      WHERE channel_type = ? AND user_id = ?
+    `);
+    stmt.run(Date.now(), channelType, userId);
+  }
+
+  private mapRowToItem(row: Record<string, unknown>): RateLimitRecord {
+    return {
+      id: row.id as string,
+      channelType: row.channel_type as string,
+      userId: row.user_id as string,
+      messageCount: row.message_count as number,
+      windowStart: row.window_start as number,
+      isLimited: row.is_limited === 1,
+      limitExpiresAt: (row.limit_expires_at as number) || undefined,
+    };
+  }
+}
+
+export class AuditLogRepository {
+  constructor(private db: Database.Database) {}
+
+  log(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): AuditLogEntry {
+    const newEntry: AuditLogEntry = {
+      ...entry,
+      id: uuidv4(),
+      timestamp: Date.now(),
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO audit_log (id, timestamp, action, channel_type, user_id, chat_id, details, severity)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      newEntry.id,
+      newEntry.timestamp,
+      newEntry.action,
+      newEntry.channelType || null,
+      newEntry.userId || null,
+      newEntry.chatId || null,
+      newEntry.details ? JSON.stringify(newEntry.details) : null,
+      newEntry.severity
+    );
+
+    return newEntry;
+  }
+
+  find(options: {
+    action?: string;
+    channelType?: string;
+    userId?: string;
+    chatId?: string;
+    fromTimestamp?: number;
+    toTimestamp?: number;
+    severity?: AuditLogEntry['severity'];
+    limit?: number;
+    offset?: number;
+  }): AuditLogEntry[] {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (options.action) {
+      conditions.push('action = ?');
+      values.push(options.action);
+    }
+    if (options.channelType) {
+      conditions.push('channel_type = ?');
+      values.push(options.channelType);
+    }
+    if (options.userId) {
+      conditions.push('user_id = ?');
+      values.push(options.userId);
+    }
+    if (options.chatId) {
+      conditions.push('chat_id = ?');
+      values.push(options.chatId);
+    }
+    if (options.fromTimestamp) {
+      conditions.push('timestamp >= ?');
+      values.push(options.fromTimestamp);
+    }
+    if (options.toTimestamp) {
+      conditions.push('timestamp <= ?');
+      values.push(options.toTimestamp);
+    }
+    if (options.severity) {
+      conditions.push('severity = ?');
+      values.push(options.severity);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = options.limit || 100;
+    const offset = options.offset || 0;
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM audit_log
+      ${whereClause}
+      ORDER BY timestamp DESC
+      LIMIT ? OFFSET ?
+    `);
+
+    values.push(limit, offset);
+    const rows = stmt.all(...values) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToEntry(row));
+  }
+
+  deleteOld(olderThanMs: number): number {
+    const cutoff = Date.now() - olderThanMs;
+    const stmt = this.db.prepare('DELETE FROM audit_log WHERE timestamp < ?');
+    const result = stmt.run(cutoff);
+    return result.changes;
+  }
+
+  private mapRowToEntry(row: Record<string, unknown>): AuditLogEntry {
+    return {
+      id: row.id as string,
+      timestamp: row.timestamp as number,
+      action: row.action as string,
+      channelType: (row.channel_type as string) || undefined,
+      userId: (row.user_id as string) || undefined,
+      chatId: (row.chat_id as string) || undefined,
+      details: row.details ? safeJsonParse(row.details as string, undefined, 'audit.details') : undefined,
+      severity: row.severity as AuditLogEntry['severity'],
+    };
+  }
+}

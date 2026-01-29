@@ -175,6 +175,87 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_channel_sessions_state ON channel_sessions(state);
       CREATE INDEX IF NOT EXISTS idx_channel_messages_session ON channel_messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_channel_messages_chat ON channel_messages(chat_id);
+
+      -- Gateway Infrastructure Tables
+
+      -- Message Queue for reliable delivery
+      CREATE TABLE IF NOT EXISTS message_queue (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 3,
+        last_attempt_at INTEGER,
+        error TEXT,
+        created_at INTEGER NOT NULL,
+        scheduled_at INTEGER
+      );
+
+      -- Scheduled Messages
+      CREATE TABLE IF NOT EXISTS scheduled_messages (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        scheduled_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        sent_message_id TEXT,
+        error TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      -- Delivery Tracking
+      CREATE TABLE IF NOT EXISTS delivery_tracking (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        sent_at INTEGER,
+        delivered_at INTEGER,
+        read_at INTEGER,
+        error TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      -- Rate Limits
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        window_start INTEGER NOT NULL,
+        is_limited INTEGER NOT NULL DEFAULT 0,
+        limit_expires_at INTEGER,
+        UNIQUE(channel_type, user_id)
+      );
+
+      -- Audit Log
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        channel_type TEXT,
+        user_id TEXT,
+        chat_id TEXT,
+        details TEXT,
+        severity TEXT NOT NULL DEFAULT 'info'
+      );
+
+      -- Gateway Infrastructure Indexes
+      CREATE INDEX IF NOT EXISTS idx_message_queue_status ON message_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_message_queue_scheduled ON message_queue(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_messages_status ON scheduled_messages(status);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_messages_scheduled ON scheduled_messages(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_delivery_tracking_status ON delivery_tracking(status);
+      CREATE INDEX IF NOT EXISTS idx_delivery_tracking_message ON delivery_tracking(message_id);
+      CREATE INDEX IF NOT EXISTS idx_rate_limits_user ON rate_limits(channel_type, user_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
     `);
 
     // Run migrations for Goal Mode columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)

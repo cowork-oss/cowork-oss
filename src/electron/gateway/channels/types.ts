@@ -404,3 +404,307 @@ export interface GatewayEvent {
  * Gateway event handler
  */
 export type GatewayEventHandler = (event: GatewayEvent) => void;
+
+// ============================================================================
+// Extended Features Types
+// ============================================================================
+
+/**
+ * Reply keyboard button (persistent keyboard below input)
+ */
+export interface ReplyKeyboardButton {
+  /** Button text */
+  text: string;
+  /** Request contact (Telegram) */
+  requestContact?: boolean;
+  /** Request location (Telegram) */
+  requestLocation?: boolean;
+}
+
+/**
+ * Reply keyboard configuration
+ */
+export interface ReplyKeyboard {
+  /** Rows of buttons */
+  buttons: ReplyKeyboardButton[][];
+  /** Resize keyboard to fit buttons */
+  resizeKeyboard?: boolean;
+  /** Hide after use */
+  oneTimeKeyboard?: boolean;
+  /** Placeholder text in input */
+  inputPlaceholder?: string;
+}
+
+/**
+ * Select menu option (Discord)
+ */
+export interface SelectMenuOption {
+  /** Display label */
+  label: string;
+  /** Value sent on selection */
+  value: string;
+  /** Description shown below label */
+  description?: string;
+  /** Emoji to display */
+  emoji?: string;
+  /** Whether this is selected by default */
+  default?: boolean;
+}
+
+/**
+ * Select menu configuration (Discord)
+ */
+export interface SelectMenu {
+  /** Custom ID for handling */
+  customId: string;
+  /** Placeholder text */
+  placeholder?: string;
+  /** Menu options */
+  options: SelectMenuOption[];
+  /** Minimum selections */
+  minValues?: number;
+  /** Maximum selections */
+  maxValues?: number;
+  /** Whether menu is disabled */
+  disabled?: boolean;
+}
+
+/**
+ * Poll option
+ */
+export interface PollOption {
+  /** Option text */
+  text: string;
+  /** Vote count (when reading results) */
+  voterCount?: number;
+}
+
+/**
+ * Poll configuration
+ */
+export interface Poll {
+  /** Poll question */
+  question: string;
+  /** Poll options */
+  options: PollOption[];
+  /** Allow multiple answers */
+  allowsMultipleAnswers?: boolean;
+  /** Anonymous voting */
+  isAnonymous?: boolean;
+  /** Poll type: quiz has correct answer */
+  type?: 'regular' | 'quiz';
+  /** Correct option index (for quiz) */
+  correctOptionId?: number;
+  /** Explanation shown after answering (quiz) */
+  explanation?: string;
+  /** Auto-close after seconds */
+  openPeriod?: number;
+  /** Close at specific time */
+  closeDate?: Date;
+}
+
+/**
+ * Reaction on a message
+ */
+export interface MessageReaction {
+  /** Emoji or custom emoji ID */
+  emoji: string;
+  /** Whether it's a custom emoji */
+  isCustom?: boolean;
+  /** Count of this reaction */
+  count?: number;
+  /** Whether bot reacted with this */
+  isOwnReaction?: boolean;
+}
+
+/**
+ * Scheduled message
+ */
+export interface ScheduledMessage {
+  /** Unique ID */
+  id: string;
+  /** Target channel */
+  channel: ChannelType;
+  /** Target chat ID */
+  chatId: string;
+  /** Message to send */
+  message: OutgoingMessage;
+  /** When to send */
+  scheduledAt: Date;
+  /** Status */
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  /** Error if failed */
+  error?: string;
+  /** Created timestamp */
+  createdAt: Date;
+}
+
+/**
+ * Message delivery status
+ */
+export interface MessageDelivery {
+  /** Message ID */
+  messageId: string;
+  /** Channel type */
+  channel: ChannelType;
+  /** Chat ID */
+  chatId: string;
+  /** Delivery status */
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  /** Sent timestamp */
+  sentAt?: Date;
+  /** Delivered timestamp */
+  deliveredAt?: Date;
+  /** Read timestamp */
+  readAt?: Date;
+  /** Error if failed */
+  error?: string;
+}
+
+/**
+ * Audit log entry
+ */
+export interface AuditLogEntry {
+  /** Entry ID */
+  id: string;
+  /** Timestamp */
+  timestamp: Date;
+  /** Action type */
+  action: string;
+  /** Channel */
+  channel?: ChannelType;
+  /** User ID */
+  userId?: string;
+  /** Chat ID */
+  chatId?: string;
+  /** Additional details */
+  details?: Record<string, unknown>;
+}
+
+/**
+ * User rate limit info
+ */
+export interface UserRateLimit {
+  /** User ID */
+  userId: string;
+  /** Channel type */
+  channel: ChannelType;
+  /** Message count in current window */
+  messageCount: number;
+  /** Window start time */
+  windowStart: Date;
+  /** Whether currently limited */
+  isLimited: boolean;
+  /** When limit expires */
+  limitExpiresAt?: Date;
+}
+
+/**
+ * Broadcast configuration
+ */
+export interface BroadcastConfig {
+  /** Target chat IDs */
+  chatIds: string[];
+  /** Channel type */
+  channel: ChannelType;
+  /** Message to broadcast */
+  message: OutgoingMessage;
+  /** Delay between sends (ms) */
+  delayBetweenSends?: number;
+}
+
+/**
+ * Broadcast result
+ */
+export interface BroadcastResult {
+  /** Total recipients */
+  total: number;
+  /** Successfully sent */
+  sent: number;
+  /** Failed sends */
+  failed: number;
+  /** Details per chat */
+  results: Array<{
+    chatId: string;
+    success: boolean;
+    messageId?: string;
+    error?: string;
+  }>;
+}
+
+/**
+ * Extended channel adapter interface with all features
+ */
+export interface ExtendedChannelAdapter extends ChannelAdapter {
+  /**
+   * Send typing indicator
+   * @param chatId Chat ID
+   * @param threadId Optional thread ID
+   */
+  sendTyping?(chatId: string, threadId?: string): Promise<void>;
+
+  /**
+   * Add reaction to a message
+   * @param chatId Chat ID
+   * @param messageId Message ID
+   * @param emoji Emoji to react with
+   */
+  addReaction?(chatId: string, messageId: string, emoji: string): Promise<void>;
+
+  /**
+   * Remove reaction from a message
+   * @param chatId Chat ID
+   * @param messageId Message ID
+   * @param emoji Emoji to remove
+   */
+  removeReaction?(chatId: string, messageId: string, emoji: string): Promise<void>;
+
+  /**
+   * Send a poll
+   * @param chatId Chat ID
+   * @param poll Poll configuration
+   * @returns Message ID
+   */
+  sendPoll?(chatId: string, poll: Poll): Promise<string>;
+
+  /**
+   * Send a message with reply keyboard
+   * @param chatId Chat ID
+   * @param text Message text
+   * @param keyboard Reply keyboard
+   * @returns Message ID
+   */
+  sendWithReplyKeyboard?(chatId: string, text: string, keyboard: ReplyKeyboard): Promise<string>;
+
+  /**
+   * Remove reply keyboard
+   * @param chatId Chat ID
+   * @param text Message text
+   */
+  removeReplyKeyboard?(chatId: string, text: string): Promise<string>;
+
+  /**
+   * Send a message with select menu (Discord)
+   * @param chatId Chat ID
+   * @param text Message text
+   * @param menu Select menu configuration
+   */
+  sendWithSelectMenu?(chatId: string, text: string, menu: SelectMenu): Promise<string>;
+
+  /**
+   * Register select menu handler (Discord)
+   */
+  onSelectMenu?(handler: SelectMenuHandler): void;
+}
+
+/**
+ * Select menu interaction handler
+ */
+export type SelectMenuHandler = (
+  customId: string,
+  values: string[],
+  userId: string,
+  chatId: string,
+  messageId: string,
+  raw: unknown
+) => void | Promise<void>;

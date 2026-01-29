@@ -26,6 +26,8 @@ import {
   ButtonInteraction,
   EmbedBuilder,
   ColorResolvable,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
 } from 'discord.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,6 +44,9 @@ import {
   CallbackQuery,
   CallbackQueryHandler,
   InlineKeyboardButton,
+  Poll,
+  SelectMenu,
+  SelectMenuHandler,
 } from './types';
 
 /**
@@ -67,6 +72,7 @@ export class DiscordAdapter implements ChannelAdapter {
   private errorHandlers: ErrorHandler[] = [];
   private statusHandlers: StatusHandler[] = [];
   private callbackQueryHandlers: CallbackQueryHandler[] = [];
+  private selectMenuHandlers: SelectMenuHandler[] = [];
   private config: DiscordConfig;
 
   // Track pending interactions that need reply (chatId -> interaction)
@@ -144,11 +150,17 @@ export class DiscordAdapter implements ChannelAdapter {
         }
       });
 
-      // Handle slash command and button interactions
+      // Handle slash command, button, and select menu interactions
       this.client.on(Events.InteractionCreate, async (interaction) => {
         // Handle button interactions
         if (interaction.isButton()) {
           await this.handleButtonInteraction(interaction);
+          return;
+        }
+
+        // Handle select menu interactions
+        if (interaction.isStringSelectMenu()) {
+          await this.handleSelectMenuInteraction(interaction);
           return;
         }
 
@@ -775,6 +787,179 @@ export class DiscordAdapter implements ChannelAdapter {
       components,
     });
   }
+
+  // ============================================================================
+  // Extended Features
+  // ============================================================================
+
+  /**
+   * Send typing indicator
+   */
+  async sendTyping(chatId: string): Promise<void> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    await (channel as TextChannel | DMChannel | ThreadChannel).sendTyping();
+  }
+
+  /**
+   * Add reaction to a message
+   */
+  async addReaction(chatId: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(messageId);
+    await message.react(emoji);
+  }
+
+  /**
+   * Remove reaction from a message
+   */
+  async removeReaction(chatId: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(messageId);
+    const reaction = message.reactions.cache.get(emoji);
+    if (reaction && this._botId) {
+      await reaction.users.remove(this._botId);
+    }
+  }
+
+  /**
+   * Send a poll (Discord native polls)
+   */
+  async sendPoll(chatId: string, poll: Poll): Promise<string> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    // Discord polls require specific formatting
+    const pollData = {
+      question: { text: poll.question },
+      answers: poll.options.map(opt => ({ text: opt.text })),
+      duration: poll.openPeriod ? Math.ceil(poll.openPeriod / 3600) : 24, // Convert seconds to hours
+      allow_multiselect: poll.allowsMultipleAnswers ?? false,
+    };
+
+    const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
+      poll: pollData as any,
+    });
+
+    return sent.id;
+  }
+
+  /**
+   * Send a message with a select menu (dropdown)
+   */
+  async sendWithSelectMenu(chatId: string, text: string, menu: SelectMenu): Promise<string> {
+    if (!this.client || this._status !== 'connected') {
+      throw new Error('Discord bot is not connected');
+    }
+
+    const channel = await this.client.channels.fetch(chatId);
+    if (!channel || !this.isTextBasedChannel(channel)) {
+      throw new Error('Invalid channel');
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(menu.customId)
+      .setPlaceholder(menu.placeholder || 'Select an option')
+      .setMinValues(menu.minValues ?? 1)
+      .setMaxValues(menu.maxValues ?? 1)
+      .addOptions(
+        menu.options.map(opt => ({
+          label: opt.label,
+          value: opt.value,
+          description: opt.description,
+          emoji: opt.emoji ? { name: opt.emoji } : undefined,
+          default: opt.default,
+        }))
+      );
+
+    if (menu.disabled) {
+      selectMenu.setDisabled(true);
+    }
+
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+    const sent = await (channel as TextChannel | DMChannel | ThreadChannel).send({
+      content: text,
+      components: [row],
+    });
+
+    return sent.id;
+  }
+
+  /**
+   * Register a select menu handler
+   */
+  onSelectMenu(handler: SelectMenuHandler): void {
+    this.selectMenuHandlers.push(handler);
+  }
+
+  /**
+   * Handle select menu interaction
+   */
+  private async handleSelectMenuInteraction(interaction: StringSelectMenuInteraction): Promise<void> {
+    const customId = interaction.customId;
+    const values = interaction.values;
+
+    // Acknowledge the interaction
+    try {
+      await interaction.deferUpdate();
+    } catch (error) {
+      console.error('Failed to defer select menu update:', error);
+    }
+
+    // Notify all registered handlers
+    for (const handler of this.selectMenuHandlers) {
+      try {
+        await handler(
+          customId,
+          values,
+          interaction.user.id,
+          interaction.channelId!,
+          interaction.message.id,
+          interaction
+        );
+      } catch (error) {
+        console.error('Error in select menu handler:', error);
+        this.handleError(
+          error instanceof Error ? error : new Error(String(error)),
+          'selectMenuHandler'
+        );
+      }
+    }
+  }
+
+  // ============================================================================
+  // Handler Registration
+  // ============================================================================
 
   /**
    * Register an error handler
