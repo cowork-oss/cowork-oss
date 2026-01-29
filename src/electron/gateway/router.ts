@@ -2132,8 +2132,8 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     // Find the last task for this session's workspace that failed or was cancelled
     const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
     const lastFailedTask = tasks
-      .filter((t) => t.status === 'error' || t.status === 'cancelled')
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+      .filter((t: Task) => t.status === 'error' || t.status === 'cancelled')
+      .sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
     if (!lastFailedTask) {
       await adapter.sendMessage({
@@ -2179,7 +2179,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
 
     const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
     const recentTasks = tasks
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);
 
     if (recentTasks.length === 0) {
@@ -2199,9 +2199,9 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     };
 
     const historyText = recentTasks
-      .map((t, i) => {
+      .map((t: Task, i: number) => {
         const emoji = statusEmoji[t.status] || '❓';
-        const date = new Date(t.created_at).toLocaleDateString();
+        const date = new Date(t.createdAt).toLocaleDateString();
         const title = t.title.length > 40 ? t.title.substring(0, 40) + '...' : t.title;
         return `${i + 1}. ${emoji} ${title}\n   ${date} • ${t.status}`;
       })

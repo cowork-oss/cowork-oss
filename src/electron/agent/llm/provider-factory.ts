@@ -542,6 +542,29 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Get the currently selected provider type
+   */
+  static getSelectedProvider(): LLMProviderType {
+    const settings = this.loadSettings();
+    return settings.providerType;
+  }
+
+  /**
+   * Get the currently selected model key
+   */
+  static getSelectedModel(): ModelKey | string {
+    const settings = this.loadSettings();
+    return settings.modelKey;
+  }
+
+  /**
+   * Get the current LLM settings
+   */
+  static getSettings(): LLMSettings {
+    return this.loadSettings();
+  }
+
+  /**
    * Test a provider configuration
    */
   static async testProvider(config: LLMProviderConfig): Promise<{ success: boolean; error?: string }> {
