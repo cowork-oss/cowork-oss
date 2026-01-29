@@ -10,12 +10,18 @@
  * - Text fragment assembly for split long messages
  * - ACK reactions while processing
  * - Draft streaming for real-time response preview
+ * - Sequential message processing to prevent race conditions
+ * - Connection conflict detection (409 errors)
+ * - Exponential backoff with jitter for error recovery
+ * - Health check endpoint for webhook mode
  */
 
-import { Bot, Context, webhookCallback, InputFile } from 'grammy';
+import { Bot, Context, webhookCallback, InputFile, GrammyError, HttpError } from 'grammy';
+import { sequentialize } from '@grammyjs/runner';
 import { apiThrottler } from '@grammyjs/transformer-throttler';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
 import {
   ChannelAdapter,
   ChannelStatus,
@@ -30,6 +36,38 @@ import {
 } from './types';
 
 /**
+ * Exponential backoff configuration
+ */
+export interface BackoffConfig {
+  /** Initial delay in ms (default: 2000) */
+  initialDelay?: number;
+  /** Maximum delay in ms (default: 30000) */
+  maxDelay?: number;
+  /** Backoff multiplier (default: 1.8) */
+  multiplier?: number;
+  /** Jitter percentage 0-1 (default: 0.25) */
+  jitter?: number;
+  /** Maximum retry attempts before giving up (default: 10) */
+  maxAttempts?: number;
+}
+
+/**
+ * Webhook server configuration
+ */
+export interface WebhookServerConfig {
+  /** Port to listen on */
+  port: number;
+  /** Host to bind to (default: '0.0.0.0') */
+  host?: string;
+  /** Secret token for webhook validation */
+  secretToken?: string;
+  /** Path for webhook endpoint (default: '/webhook') */
+  webhookPath?: string;
+  /** Path for health check (default: '/healthz') */
+  healthPath?: string;
+}
+
+/**
  * Extended Telegram configuration with new features
  */
 export interface TelegramAdapterConfig extends TelegramConfig {
@@ -41,6 +79,12 @@ export interface TelegramAdapterConfig extends TelegramConfig {
   fragmentAssemblyTimeout?: number;
   /** Enable message deduplication (default: true) */
   deduplicationEnabled?: boolean;
+  /** Enable sequential message processing (default: true) */
+  sequentialProcessingEnabled?: boolean;
+  /** Exponential backoff configuration */
+  backoff?: BackoffConfig;
+  /** Webhook server configuration (if using webhook mode) */
+  webhookServer?: WebhookServerConfig;
 }
 
 /**
@@ -93,12 +137,30 @@ export class TelegramAdapter implements ChannelAdapter {
   private draftStates: Map<string, DraftState> = new Map(); // chatId -> draft state
   private readonly DRAFT_UPDATE_INTERVAL = 500; // Update draft every 500ms
 
+  // Exponential backoff state
+  private backoffAttempt = 0;
+  private backoffTimer?: ReturnType<typeof setTimeout>;
+  private isReconnecting = false;
+
+  // Webhook server
+  private webhookServer?: http.Server;
+
+  // Default backoff configuration
+  private readonly DEFAULT_BACKOFF: Required<BackoffConfig> = {
+    initialDelay: 2000,
+    maxDelay: 30000,
+    multiplier: 1.8,
+    jitter: 0.25,
+    maxAttempts: 10,
+  };
+
   constructor(config: TelegramAdapterConfig) {
     this.config = {
       deduplicationEnabled: true,
       ackReactionEnabled: true,
       draftStreamingEnabled: true,
       fragmentAssemblyTimeout: 1500,
+      sequentialProcessingEnabled: true,
       ...config,
     };
   }
@@ -120,43 +182,36 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     this.setStatus('connecting');
+    this.resetBackoff();
 
     try {
       // Create bot instance
       this.bot = new Bot(this.config.botToken);
 
-      // Feature 5: Add API throttling to prevent rate limits
+      // Add API throttling to prevent rate limits
       const throttler = apiThrottler();
       this.bot.api.config.use(throttler);
+
+      // Add sequential processing to prevent race conditions
+      if (this.config.sequentialProcessingEnabled) {
+        this.bot.use(sequentialize(this.getSequentialKey));
+      }
 
       // Get bot info
       const me = await this.bot.api.getMe();
       this._botUsername = me.username;
 
-      // Register bot commands for the "/" menu
-      await this.bot.api.setMyCommands([
-        { command: 'start', description: 'Start the bot' },
-        { command: 'help', description: 'Show available commands' },
-        { command: 'workspaces', description: 'List available workspaces' },
-        { command: 'workspace', description: 'Select or show current workspace' },
-        { command: 'addworkspace', description: 'Add a new workspace by path' },
-        { command: 'newtask', description: 'Start a fresh task/conversation' },
-        { command: 'provider', description: 'Change or show current LLM provider' },
-        { command: 'models', description: 'List available AI models' },
-        { command: 'model', description: 'Change or show current model' },
-        { command: 'status', description: 'Check bot status' },
-        { command: 'cancel', description: 'Cancel current task' },
-      ]);
+      // Register expanded bot commands for the "/" menu
+      await this.registerBotCommands();
 
       // Set up message handler with deduplication and fragment assembly
       this.bot.on('message:text', async (ctx) => {
         await this.handleTextMessage(ctx);
       });
 
-      // Handle errors
-      this.bot.catch((err) => {
-        console.error('Telegram bot error:', err);
-        this.handleError(err instanceof Error ? err : new Error(String(err)), 'bot.catch');
+      // Handle errors with 409 detection and backoff
+      this.bot.catch(async (err) => {
+        await this.handleBotError(err);
       });
 
       // Start deduplication cleanup timer
@@ -164,19 +219,237 @@ export class TelegramAdapter implements ChannelAdapter {
         this.startDedupCleanup();
       }
 
-      // Start polling
-      this.bot.start({
-        onStart: () => {
-          console.log(`Telegram bot @${this._botUsername} started`);
-          this.setStatus('connected');
-        },
-        drop_pending_updates: true,
-        allowed_updates: ['message', 'message_reaction'] as const,
-      });
+      // Start polling with error handling
+      await this.startPolling();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+
+      // Check for connection conflict (409) during initial connection
+      if (this.isConnectionConflictError(error)) {
+        console.error('Connection conflict detected: Another bot instance is running');
+        this.setStatus('error', new Error('Connection conflict: Another bot instance is running. Stop the other instance first.'));
+        throw new Error('Connection conflict: Another bot instance is running');
+      }
+
       this.setStatus('error', err);
       throw err;
+    }
+  }
+
+  /**
+   * Get sequential key for message ordering
+   * Messages from the same chat are processed sequentially
+   */
+  private getSequentialKey = (ctx: Context): string | undefined => {
+    const chatId = ctx.chat?.id;
+    if (!chatId) return undefined;
+
+    // Use chat ID + thread ID for forum topics
+    const threadId = ctx.message?.message_thread_id;
+    if (threadId) {
+      return `${chatId}:${threadId}`;
+    }
+
+    return String(chatId);
+  };
+
+  /**
+   * Register bot commands for the "/" menu
+   */
+  private async registerBotCommands(): Promise<void> {
+    if (!this.bot) return;
+
+    await this.bot.api.setMyCommands([
+      // Core commands
+      { command: 'start', description: 'Start the bot and see welcome message' },
+      { command: 'help', description: 'Show all available commands' },
+      { command: 'status', description: 'Check bot connection and system status' },
+
+      // Workspace management
+      { command: 'workspaces', description: 'List all available workspaces' },
+      { command: 'workspace', description: 'Select or show current workspace' },
+      { command: 'addworkspace', description: 'Add a new workspace by path' },
+      { command: 'removeworkspace', description: 'Remove a workspace from the list' },
+
+      // Task management
+      { command: 'newtask', description: 'Start a fresh task/conversation' },
+      { command: 'cancel', description: 'Cancel the current running task' },
+      { command: 'retry', description: 'Retry the last failed task' },
+      { command: 'history', description: 'Show recent task history' },
+
+      // Model configuration
+      { command: 'provider', description: 'Change or show current LLM provider' },
+      { command: 'providers', description: 'List all available LLM providers' },
+      { command: 'model', description: 'Change or show current model' },
+      { command: 'models', description: 'List available AI models' },
+
+      // Skills management
+      { command: 'skills', description: 'List available skills' },
+      { command: 'skill', description: 'Enable or disable a skill' },
+
+      // Settings
+      { command: 'settings', description: 'View and modify bot settings' },
+      { command: 'debug', description: 'Toggle debug mode on/off' },
+      { command: 'version', description: 'Show bot version information' },
+    ]);
+  }
+
+  /**
+   * Start polling with error handling and reconnection
+   */
+  private async startPolling(): Promise<void> {
+    if (!this.bot) return;
+
+    this.bot.start({
+      onStart: () => {
+        console.log(`Telegram bot @${this._botUsername} started`);
+        this.setStatus('connected');
+        this.resetBackoff();
+      },
+      drop_pending_updates: true,
+      allowed_updates: ['message', 'message_reaction', 'callback_query'] as const,
+    });
+  }
+
+  /**
+   * Handle bot errors including 409 conflict detection
+   */
+  private async handleBotError(err: unknown): Promise<void> {
+    console.error('Telegram bot error:', err);
+
+    // Check for connection conflict (409)
+    if (this.isConnectionConflictError(err)) {
+      console.error('Connection conflict detected (409): Another bot instance may be running');
+      this.setStatus('error', new Error('Connection conflict: Another bot instance is running'));
+
+      // Don't reconnect on 409 - let the user resolve the conflict
+      this.handleError(new Error('Connection conflict: Another bot instance is running. Stop the other instance and restart.'), 'connection_conflict');
+      return;
+    }
+
+    // Check for network errors that warrant reconnection
+    if (this.isNetworkError(err)) {
+      console.log('Network error detected, will attempt reconnection with backoff');
+      await this.attemptReconnection();
+      return;
+    }
+
+    // Handle other errors normally
+    this.handleError(err instanceof Error ? err : new Error(String(err)), 'bot.catch');
+  }
+
+  /**
+   * Check if error is a connection conflict (409)
+   */
+  private isConnectionConflictError(err: unknown): boolean {
+    if (err instanceof GrammyError) {
+      return err.error_code === 409;
+    }
+    if (err instanceof HttpError) {
+      return (err as HttpError & { status?: number }).status === 409;
+    }
+    // Check error message for 409 indicators
+    const message = err instanceof Error ? err.message : String(err);
+    return message.includes('409') || message.includes('Conflict') || message.includes('terminated by other getUpdates');
+  }
+
+  /**
+   * Check if error is a network error that warrants reconnection
+   */
+  private isNetworkError(err: unknown): boolean {
+    if (err instanceof HttpError) {
+      return true;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return (
+      message.includes('ECONNRESET') ||
+      message.includes('ETIMEDOUT') ||
+      message.includes('ENOTFOUND') ||
+      message.includes('network') ||
+      message.includes('socket') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504')
+    );
+  }
+
+  /**
+   * Attempt reconnection with exponential backoff
+   */
+  private async attemptReconnection(): Promise<void> {
+    if (this.isReconnecting) {
+      console.log('Reconnection already in progress');
+      return;
+    }
+
+    const backoffConfig = { ...this.DEFAULT_BACKOFF, ...this.config.backoff };
+
+    if (this.backoffAttempt >= backoffConfig.maxAttempts) {
+      console.error(`Max reconnection attempts (${backoffConfig.maxAttempts}) reached`);
+      this.setStatus('error', new Error('Max reconnection attempts reached'));
+      this.handleError(new Error('Failed to reconnect after maximum attempts'), 'reconnection_failed');
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.backoffAttempt++;
+
+    const delay = this.calculateBackoffDelay(backoffConfig);
+    console.log(`Reconnection attempt ${this.backoffAttempt}/${backoffConfig.maxAttempts} in ${delay}ms`);
+
+    this.backoffTimer = setTimeout(async () => {
+      try {
+        // Stop existing bot if any
+        if (this.bot) {
+          await this.bot.stop();
+          this.bot = null;
+        }
+
+        this.isReconnecting = false;
+        this.setStatus('disconnected');
+
+        // Attempt to reconnect
+        await this.connect();
+      } catch (error) {
+        this.isReconnecting = false;
+        console.error('Reconnection attempt failed:', error);
+
+        // Schedule next attempt if not a 409 conflict
+        if (!this.isConnectionConflictError(error)) {
+          await this.attemptReconnection();
+        }
+      }
+    }, delay);
+  }
+
+  /**
+   * Calculate backoff delay with jitter
+   */
+  private calculateBackoffDelay(config: Required<BackoffConfig>): number {
+    // Calculate base delay: initialDelay * multiplier^attempt
+    let delay = config.initialDelay * Math.pow(config.multiplier, this.backoffAttempt - 1);
+
+    // Cap at max delay
+    delay = Math.min(delay, config.maxDelay);
+
+    // Add jitter: delay ± (delay * jitter * random)
+    const jitterAmount = delay * config.jitter;
+    const jitter = (Math.random() * 2 - 1) * jitterAmount; // Random between -jitterAmount and +jitterAmount
+    delay = Math.round(delay + jitter);
+
+    // Ensure minimum delay of 1 second
+    return Math.max(1000, delay);
+  }
+
+  /**
+   * Reset backoff state
+   */
+  private resetBackoff(): void {
+    this.backoffAttempt = 0;
+    this.isReconnecting = false;
+    if (this.backoffTimer) {
+      clearTimeout(this.backoffTimer);
+      this.backoffTimer = undefined;
     }
   }
 
@@ -409,6 +682,9 @@ export class TelegramAdapter implements ChannelAdapter {
    * Disconnect from Telegram
    */
   async disconnect(): Promise<void> {
+    // Reset backoff state
+    this.resetBackoff();
+
     // Clear timers
     if (this.dedupCleanupTimer) {
       clearInterval(this.dedupCleanupTimer);
@@ -426,6 +702,11 @@ export class TelegramAdapter implements ChannelAdapter {
 
     // Clear dedup cache
     this.processedUpdates.clear();
+
+    // Stop webhook server if running
+    if (this.webhookServer) {
+      await this.stopWebhookServer();
+    }
 
     if (this.bot) {
       await this.bot.stop();
@@ -834,6 +1115,204 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     await this.bot.api.deleteWebhook();
+  }
+
+  /**
+   * Start webhook server with health check endpoint
+   * This creates an HTTP server that handles both webhook callbacks and health checks.
+   */
+  async startWebhookServer(config: WebhookServerConfig): Promise<void> {
+    if (this.webhookServer) {
+      throw new Error('Webhook server is already running');
+    }
+
+    if (!this.bot) {
+      throw new Error('Bot not initialized. Call connect() first or initialize bot manually.');
+    }
+
+    const {
+      port,
+      host = '0.0.0.0',
+      secretToken,
+      webhookPath = '/webhook',
+      healthPath = '/healthz',
+    } = config;
+
+    // Create HTTP server
+    this.webhookServer = http.createServer(async (req, res) => {
+      const url = req.url || '/';
+
+      // Health check endpoint
+      if (req.method === 'GET' && url === healthPath) {
+        await this.handleHealthCheck(req, res);
+        return;
+      }
+
+      // Webhook endpoint
+      if (req.method === 'POST' && url === webhookPath) {
+        // Validate secret token if configured
+        if (secretToken) {
+          const requestToken = req.headers['x-telegram-bot-api-secret-token'];
+          if (requestToken !== secretToken) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+        }
+
+        // Handle webhook callback
+        await this.handleWebhookRequest(req, res);
+        return;
+      }
+
+      // 404 for unknown routes
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+    });
+
+    // Start listening
+    return new Promise((resolve, reject) => {
+      this.webhookServer!.listen(port, host, () => {
+        console.log(`Telegram webhook server listening on ${host}:${port}`);
+        console.log(`  Webhook endpoint: ${webhookPath}`);
+        console.log(`  Health check: ${healthPath}`);
+        resolve();
+      });
+
+      this.webhookServer!.on('error', (error) => {
+        console.error('Webhook server error:', error);
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Stop the webhook server
+   */
+  async stopWebhookServer(): Promise<void> {
+    if (!this.webhookServer) {
+      return;
+    }
+
+    return new Promise((resolve) => {
+      this.webhookServer!.close(() => {
+        console.log('Webhook server stopped');
+        this.webhookServer = undefined;
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Handle health check requests
+   */
+  private async handleHealthCheck(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const health = {
+      status: this._status === 'connected' ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      bot: {
+        status: this._status,
+        username: this._botUsername || null,
+        connected: this._status === 'connected',
+      },
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+    };
+
+    const statusCode = health.status === 'healthy' ? 200 : 503;
+    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(health, null, 2));
+  }
+
+  /**
+   * Handle webhook requests
+   */
+  private async handleWebhookRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let body = '';
+
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+    });
+
+    req.on('end', async () => {
+      try {
+        const update = JSON.parse(body);
+
+        // Process the update using grammY's webhook handler
+        if (this.bot) {
+          await this.bot.handleUpdate(update);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        console.error('Error processing webhook:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    });
+  }
+
+  /**
+   * Connect using webhook mode instead of polling
+   * Sets up the bot, registers commands, and starts the webhook server.
+   */
+  async connectWithWebhook(webhookUrl: string, serverConfig: WebhookServerConfig): Promise<void> {
+    if (this._status === 'connected' || this._status === 'connecting') {
+      return;
+    }
+
+    this.setStatus('connecting');
+    this.resetBackoff();
+
+    try {
+      // Create bot instance
+      this.bot = new Bot(this.config.botToken);
+
+      // Add API throttling
+      const throttler = apiThrottler();
+      this.bot.api.config.use(throttler);
+
+      // Add sequential processing
+      if (this.config.sequentialProcessingEnabled) {
+        this.bot.use(sequentialize(this.getSequentialKey));
+      }
+
+      // Get bot info
+      const me = await this.bot.api.getMe();
+      this._botUsername = me.username;
+
+      // Register bot commands
+      await this.registerBotCommands();
+
+      // Set up message handler
+      this.bot.on('message:text', async (ctx) => {
+        await this.handleTextMessage(ctx);
+      });
+
+      // Handle errors
+      this.bot.catch(async (err) => {
+        await this.handleBotError(err);
+      });
+
+      // Start deduplication cleanup
+      if (this.config.deduplicationEnabled) {
+        this.startDedupCleanup();
+      }
+
+      // Start webhook server
+      await this.startWebhookServer(serverConfig);
+
+      // Set webhook URL with Telegram
+      await this.setWebhook(webhookUrl, serverConfig.secretToken);
+
+      console.log(`Telegram bot @${this._botUsername} connected via webhook`);
+      this.setStatus('connected');
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.setStatus('error', err);
+      throw err;
+    }
   }
 
   // Private methods
