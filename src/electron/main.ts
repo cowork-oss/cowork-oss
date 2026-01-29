@@ -9,6 +9,7 @@ import { ChannelGateway } from './gateway';
 import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
+import { AppearanceManager } from './settings/appearance-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 
 let mainWindow: BrowserWindow | null = null;
@@ -93,6 +94,7 @@ app.whenReady().then(async () => {
   LLMProviderFactory.initialize();
   SearchProviderFactory.initialize();
   GuardrailManager.initialize();
+  AppearanceManager.initialize();
 
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();

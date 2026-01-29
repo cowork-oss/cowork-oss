@@ -45,6 +45,7 @@ import {
   StringIdSchema,
 } from '../utils/validation';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
+import { AppearanceManager } from '../settings/appearance-manager';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { CustomSkill } from '../../shared/types';
 import { MCPSettingsManager } from '../mcp/settings';
@@ -1039,6 +1040,16 @@ export function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS, async () => {
     return GuardrailManager.getDefaults();
+  });
+
+  // Appearance Settings handlers
+  ipcMain.handle(IPC_CHANNELS.APPEARANCE_GET_SETTINGS, async () => {
+    return AppearanceManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APPEARANCE_SAVE_SETTINGS, async (_, settings) => {
+    AppearanceManager.saveSettings(settings);
+    return { success: true };
   });
 
   // Queue handlers

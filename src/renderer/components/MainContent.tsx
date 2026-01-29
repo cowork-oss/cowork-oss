@@ -1,7 +1,38 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType } from '../../shared/types';
+
+// localStorage key for verbose mode
+const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
+
+// Important event types shown in non-verbose mode
+// These are high-level steps that represent meaningful progress
+const IMPORTANT_EVENT_TYPES: EventType[] = [
+  'task_created',
+  'task_completed',
+  'task_cancelled',
+  'plan_created',
+  'step_started',
+  'step_completed',
+  'step_failed',
+  'assistant_message',
+  'user_message',
+  'file_created',
+  'file_modified',
+  'file_deleted',
+  'error',
+  'verification_started',
+  'verification_passed',
+  'verification_failed',
+  'retry_started',
+  'approval_requested',
+];
+
+// Helper to check if an event is important (shown in non-verbose mode)
+const isImportantEvent = (event: TaskEvent): boolean => {
+  return IMPORTANT_EVENT_TYPES.includes(event.type);
+};
 import { ApprovalDialog } from './ApprovalDialog';
 import { SkillParameterModal } from './SkillParameterModal';
 import { FileViewer } from './FileViewer';
@@ -250,13 +281,36 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
-  const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
+  // Track toggled events by ID for stable state across filtering
+  const [toggledEvents, setToggledEvents] = useState<Set<string>>(new Set());
   const [appVersion, setAppVersion] = useState<string>('');
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  // Verbose mode - when false, only show important steps
+  const [verboseSteps, setVerboseSteps] = useState(() => {
+    const saved = localStorage.getItem(VERBOSE_STEPS_KEY);
+    return saved === 'true';
+  });
   const skillsMenuRef = useRef<HTMLDivElement>(null);
+
+  // Filter events based on verbose mode
+  const filteredEvents = useMemo(() => {
+    if (verboseSteps) {
+      return events;
+    }
+    return events.filter(isImportantEvent);
+  }, [events, verboseSteps]);
+
+  // Toggle verbose mode and persist to localStorage
+  const toggleVerboseSteps = () => {
+    setVerboseSteps(prev => {
+      const newValue = !prev;
+      localStorage.setItem(VERBOSE_STEPS_KEY, String(newValue));
+      return newValue;
+    });
+  };
 
   // Load app version
   useEffect(() => {
@@ -309,13 +363,14 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     setSelectedSkillForParams(null);
   };
 
-  const toggleEventExpanded = (index: number) => {
-    setExpandedEvents(prev => {
+  // Toggle an event's expanded state using its ID
+  const toggleEventExpanded = (eventId: string) => {
+    setToggledEvents(prev => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
+      if (next.has(eventId)) {
+        next.delete(eventId);
       } else {
-        next.add(index);
+        next.add(eventId);
       }
       return next;
     });
@@ -333,11 +388,11 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     return ['plan_created', 'assistant_message', 'error'].includes(event.type);
   };
 
-  // Check if an event is currently expanded
+  // Check if an event is currently expanded using its ID
   // If the event should default expand, clicking toggles it to collapsed (and vice versa)
-  const isEventExpanded = (event: TaskEvent, index: number): boolean => {
+  const isEventExpanded = (event: TaskEvent): boolean => {
     const defaultExpanded = shouldDefaultExpand(event);
-    const isToggled = expandedEvents.has(index);
+    const isToggled = toggledEvents.has(event.id);
     // XOR: if toggled, invert the default state
     return defaultExpanded ? !isToggled : isToggled;
   };
@@ -466,13 +521,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     }
   };
 
-  const handleQueue = () => {
-    if (inputValue.trim()) {
-      setQueuedMessage(inputValue.trim());
-      setInputValue('');
-    }
-  };
-
   const handleClearQueue = () => {
     setQueuedMessage(null);
   };
@@ -501,6 +549,12 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     if (type === 'step_started' || type === 'executing' || type === 'verification_started' || type === 'retry_started') return 'active';
     return '';
   };
+
+  // Get the last assistant message to always show the response
+  const lastAssistantMessage = useMemo(() => {
+    const assistantMessages = events.filter(e => e.type === 'assistant_message');
+    return assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
+  }, [events]);
 
   // Welcome/Empty state
   if (!task) {
@@ -753,55 +807,65 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
         <div className="task-content">
-          {/* Task Description */}
-          <div className="task-section">
-            <div className="task-description">
+          {/* User Prompt - Right aligned like chat */}
+          <div className="chat-message user-message">
+            <div className="chat-bubble user-bubble">
               <p>{task.prompt}</p>
             </div>
           </div>
 
-          {/* Timeline */}
+          {/* Timeline (View steps) */}
           {events.length > 0 && (
             <div className="timeline-section">
-              <button
-                className={`view-steps-btn ${showSteps ? 'expanded' : ''}`}
-                onClick={() => setShowSteps(!showSteps)}
-              >
-                View steps
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </button>
+              <div className="timeline-controls">
+                <button
+                  className={`view-steps-btn ${showSteps ? 'expanded' : ''}`}
+                  onClick={() => setShowSteps(!showSteps)}
+                >
+                  View steps
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+                {showSteps && (
+                  <button
+                    className={`verbose-toggle-btn ${verboseSteps ? 'active' : ''}`}
+                    onClick={toggleVerboseSteps}
+                    title={verboseSteps ? 'Show important steps only' : 'Show all steps (verbose)'}
+                  >
+                    {verboseSteps ? 'Verbose' : 'Summary'}
+                  </button>
+                )}
+              </div>
 
               {showSteps && (
                 <div className="timeline-events" ref={timelineRef}>
-                  {events.map((event, index) => {
+                  {filteredEvents.map((event, index) => {
                     const isExpandable = hasEventDetails(event);
-                    const isExpanded = isEventExpanded(event, index);
+                    const isExpanded = isEventExpanded(event);
                     const isUserMessage = event.type === 'user_message';
 
-                    // Render user messages as chat bubbles on the right
+                    // Render user messages as chat bubbles on the right (same style as original prompt)
                     if (isUserMessage) {
                       return (
-                        <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event user-message-event">
-                          <div className="user-message-bubble">
-                            <div className="user-message-content">{event.payload?.message || 'User message'}</div>
-                            <div className="user-message-time">{formatTime(event.timestamp)}</div>
+                        <div key={event.id || `event-${index}`} className="chat-message user-message">
+                          <div className="chat-bubble user-bubble">
+                            <p>{event.payload?.message || 'User message'}</p>
                           </div>
                         </div>
                       );
                     }
 
                     return (
-                      <div key={`event-${index}-${event.id || 'no-id'}`} className="timeline-event">
+                      <div key={event.id || `event-${index}`} className="timeline-event">
                         <div className="event-indicator">
                           <div className={`event-dot ${getEventDotClass(event.type)}`} />
-                          {index < events.length - 1 && <div className="event-line" />}
+                          {index < filteredEvents.length - 1 && <div className="event-line" />}
                         </div>
                         <div className="event-content">
                           <div
                             className={`event-header ${isExpandable ? 'expandable' : ''} ${isExpanded ? 'expanded' : ''}`}
-                            onClick={isExpandable ? () => toggleEventExpanded(index) : undefined}
+                            onClick={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
                           >
                             <div className="event-header-left">
                               {isExpandable && (
@@ -820,6 +884,23 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Assistant response - Always visible below steps */}
+          {lastAssistantMessage && (
+            <div className="chat-message assistant-message">
+              <div className="chat-bubble assistant-bubble">
+                <div className="chat-bubble-header">
+                  {task.status === 'completed' && <span className="chat-status">✅ Task Done!</span>}
+                  {task.status === 'executing' && <span className="chat-status executing">⏳ Working...</span>}
+                </div>
+                <div className="chat-bubble-content markdown-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {lastAssistantMessage.payload.message}
+                  </ReactMarkdown>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -869,26 +950,6 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" />
-                  </svg>
-                </button>
-              )}
-              {task.status === 'executing' ? (
-                <button
-                  className="send-btn send-btn-queue"
-                  onClick={handleQueue}
-                  disabled={!inputValue.trim() || !!queuedMessage}
-                  title={queuedMessage ? "A message is already queued" : "Add to queue"}
-                >
-                  <span>Queue</span>
-                </button>
-              ) : (
-                <button
-                  className="send-btn"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 19V5M5 12l7-7 7 7" />
                   </svg>
                 </button>
               )}

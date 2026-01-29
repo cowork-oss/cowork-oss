@@ -61,7 +61,7 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
   const getEventTitle = (event: TaskEvent) => {
     switch (event.type) {
       case 'task_created':
-        return 'Task created';
+        return '🚀 Task Started';
       case 'plan_created':
         return 'Execution plan created';
       case 'step_started':
@@ -87,9 +87,9 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
       case 'executing':
         return event.payload.message || 'Executing';
       case 'task_completed':
-        return 'Task completed';
+        return '✅ Task Done!';
       case 'follow_up_completed':
-        return 'Task completed';
+        return '✅ Task Done!';
       case 'log':
         return event.payload.message;
       default:

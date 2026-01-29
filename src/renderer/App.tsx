@@ -10,9 +10,7 @@ import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, AccentColor, QueueStatus, ToastNotification } from '../shared/types';
 
-// Storage keys
-const THEME_STORAGE_KEY = 'cowork-theme-mode';
-const ACCENT_STORAGE_KEY = 'cowork-accent-color';
+// Storage key for disclaimer (UI-only, doesn't need persistence via main process)
 const DISCLAIMER_ACCEPTED_KEY = 'cowork-disclaimer-accepted';
 
 // Helper to get effective theme based on system preference
@@ -42,15 +40,9 @@ export function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
-  // Theme state
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return (saved as ThemeMode) || 'dark';
-  });
-  const [accentColor, setAccentColor] = useState<AccentColor>(() => {
-    const saved = localStorage.getItem(ACCENT_STORAGE_KEY);
-    return (saved as AccentColor) || 'cyan';
-  });
+  // Theme state (loaded from main process on mount)
+  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const [accentColor, setAccentColor] = useState<AccentColor>('cyan');
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -64,8 +56,10 @@ export function App() {
     return localStorage.getItem(DISCLAIMER_ACCEPTED_KEY) === 'true';
   });
 
-  const handleDisclaimerAccept = () => {
-    localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'true');
+  const handleDisclaimerAccept = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'true');
+    }
     setDisclaimerAccepted(true);
   };
 
@@ -84,6 +78,20 @@ export function App() {
   // Load LLM config on mount
   useEffect(() => {
     loadLLMConfig();
+  }, []);
+
+  // Load appearance settings on mount
+  useEffect(() => {
+    const loadAppearanceSettings = async () => {
+      try {
+        const settings = await window.electronAPI.getAppearanceSettings();
+        setThemeMode(settings.themeMode);
+        setAccentColor(settings.accentColor);
+      } catch (error) {
+        console.error('Failed to load appearance settings:', error);
+      }
+    };
+    loadAppearanceSettings();
   }, []);
 
   // Load queue status and subscribe to updates
@@ -225,7 +233,7 @@ export function App() {
         const task = tasksRef.current.find(t => t.id === event.taskId);
         addToast({
           type: 'success',
-          title: 'Task Completed',
+          title: '✅ Task Done!',
           message: task?.title || 'Task finished successfully',
           taskId: event.taskId,
         });
@@ -365,12 +373,14 @@ export function App() {
 
   const handleThemeChange = (theme: ThemeMode) => {
     setThemeMode(theme);
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
+    // Persist to main process
+    window.electronAPI.saveAppearanceSettings({ themeMode: theme, accentColor });
   };
 
   const handleAccentChange = (accent: AccentColor) => {
     setAccentColor(accent);
-    localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+    // Persist to main process
+    window.electronAPI.saveAppearanceSettings({ themeMode, accentColor: accent });
   };
 
   // Show disclaimer modal on first launch

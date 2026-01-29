@@ -1,15 +1,16 @@
 import { useState } from 'react';
 
 interface DisclaimerModalProps {
-  onAccept: () => void;
+  onAccept: (dontShowAgain: boolean) => void;
 }
 
 export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
   const [selectedOption, setSelectedOption] = useState<'yes' | 'no' | null>(null);
+  const [dontShowAgain, setDontShowAgain] = useState(true);
 
   const handleContinue = () => {
     if (selectedOption === 'yes') {
-      onAccept();
+      onAccept(dontShowAgain);
     }
   };
 
@@ -102,6 +103,10 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
         {/* Continue button */}
         {selectedOption === 'yes' && (
           <div className="disclaimer-continue">
+            <label className="disclaimer-checkbox-label" onClick={() => setDontShowAgain(!dontShowAgain)}>
+              <span className="disclaimer-checkbox">{dontShowAgain ? '☑' : '☐'}</span>
+              <span>Don't show this again</span>
+            </label>
             <button onClick={handleContinue} className="disclaimer-continue-btn">
               Continue →
             </button>

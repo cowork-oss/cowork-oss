@@ -16,6 +16,7 @@ import {
   GatewayEvent,
   GatewayEventHandler,
 } from './channels/types';
+import { TelegramAdapter } from './channels/telegram';
 import { SecurityManager } from './security';
 import { SessionManager } from './session';
 import {
@@ -69,7 +70,12 @@ export class MessageRouter {
   private artifactRepo: ArtifactRepository;
 
   // Track pending responses for tasks
-  private pendingTaskResponses: Map<string, { adapter: ChannelAdapter; chatId: string; sessionId: string }> = new Map();
+  private pendingTaskResponses: Map<string, {
+    adapter: ChannelAdapter;
+    chatId: string;
+    sessionId: string;
+    originalMessageId?: string; // For reaction updates
+  }> = new Map();
 
   // Track pending approval requests for Discord/Telegram
   private pendingApprovals: Map<string, { taskId: string; approval: any; sessionId: string }> = new Map();
@@ -1507,12 +1513,18 @@ export class MessageRouter {
       adapter,
       chatId: message.chatId,
       sessionId,
+      originalMessageId: message.messageId, // Track for reaction updates
     });
+
+    // Start draft streaming for real-time response preview (Telegram)
+    if (adapter instanceof TelegramAdapter) {
+      await adapter.startDraftStream(message.chatId);
+    }
 
     // Send acknowledgment
     await adapter.sendMessage({
       chatId: message.chatId,
-      text: `🚀 Starting task: "${taskTitle}"\n\nI'll notify you when it's complete or if I need your input.`,
+      text: `🚀 Task Started: "${taskTitle}"\n\nI'll notify you when it's complete or if I need your input.`,
       replyTo: message.messageId,
     });
 
@@ -1551,8 +1563,9 @@ export class MessageRouter {
 
   /**
    * Send task update to channel
+   * Uses draft streaming for Telegram to show real-time progress
    */
-  async sendTaskUpdate(taskId: string, text: string): Promise<void> {
+  async sendTaskUpdate(taskId: string, text: string, isStreaming = false): Promise<void> {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) {
       // This is expected for tasks started from the UI (not via Telegram)
@@ -1560,13 +1573,30 @@ export class MessageRouter {
     }
 
     try {
-      await pending.adapter.sendMessage({
-        chatId: pending.chatId,
-        text,
-        parseMode: 'markdown',
-      });
+      // Use draft streaming for Telegram when streaming content
+      if (isStreaming && pending.adapter instanceof TelegramAdapter) {
+        await pending.adapter.updateDraftStream(pending.chatId, text);
+      } else {
+        await pending.adapter.sendMessage({
+          chatId: pending.chatId,
+          text,
+          parseMode: 'markdown',
+        });
+      }
     } catch (error) {
       console.error('Error sending task update:', error);
+    }
+  }
+
+  /**
+   * Send typing indicator to channel
+   */
+  async sendTypingIndicator(taskId: string): Promise<void> {
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending) return;
+
+    if (pending.adapter instanceof TelegramAdapter) {
+      await pending.adapter.sendTyping(pending.chatId);
     }
   }
 
@@ -1593,17 +1623,28 @@ export class MessageRouter {
 
     try {
       const message = result
-        ? `✅ Task completed!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
-        : '✅ Task completed!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
+        ? `✅ Task Done!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
+        : '✅ Task Done!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
 
-      // Split long messages (Telegram has 4096 char limit)
-      const chunks = this.splitMessage(message, 4000);
-      for (const chunk of chunks) {
-        await pending.adapter.sendMessage({
-          chatId: pending.chatId,
-          text: chunk,
-          parseMode: 'markdown',
-        });
+      // Finalize draft stream if using Telegram
+      if (pending.adapter instanceof TelegramAdapter) {
+        // Finalize the streaming draft with final message
+        await pending.adapter.finalizeDraftStream(pending.chatId, message);
+
+        // Update reaction from 👀 to ✅ on the original message
+        if (pending.originalMessageId) {
+          await pending.adapter.sendCompletionReaction(pending.chatId, pending.originalMessageId);
+        }
+      } else {
+        // Split long messages (Telegram has 4096 char limit)
+        const chunks = this.splitMessage(message, 4000);
+        for (const chunk of chunks) {
+          await pending.adapter.sendMessage({
+            chatId: pending.chatId,
+            text: chunk,
+            parseMode: 'markdown',
+          });
+        }
       }
 
       // Send artifacts if any were created
@@ -1681,6 +1722,16 @@ export class MessageRouter {
     if (!pending) return;
 
     try {
+      // Cancel any draft stream
+      if (pending.adapter instanceof TelegramAdapter) {
+        await pending.adapter.cancelDraftStream(pending.chatId);
+
+        // Remove ACK reaction on failure
+        if (pending.originalMessageId) {
+          await pending.adapter.removeAckReaction(pending.chatId, pending.originalMessageId);
+        }
+      }
+
       await pending.adapter.sendMessage({
         chatId: pending.chatId,
         text: `❌ Task failed: ${error}`,

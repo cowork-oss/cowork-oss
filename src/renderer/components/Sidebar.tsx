@@ -120,10 +120,8 @@ export function Sidebar({
 
   return (
     <div className="sidebar cli-sidebar">
-      {/* Terminal Header - no dots here since macOS traffic lights occupy this space */}
-      <div className="cli-sidebar-header">
-        <span className="cli-sidebar-title">TASKS</span>
-      </div>
+      {/* Sidebar Header - matches main header height */}
+      <div className="cli-sidebar-header"></div>
 
       {/* New Task Button */}
       <div className="sidebar-header">

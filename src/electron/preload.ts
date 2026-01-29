@@ -63,6 +63,9 @@ const IPC_CHANNELS = {
   GUARDRAIL_GET_SETTINGS: 'guardrail:getSettings',
   GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
   GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
+  // Appearance
+  APPEARANCE_GET_SETTINGS: 'appearance:getSettings',
+  APPEARANCE_SAVE_SETTINGS: 'appearance:saveSettings',
   // Task Queue
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
@@ -357,6 +360,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveGuardrailSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, settings),
   getGuardrailDefaults: () => ipcRenderer.invoke(IPC_CHANNELS.GUARDRAIL_GET_DEFAULTS),
 
+  // Appearance Settings APIs
+  getAppearanceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_GET_SETTINGS),
+  saveAppearanceSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_SAVE_SETTINGS, settings),
+
   // Queue APIs
   getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
   getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
@@ -571,6 +578,15 @@ export interface ElectronAPI {
     maxIterationsPerTask: number;
     iterationLimitEnabled: boolean;
   }>;
+  // Appearance Settings
+  getAppearanceSettings: () => Promise<{
+    themeMode: 'light' | 'dark' | 'system';
+    accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+  }>;
+  saveAppearanceSettings: (settings: {
+    themeMode: 'light' | 'dark' | 'system';
+    accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+  }) => Promise<{ success: boolean }>;
   // Queue APIs
   getQueueStatus: () => Promise<{
     runningCount: number;

@@ -494,6 +494,10 @@ export const IPC_CHANNELS = {
   GUARDRAIL_SAVE_SETTINGS: 'guardrail:saveSettings',
   GUARDRAIL_GET_DEFAULTS: 'guardrail:getDefaults',
 
+  // Appearance
+  APPEARANCE_GET_SETTINGS: 'appearance:getSettings',
+  APPEARANCE_SAVE_SETTINGS: 'appearance:saveSettings',
+
   // Task Queue
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
