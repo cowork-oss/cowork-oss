@@ -55,7 +55,7 @@ interface TextFragment {
     timestamp: Date;
     ctx: Context;
   }>;
-  timer: NodeJS.Timeout;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -83,7 +83,7 @@ export class TelegramAdapter implements ChannelAdapter {
   private processedUpdates: Map<number, number> = new Map(); // updateId -> timestamp
   private readonly DEDUP_CACHE_TTL = 60000; // 1 minute
   private readonly DEDUP_CACHE_MAX_SIZE = 1000;
-  private dedupCleanupTimer?: NodeJS.Timeout;
+  private dedupCleanupTimer?: ReturnType<typeof setTimeout>;
 
   // Text fragment assembly: buffer split messages
   private pendingFragments: Map<string, TextFragment> = new Map(); // chatId:userId -> fragment
