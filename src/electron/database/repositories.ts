@@ -89,6 +89,14 @@ export class WorkspaceRepository {
     stmt.run(JSON.stringify(permissions), id);
   }
 
+  /**
+   * Delete a workspace by ID
+   */
+  delete(id: string): void {
+    const stmt = this.db.prepare('DELETE FROM workspaces WHERE id = ?');
+    stmt.run(id);
+  }
+
   private mapRowToWorkspace(row: any): Workspace {
     // Note: network is true by default for browser tools (web access)
     const defaultPermissions: WorkspacePermissions = { read: true, write: true, delete: false, network: true, shell: false };
@@ -217,6 +225,19 @@ export class TaskRepository {
       ORDER BY created_at ASC
     `);
     const rows = stmt.all(...statuses) as any[];
+    return rows.map(row => this.mapRowToTask(row));
+  }
+
+  /**
+   * Find tasks by workspace ID
+   */
+  findByWorkspace(workspaceId: string): Task[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE workspace_id = ?
+      ORDER BY created_at DESC
+    `);
+    const rows = stmt.all(workspaceId) as any[];
     return rows.map(row => this.mapRowToTask(row));
   }
 
@@ -570,6 +591,8 @@ export interface ChannelSession {
   workspaceId?: string;
   state: 'idle' | 'active' | 'waiting_approval';
   context?: Record<string, unknown>;
+  shellEnabled?: boolean;
+  debugMode?: boolean;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -882,13 +905,25 @@ export class ChannelSessionRepository {
       fields.push('state = ?');
       values.push(updates.state);
     }
-    if ('context' in updates) {
-      fields.push('context = ?');
-      values.push(updates.context ? JSON.stringify(updates.context) : null);
-    }
     if ('lastActivityAt' in updates) {
       fields.push('last_activity_at = ?');
       values.push(updates.lastActivityAt);
+    }
+
+    // Handle shellEnabled and debugMode by merging into context
+    const hasContextUpdate = 'context' in updates || 'shellEnabled' in updates || 'debugMode' in updates;
+    if (hasContextUpdate) {
+      // Load existing session to merge context
+      const existing = this.findById(id);
+      const existingContext = existing?.context || {};
+      const newContext = {
+        ...existingContext,
+        ...('context' in updates ? updates.context : {}),
+        ...('shellEnabled' in updates ? { shellEnabled: updates.shellEnabled } : {}),
+        ...('debugMode' in updates ? { debugMode: updates.debugMode } : {}),
+      };
+      fields.push('context = ?');
+      values.push(JSON.stringify(newContext));
     }
 
     if (fields.length === 0) return;
@@ -928,6 +963,10 @@ export class ChannelSessionRepository {
   }
 
   private mapRowToSession(row: Record<string, unknown>): ChannelSession {
+    const context = row.context ? safeJsonParse(row.context as string, {} as Record<string, unknown>, 'session.context') : undefined;
+    // Extract shellEnabled and debugMode from context
+    const shellEnabled = context?.shellEnabled as boolean | undefined;
+    const debugMode = context?.debugMode as boolean | undefined;
     return {
       id: row.id as string,
       channelId: row.channel_id as string,
@@ -936,7 +975,9 @@ export class ChannelSessionRepository {
       taskId: (row.task_id as string) || undefined,
       workspaceId: (row.workspace_id as string) || undefined,
       state: row.state as 'idle' | 'active' | 'waiting_approval',
-      context: row.context ? safeJsonParse(row.context as string, undefined, 'session.context') : undefined,
+      context,
+      shellEnabled,
+      debugMode,
       createdAt: row.created_at as number,
       lastActivityAt: row.last_activity_at as number,
     };
