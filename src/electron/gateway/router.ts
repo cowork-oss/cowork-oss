@@ -33,6 +33,8 @@ import { AgentDaemon } from '../agent/daemon';
 import { Task, IPC_CHANNELS } from '../../shared/types';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { ModelKey, LLMProviderType } from '../agent/llm/types';
+import { getCustomSkillLoader } from '../agent/custom-skill-loader';
+import { app } from 'electron';
 
 export interface RouterConfig {
   /** Default workspace ID to use for new sessions */
@@ -488,6 +490,42 @@ export class MessageRouter {
 
       case '/queue':
         await this.handleQueueCommand(adapter, message, args);
+        break;
+
+      case '/removeworkspace':
+        await this.handleRemoveWorkspaceCommand(adapter, message, sessionId, args);
+        break;
+
+      case '/retry':
+        await this.handleRetryCommand(adapter, message, sessionId);
+        break;
+
+      case '/history':
+        await this.handleHistoryCommand(adapter, message, sessionId);
+        break;
+
+      case '/skills':
+        await this.handleSkillsCommand(adapter, message, sessionId);
+        break;
+
+      case '/skill':
+        await this.handleSkillCommand(adapter, message, sessionId, args);
+        break;
+
+      case '/providers':
+        await this.handleProvidersCommand(adapter, message);
+        break;
+
+      case '/settings':
+        await this.handleSettingsCommand(adapter, message, sessionId);
+        break;
+
+      case '/debug':
+        await this.handleDebugCommand(adapter, message, sessionId);
+        break;
+
+      case '/version':
+        await this.handleVersionCommand(adapter, message);
         break;
 
       default:
@@ -2002,42 +2040,436 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
   }
 
   /**
+   * Handle /removeworkspace command
+   */
+  private async handleRemoveWorkspaceCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[]
+  ): Promise<void> {
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Please specify a workspace name to remove.\n\nUsage: `/removeworkspace <name>`',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const workspaceName = args.join(' ');
+    const workspaces = this.workspaceRepo.findAll();
+    const workspace = workspaces.find(
+      (w) => w.name.toLowerCase() === workspaceName.toLowerCase()
+    );
+
+    if (!workspace) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `❌ Workspace "${workspaceName}" not found.\n\nUse /workspaces to see available workspaces.`,
+      });
+      return;
+    }
+
+    // Check if this is the current workspace for the session
+    const session = this.sessionRepo.findById(sessionId);
+    if (session?.workspaceId === workspace.id) {
+      // Clear the workspace from session
+      this.sessionRepo.update(sessionId, { workspaceId: undefined });
+    }
+
+    // Remove the workspace
+    this.workspaceRepo.delete(workspace.id);
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `✅ Workspace "${workspace.name}" removed successfully.`,
+    });
+  }
+
+  /**
+   * Handle /retry command - retry the last failed task
+   */
+  private async handleRetryCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (!session?.workspaceId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ No workspace selected. Use /workspace to select one first.',
+      });
+      return;
+    }
+
+    // Find the last task for this session's workspace that failed or was cancelled
+    const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
+    const lastFailedTask = tasks
+      .filter((t) => t.status === 'error' || t.status === 'cancelled')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+    if (!lastFailedTask) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ No failed task found to retry.\n\nStart a new task by sending a message.',
+      });
+      return;
+    }
+
+    // Re-submit the task by sending the original prompt as a new message
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `🔄 Retrying task...\n\nOriginal prompt: "${lastFailedTask.title}"`,
+    });
+
+    // Create a synthetic message with the original prompt
+    const retryMessage: IncomingMessage = {
+      ...message,
+      text: lastFailedTask.title,
+    };
+
+    // Route as a regular task message
+    await this.routeMessage(adapter, retryMessage, sessionId);
+  }
+
+  /**
+   * Handle /history command - show recent task history
+   */
+  private async handleHistoryCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+
+    if (!session?.workspaceId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ No workspace selected. Use /workspace to select one first.',
+      });
+      return;
+    }
+
+    const tasks = this.taskRepo.findByWorkspace(session.workspaceId);
+    const recentTasks = tasks
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 10);
+
+    if (recentTasks.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '📋 No task history found.\n\nStart a new task by sending a message.',
+      });
+      return;
+    }
+
+    const statusEmoji: Record<string, string> = {
+      completed: '✅',
+      running: '⏳',
+      pending: '⏸️',
+      error: '❌',
+      cancelled: '🚫',
+    };
+
+    const historyText = recentTasks
+      .map((t, i) => {
+        const emoji = statusEmoji[t.status] || '❓';
+        const date = new Date(t.created_at).toLocaleDateString();
+        const title = t.title.length > 40 ? t.title.substring(0, 40) + '...' : t.title;
+        return `${i + 1}. ${emoji} ${title}\n   ${date} • ${t.status}`;
+      })
+      .join('\n\n');
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `📋 *Recent Tasks*\n\n${historyText}`,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /skills command - list available skills
+   */
+  private async handleSkillsCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    _sessionId: string
+  ): Promise<void> {
+    try {
+      const skillLoader = getCustomSkillLoader();
+      await skillLoader.initialize();
+      const skills = skillLoader.listTaskSkills();
+
+      if (skills.length === 0) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '📚 No skills available.\n\nSkills are stored in:\n`~/Library/Application Support/cowork-oss/skills/`',
+          parseMode: 'markdown',
+        });
+        return;
+      }
+
+      // Group skills by category
+      const byCategory = new Map<string, typeof skills>();
+      for (const skill of skills) {
+        const category = skill.category || 'Uncategorized';
+        if (!byCategory.has(category)) {
+          byCategory.set(category, []);
+        }
+        byCategory.get(category)!.push(skill);
+      }
+
+      let text = '📚 *Available Skills*\n\n';
+      for (const [category, categorySkills] of byCategory) {
+        text += `*${category}*\n`;
+        for (const skill of categorySkills) {
+          const status = skill.enabled !== false ? '✅' : '❌';
+          text += `${skill.icon || '⚡'} ${skill.name} ${status}\n`;
+          text += `   \`/skill ${skill.id}\` to toggle\n`;
+        }
+        text += '\n';
+      }
+
+      text += '_Use `/skill <name>` to toggle a skill on/off_';
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text,
+        parseMode: 'markdown',
+      });
+    } catch (error) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Failed to load skills.',
+      });
+    }
+  }
+
+  /**
+   * Handle /skill command - toggle a skill on/off
+   */
+  private async handleSkillCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    _sessionId: string,
+    args: string[]
+  ): Promise<void> {
+    if (args.length === 0) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Please specify a skill ID.\n\nUsage: `/skill <id>`\n\nUse /skills to see available skills.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    try {
+      const skillLoader = getCustomSkillLoader();
+      await skillLoader.initialize();
+      const skillId = args[0].toLowerCase();
+      const skill = skillLoader.getSkill(skillId);
+
+      if (!skill) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `❌ Skill "${skillId}" not found.\n\nUse /skills to see available skills.`,
+        });
+        return;
+      }
+
+      // Toggle the enabled state
+      const newState = skill.enabled === false;
+      await skillLoader.updateSkill(skillId, { enabled: newState });
+
+      const statusText = newState ? '✅ enabled' : '❌ disabled';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `${skill.icon || '⚡'} *${skill.name}* is now ${statusText}`,
+        parseMode: 'markdown',
+      });
+    } catch (error) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Failed to toggle skill.',
+      });
+    }
+  }
+
+  /**
+   * Handle /providers command - list available LLM providers
+   */
+  private async handleProvidersCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage
+  ): Promise<void> {
+    const providers = LLMProviderFactory.getAvailableProviders();
+    const current = LLMProviderFactory.getSelectedProvider();
+
+    const providerEmoji: Record<string, string> = {
+      anthropic: '🟠',
+      openai: '🟢',
+      google: '🔵',
+      bedrock: '🟡',
+      ollama: '⚪',
+      perplexity: '🟣',
+      pi: '🩷',
+    };
+
+    let text = '🤖 *Available Providers*\n\n';
+    for (const provider of providers) {
+      const emoji = providerEmoji[provider] || '⚡';
+      const isCurrent = provider === current ? ' ← current' : '';
+      text += `${emoji} \`${provider}\`${isCurrent}\n`;
+    }
+
+    text += '\n_Use `/provider <name>` to switch_';
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /settings command - view current settings
+   */
+  private async handleSettingsCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    const workspace = session?.workspaceId
+      ? this.workspaceRepo.findById(session.workspaceId)
+      : null;
+
+    const provider = LLMProviderFactory.getSelectedProvider();
+    const model = LLMProviderFactory.getSelectedModel();
+    const settings = LLMProviderFactory.getSettings();
+
+    let text = '⚙️ *Current Settings*\n\n';
+
+    text += '*Workspace*\n';
+    text += workspace ? `📁 ${workspace.name}\n` : '❌ None selected\n';
+    text += '\n';
+
+    text += '*AI Configuration*\n';
+    text += `🤖 Provider: \`${provider}\`\n`;
+    text += `🧠 Model: \`${model}\`\n`;
+    text += '\n';
+
+    text += '*Session*\n';
+    text += `🔧 Shell commands: ${session?.shellEnabled ? '✅' : '❌'}\n`;
+    text += `📝 Debug mode: ${session?.debugMode ? '✅' : '❌'}\n`;
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
+   * Handle /debug command - toggle debug mode
+   */
+  private async handleDebugCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    const currentDebug = session?.debugMode || false;
+    const newDebug = !currentDebug;
+
+    this.sessionRepo.update(sessionId, { debugMode: newDebug });
+
+    const statusText = newDebug ? '✅ enabled' : '❌ disabled';
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: `🐛 Debug mode is now ${statusText}`,
+    });
+  }
+
+  /**
+   * Handle /version command - show version info
+   */
+  private async handleVersionCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage
+  ): Promise<void> {
+    const version = app.getVersion();
+    const electronVersion = process.versions.electron;
+    const nodeVersion = process.versions.node;
+    const platform = process.platform;
+    const arch = process.arch;
+
+    const text = `📦 *CoWork-OSS*
+
+Version: \`${version}\`
+Platform: \`${platform}\` (${arch})
+Electron: \`${electronVersion}\`
+Node.js: \`${nodeVersion}\`
+
+🔗 [GitHub](https://github.com/CoWork-OS/cowork-oss)`;
+
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text,
+      parseMode: 'markdown',
+    });
+  }
+
+  /**
    * Get help text
    */
   private getHelpText(): string {
     return `📚 *Available Commands*
 
+*Core*
 /start - Start the bot
 /help - Show this help message
-/status - Check bot status and current workspace
+/status - Check bot status and workspace
+/version - Show version information
+
+*Workspaces*
 /workspaces - List available workspaces
 /workspace <name> - Select a workspace
 /addworkspace <path> - Add a new workspace
+/removeworkspace <name> - Remove a workspace
+
+*Tasks*
 /newtask - Start a fresh task/conversation
-/provider - Show or change AI provider
-/model - Show or change model
-/shell - Enable/disable shell command execution
 /cancel - Cancel current task
+/retry - Retry the last failed task
+/history - Show recent task history
 /approve - Approve pending action (or /yes, /y)
 /deny - Reject pending action (or /no, /n)
-/queue - View task queue status
-/queue clear - Clear stuck tasks from queue
+/queue - View/clear task queue
 
-💬 *How to use*
-1. Add or select a workspace:
-   • \`/workspaces\` to see existing workspaces
-   • \`/workspace <name>\` to select one
-   • \`/addworkspace ~/path/to/folder\` to add new
-2. Enable shell commands if needed: \`/shell on\`
-3. Send me a message describing what you want to do
-4. Continue the conversation with follow-up messages
-5. Use \`/newtask\` when you want to start something new
-6. Use \`/models\` to see AI models, \`/model <name>\` to switch
+*Models*
+/providers - List available AI providers
+/provider <name> - Show or change provider
+/models - List available AI models
+/model <name> - Show or change model
 
-Examples:
-• "What files are in this project?"
-• "Create a new React component called Button"
-• "Run npm install to install dependencies"`;
+*Skills*
+/skills - List available skills
+/skill <name> - Toggle a skill on/off
+
+*Settings*
+/settings - View current settings
+/shell - Enable/disable shell commands
+/debug - Toggle debug mode
+
+💬 *Quick Start*
+1. \`/workspaces\` → \`/workspace <name>\`
+2. \`/shell on\` (if needed)
+3. Send your task message
+4. \`/newtask\` to start fresh`;
   }
 
   /**
