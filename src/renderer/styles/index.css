@@ -8296,7 +8296,7 @@ button {
 }
 
 .mcp-modal {
-  background: #1e1e1e;
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   width: 90%;
@@ -8304,7 +8304,12 @@ button {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
+}
+
+.theme-light .mcp-modal {
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 
 .mcp-modal-header {
@@ -8354,6 +8359,26 @@ button {
   margin-bottom: 0;
 }
 
+.mcp-modal-content input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.mcp-modal-content input[type="text"]:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.theme-light .mcp-modal-content input[type="text"] {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
 .mcp-env-textarea {
   width: 100%;
   padding: 10px 12px;
@@ -8365,6 +8390,11 @@ button {
   font-size: 13px;
   resize: vertical;
   min-height: 100px;
+}
+
+.theme-light .mcp-env-textarea {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.15);
 }
 
 .mcp-env-textarea:focus {
@@ -8404,6 +8434,11 @@ button {
   padding: 12px;
 }
 
+.theme-light .mcp-tool-item {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
 .mcp-tool-name {
   font-size: 14px;
   font-weight: 600;
@@ -8425,6 +8460,84 @@ button {
 
 .mcp-tool-params-label {
   font-weight: 500;
+}
+
+/* MCP Filesystem Paths UI */
+.mcp-paths-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.mcp-paths-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.theme-light .mcp-paths-empty {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.mcp-path-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.theme-light .mcp-path-item {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.mcp-path-icon {
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.mcp-path-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.mcp-path-remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.mcp-path-remove:hover {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.mcp-add-path-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .settings-textarea {

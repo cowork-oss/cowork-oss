@@ -4,6 +4,7 @@ import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { SlackSettings } from './SlackSettings';
 import { WhatsAppSettings } from './WhatsAppSettings';
+import { ImessageSettings } from './ImessageSettings';
 import { SearchSettings } from './SearchSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { GuardrailSettings } from './GuardrailSettings';
@@ -13,7 +14,7 @@ import { SkillsSettings } from './SkillsSettings';
 import { MCPSettings } from './MCPSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools';
 
 interface SettingsProps {
   onBack: () => void;
@@ -734,6 +735,17 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             Slack
           </button>
           <button
+            className={`settings-nav-item ${activeTab === 'imessage' ? 'active' : ''}`}
+            onClick={() => setActiveTab('imessage')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <circle cx="9" cy="10" r="1" fill="currentColor" />
+              <circle cx="15" cy="10" r="1" fill="currentColor" />
+            </svg>
+            iMessage
+          </button>
+          <button
             className={`settings-nav-item ${activeTab === 'guardrails' ? 'active' : ''}`}
             onClick={() => setActiveTab('guardrails')}
           >
@@ -813,6 +825,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <SlackSettings />
           ) : activeTab === 'whatsapp' ? (
             <WhatsAppSettings />
+          ) : activeTab === 'imessage' ? (
+            <ImessageSettings />
           ) : activeTab === 'search' ? (
             <SearchSettings />
           ) : activeTab === 'updates' ? (
