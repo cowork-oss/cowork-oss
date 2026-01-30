@@ -259,6 +259,9 @@ export const MCP_METHODS = {
   RESOURCES_LIST_CHANGED: 'notifications/resources/list_changed',
   RESOURCES_UPDATED: 'notifications/resources/updated',
   PROMPTS_LIST_CHANGED: 'notifications/prompts/list_changed',
+  CANCELLED: 'notifications/cancelled',
+  PROGRESS: 'notifications/progress',
+  MESSAGE: 'notifications/message',
 } as const;
 
 // MCP Error Codes

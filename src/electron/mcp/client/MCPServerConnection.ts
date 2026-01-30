@@ -262,10 +262,9 @@ export class MCPServerConnection extends EventEmitter {
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {
-        // We support receiving tool/resource/prompt list change notifications
-        roots: {
-          listChanged: true,
-        },
+        // Declare capabilities we actually support
+        // Note: roots capability removed - we don't respond to roots/list requests
+        // and some servers timeout waiting for the response
       },
       clientInfo: CLIENT_INFO,
     });
@@ -361,8 +360,22 @@ export class MCPServerConnection extends EventEmitter {
         this.refreshPrompts();
         break;
 
+      case MCP_METHODS.CANCELLED:
+        // Request was cancelled by the server - this is informational
+        // The corresponding pending request will be rejected with an error
+        break;
+
+      case MCP_METHODS.PROGRESS:
+        // Progress updates for long-running operations - currently ignored
+        break;
+
+      case MCP_METHODS.MESSAGE:
+        // Server log messages - could be logged at debug level if needed
+        break;
+
       default:
-        console.log(`[MCPServerConnection] Unhandled notification: ${notification.method}`);
+        // Only log truly unknown notifications at debug level
+        console.debug(`[MCPServerConnection] Unknown notification: ${notification.method}`);
     }
   }
 
