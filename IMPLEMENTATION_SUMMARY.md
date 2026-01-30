@@ -8,7 +8,7 @@ A **fully functional macOS desktop application** for agentic task automation wit
 - **Real Office document creation**: Excel (.xlsx), Word (.docx), PDF, PowerPoint (.pptx)
 - **Web search integration**: Tavily, Brave, SerpAPI, Google Custom Search
 - **Browser automation**: Full Playwright integration for web interactions
-- **Channel integrations**: Telegram, Discord, and Slack bots for remote task execution
+- **Channel integrations**: WhatsApp, Telegram, Discord, and Slack bots for remote task execution
 - **In-app Settings**: Secure credential storage with no .env files required
 - **Auto-updates**: Built-in update manager for seamless upgrades
 
@@ -582,7 +582,7 @@ npm run type-check       # Check TypeScript types
 | Web search | Yes | Yes | Complete |
 | Browser automation | Yes | Yes | Complete |
 | Multi-provider LLM | Yes | Yes | Complete |
-| Remote channels | Yes | Yes (Telegram, Discord, Slack) | Complete |
+| Remote channels | Yes | Yes (WhatsApp, Telegram, Discord, Slack) | Complete |
 | Goal Mode | Yes | Yes | Complete |
 | Dynamic re-planning | Yes | Yes | Complete |
 | System tools | Yes | Yes | Complete |
@@ -603,7 +603,7 @@ CoWork-OSS is a production-ready agentic task automation app with:
 - **4 search providers** with fallback
 - **12 browser automation tools**
 - **4 document skills** with real Office output
-- **3 channel integrations** (Telegram, Discord, Slack)
+- **4 channel integrations** (WhatsApp, Telegram, Discord, Slack)
 - **Full MCP support** (Client, Host, Registry with SSE/WebSocket)
 - **Custom Skills** (user-defined reusable workflows)
 - **Goal Mode** (success criteria with auto-retry)

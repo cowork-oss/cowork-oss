@@ -165,6 +165,15 @@ Open **Settings** > **Web Search** tab:
 
 ### Channel Integrations (Optional)
 
+#### WhatsApp Bot
+1. Open **Settings** > **WhatsApp**
+2. Click **Add WhatsApp Channel**
+3. A QR code will appear
+4. Open WhatsApp on phone → **Settings** > **Linked Devices** > **Link a Device**
+5. Scan the QR code
+6. Once connected, enable **Self-Chat Mode** if using your personal number
+7. Set a **Response Prefix** (e.g., "🤖") to distinguish bot messages
+
 #### Telegram Bot
 1. Create bot with [@BotFather](https://t.me/BotFather)
 2. Open **Settings** > **Channels** > **Telegram**
@@ -210,7 +219,7 @@ src/
 │   │   ├── browser/  # Playwright
 │   │   ├── tools/    # Tool implementations
 │   │   └── skills/   # Document skills
-│   ├── gateway/      # Telegram, Discord & Slack
+│   ├── gateway/      # WhatsApp, Telegram, Discord & Slack
 │   └── database/     # SQLite storage
 ├── renderer/         # Frontend (React)
 │   ├── App.tsx       # Main component
@@ -306,7 +315,7 @@ Don't use system folders like `/System` or `/Applications`.
 
 1. **Web Search**: Configure a search provider and ask research questions
 2. **Browser Automation**: Have the agent navigate websites and extract data
-3. **Remote Access**: Set up Telegram, Discord, or Slack bot for mobile/remote access
+3. **Remote Access**: Set up WhatsApp, Telegram, Discord, or Slack bot for mobile/remote access
 4. **Document Creation**: Create professional Excel, Word, PDF, or PowerPoint files
 5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
 6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills

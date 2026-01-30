@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WhatsApp Bot Integration** - Run tasks via WhatsApp with the Baileys library
+  - QR code pairing for WhatsApp Web connection
+  - Self-Chat Mode for users using their personal WhatsApp number
+    - Bot only responds in "Message Yourself" chat when enabled
+    - Configurable response prefix (e.g., "🤖") to distinguish bot messages
+  - Standard security modes: Pairing, Allowlist, Open
+  - Full command support: `/start`, `/help`, `/workspaces`, `/workspace`, `/newtask`, `/status`, `/cancel`, `/pair`
+  - Markdown to WhatsApp formatting conversion (`**bold**` → `*bold*`, headers, strikethrough, links)
+  - Automatic cleanup of expired pairing codes
+  - Logout and re-pairing support
 - **AppleScript Execution** - New `run_applescript` system tool for macOS automation
   - Execute AppleScript code to control applications and automate system tasks
   - Control apps like Safari, Finder, Mail, and more

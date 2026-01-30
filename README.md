@@ -110,6 +110,7 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
 - **Parallel Task Queue**: Run multiple tasks concurrently with configurable limits (1-10, default 3)
 - **Quick Task FAB**: Floating action button for rapid task creation
 - **Toast Notifications**: Real-time notifications for task completion and failures
+- **WhatsApp Bot**: Run tasks via WhatsApp with QR code pairing, self-chat mode, and markdown support
 - **Telegram Bot**: Run tasks remotely via Telegram with workspace selection and streaming responses
 - **Discord Bot**: Run tasks via Discord with slash commands and direct messages
 - **Slack Bot**: Run tasks via Slack with Socket Mode, direct messages, and channel mentions
@@ -466,6 +467,7 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [x] Built-in skills (documents, spreadsheets, presentations)
 - [x] **Real Office format support** (Excel .xlsx, Word .docx, PDF, PowerPoint .pptx)
 - [x] SQLite local persistence
+- [x] **WhatsApp bot integration** with QR code pairing and self-chat mode
 - [x] Telegram bot integration for remote task execution
 - [x] **Discord bot integration** with slash commands and DM support
 - [x] **Slack bot integration** with Socket Mode and channel mentions
@@ -501,6 +503,134 @@ If requested by the rights holder, we will update naming/branding to avoid confu
 - [ ] VM sandbox using macOS Virtualization.framework
 - [ ] Network egress controls with proxy
 - [ ] Skill marketplace/loader
+
+---
+
+## WhatsApp Bot Integration
+
+CoWork-OSS supports running tasks via WhatsApp using the Baileys library for Web WhatsApp connections. This allows you to interact with your agent from WhatsApp on any device.
+
+### Setting Up WhatsApp
+
+#### 1. Add WhatsApp Channel in CoWork-OSS
+
+1. Open CoWork-OSS and go to **Settings** (gear icon)
+2. Navigate to the **WhatsApp** tab
+3. Click **Add WhatsApp Channel**
+4. A QR code will appear on screen
+
+#### 2. Scan the QR Code
+
+1. Open WhatsApp on your phone
+2. Go to **Settings** > **Linked Devices**
+3. Tap **Link a Device**
+4. Scan the QR code displayed in CoWork-OSS
+5. Once connected, the channel status will show "Connected"
+
+### Self-Chat Mode
+
+WhatsApp integration supports a unique **Self-Chat Mode** for users who want to use their own WhatsApp number:
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Self-Chat Mode ON** (default) | Bot only responds in your "Message Yourself" chat | Using your personal WhatsApp |
+| **Self-Chat Mode OFF** | Bot responds to all incoming messages | Dedicated bot phone number |
+
+#### Configuring Self-Chat Mode
+
+1. In Settings → WhatsApp, toggle **Self-Chat Mode**
+2. Set a **Response Prefix** (e.g., "🤖") to distinguish bot responses from your messages
+3. When enabled, the bot only processes messages in your self-chat (the "Message Yourself" conversation)
+
+### Security Modes
+
+Choose the appropriate security mode for your use case:
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Pairing** (default) | Users must enter a pairing code generated in the app | Personal use, shared devices |
+| **Allowlist** | Only pre-approved phone numbers can interact | Team use with known users |
+| **Open** | Anyone can message the bot | ⚠️ Not recommended |
+
+### Pairing a User
+
+1. In CoWork-OSS Settings → WhatsApp, click **Generate Code**
+2. The user sends the 6-character code to the bot via WhatsApp
+3. Once verified, the user is authorized to use the bot
+4. Pairing codes expire after 5 minutes
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Start the bot and get help |
+| `/help` | Show available commands |
+| `/workspaces` | List all available workspaces |
+| `/workspace` | Select or show current workspace |
+| `/newtask` | Start a fresh task/conversation |
+| `/status` | Check bot and session status |
+| `/cancel` | Cancel the running task |
+| `/pair <code>` | Pair with a pairing code |
+
+### Using the Bot
+
+**In Self-Chat Mode:**
+1. Open your "Message Yourself" chat in WhatsApp
+2. Type your task or command
+3. The bot responds with a prefix (e.g., "🤖 Here's the result...")
+
+**With a Dedicated Number:**
+1. Message the bot's WhatsApp number directly
+2. Type your task or command
+3. Receive responses in real-time
+
+### Example Conversation
+
+```
+You: /workspaces
+Bot: 🤖 Available workspaces:
+     1. ~/Documents/project-a
+     2. ~/Downloads
+
+You: /workspace 1
+Bot: 🤖 Workspace selected: ~/Documents/project-a
+
+You: List all TypeScript files and summarize them
+Bot: 🤖 Task created... [streaming updates]
+Bot: 🤖 Found 12 TypeScript files. Here's a summary...
+```
+
+### Markdown Support
+
+The bot converts standard Markdown to WhatsApp-compatible formatting:
+- `**bold**` → `*bold*`
+- `### Headers` → `*Headers*` (bold)
+- `~~strikethrough~~` → `~strikethrough~`
+- `[link](url)` → `link (url)`
+- Code blocks are preserved with triple backticks
+
+### Logout and Re-pairing
+
+To disconnect and re-pair WhatsApp:
+1. In Settings → WhatsApp, click **Logout**
+2. This clears the session credentials
+3. Click **Enable** to generate a new QR code
+4. Scan again with your phone
+
+### Troubleshooting
+
+**QR Code not appearing:**
+- Ensure no other WhatsApp Web sessions are blocking
+- Try clicking "Logout" then "Enable" again
+
+**Messages not being received:**
+- Check that the channel status shows "Connected"
+- Verify Self-Chat Mode setting matches your use case
+- In Self-Chat Mode, messages must be in your "Message Yourself" chat
+
+**Bot responding to wrong chats:**
+- Enable Self-Chat Mode if using your personal number
+- The bot will only respond in your self-chat when this is enabled
 
 ---
 

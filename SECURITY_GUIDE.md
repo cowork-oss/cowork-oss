@@ -409,7 +409,7 @@ Security policies are evaluated across multiple layers in order:
 
 ### Context-Aware Tool Isolation
 
-When tasks originate from gateway bots (Telegram/Discord/Slack), tools are restricted based on context:
+When tasks originate from gateway bots (WhatsApp/Telegram/Discord/Slack), tools are restricted based on context:
 
 | Context | Restrictions |
 |---------|-------------|

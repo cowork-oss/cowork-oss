@@ -50,6 +50,7 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Located: `src/electron/agent/browser/`
 
 #### Channel Integrations
+- [x] WhatsApp bot with QR code pairing and self-chat mode
 - [x] Telegram bot with commands
 - [x] Discord bot with slash commands
 - [x] Slack bot with Socket Mode
@@ -206,7 +207,7 @@ cowork-oss/
 │   │   │   ├── tools/         # All tool implementations
 │   │   │   ├── skills/        # Document skills
 │   │   │   └── guardrails/    # Safety limits
-│   │   ├── gateway/           # Telegram, Discord & Slack
+│   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
 │   │   ├── mcp/               # Model Context Protocol
 │   │   │   ├── client/        # Connect to servers
 │   │   │   ├── host/          # Expose tools
@@ -303,7 +304,7 @@ Operations Requiring Approval:
 4. Create real Office documents (.xlsx, .docx, .pdf, .pptx)
 5. Search the web with multiple providers
 6. Automate browser interactions
-7. Run tasks remotely via Telegram, Discord, or Slack
+7. Run tasks remotely via WhatsApp, Telegram, Discord, or Slack
 8. Track all agent activity in real-time
 9. Approve/deny destructive operations
 10. Receive automatic updates
@@ -391,7 +392,7 @@ Expected behavior:
 - Multi-provider LLM support (6 providers)
 - Real Office document creation
 - Web search and browser automation
-- Remote access via Telegram, Discord, and Slack
+- Remote access via WhatsApp, Telegram, Discord, and Slack
 - Full MCP support (Client, Host, Registry)
 - Custom Skills system
 - Goal Mode with auto-retry
