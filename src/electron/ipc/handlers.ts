@@ -1349,4 +1349,20 @@ function setupMCPHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES, async () => {
     return BuiltinToolsSettingsManager.getToolsByCategory();
   });
+
+  // =====================
+  // Tray (Menu Bar) Handlers
+  // =====================
+
+  ipcMain.handle(IPC_CHANNELS.TRAY_GET_SETTINGS, async () => {
+    // Import trayManager lazily to avoid circular dependencies
+    const { trayManager } = await import('../tray');
+    return trayManager.getSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAY_SAVE_SETTINGS, async (_, settings) => {
+    const { trayManager } = await import('../tray');
+    trayManager.saveSettings(settings);
+    return { success: true };
+  });
 }

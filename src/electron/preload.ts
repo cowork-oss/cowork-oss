@@ -112,6 +112,14 @@ const IPC_CHANNELS = {
   BUILTIN_TOOLS_GET_SETTINGS: 'builtinTools:getSettings',
   BUILTIN_TOOLS_SAVE_SETTINGS: 'builtinTools:saveSettings',
   BUILTIN_TOOLS_GET_CATEGORIES: 'builtinTools:getCategories',
+  // Tray (Menu Bar)
+  TRAY_GET_SETTINGS: 'tray:getSettings',
+  TRAY_SAVE_SETTINGS: 'tray:saveSettings',
+  TRAY_NEW_TASK: 'tray:newTask',
+  TRAY_SELECT_WORKSPACE: 'tray:selectWorkspace',
+  TRAY_OPEN_SETTINGS: 'tray:openSettings',
+  TRAY_OPEN_ABOUT: 'tray:openAbout',
+  TRAY_CHECK_UPDATES: 'tray:checkUpdates',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -233,7 +241,15 @@ interface BuiltinToolsSettings {
     image: ToolCategoryConfig;
   };
   toolOverrides: Record<string, { enabled: boolean; priority?: 'high' | 'normal' | 'low' }>;
-  version: string;
+}
+
+// Tray (Menu Bar) Settings (inlined for sandboxed preload)
+interface TraySettings {
+  enabled: boolean;
+  showDockIcon: boolean;
+  startMinimized: boolean;
+  closeToTray: boolean;
+  showNotifications: boolean;
 }
 
 // Expose protected methods that allow the renderer process to use ipcRenderer
@@ -443,6 +459,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getBuiltinToolsSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_SETTINGS),
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_SAVE_SETTINGS, settings),
   getBuiltinToolsCategories: () => ipcRenderer.invoke(IPC_CHANNELS.BUILTIN_TOOLS_GET_CATEGORIES),
+
+  // Tray (Menu Bar) APIs
+  getTraySettings: () => ipcRenderer.invoke(IPC_CHANNELS.TRAY_GET_SETTINGS),
+  saveTraySettings: (settings: TraySettings) => ipcRenderer.invoke(IPC_CHANNELS.TRAY_SAVE_SETTINGS, settings),
+
+  // Tray event listeners (for renderer to respond to tray actions)
+  onTrayNewTask: (callback: () => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_NEW_TASK, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_NEW_TASK, callback);
+  },
+  onTraySelectWorkspace: (callback: (event: any, workspaceId: string) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_SELECT_WORKSPACE, callback);
+  },
+  onTrayOpenSettings: (callback: () => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_OPEN_SETTINGS, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_OPEN_SETTINGS, callback);
+  },
+  onTrayOpenAbout: (callback: () => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_OPEN_ABOUT, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_OPEN_ABOUT, callback);
+  },
+  onTrayCheckUpdates: (callback: () => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAY_CHECK_UPDATES, callback);
+  },
 });
 
 // Type declarations for TypeScript
@@ -458,6 +500,8 @@ export interface FileViewerResult {
   };
   error?: string;
 }
+
+export type { TraySettings };
 
 export interface ElectronAPI {
   selectFolder: () => Promise<string | null>;
@@ -674,6 +718,14 @@ export interface ElectronAPI {
   getBuiltinToolsSettings: () => Promise<BuiltinToolsSettings>;
   saveBuiltinToolsSettings: (settings: BuiltinToolsSettings) => Promise<{ success: boolean }>;
   getBuiltinToolsCategories: () => Promise<Record<string, string[]>>;
+  // Tray (Menu Bar)
+  getTraySettings: () => Promise<TraySettings>;
+  saveTraySettings: (settings: Partial<TraySettings>) => Promise<{ success: boolean }>;
+  onTrayNewTask: (callback: () => void) => () => void;
+  onTraySelectWorkspace: (callback: (event: any, workspaceId: string) => void) => () => void;
+  onTrayOpenSettings: (callback: () => void) => () => void;
+  onTrayOpenAbout: (callback: () => void) => () => void;
+  onTrayCheckUpdates: (callback: () => void) => () => void;
 }
 
 declare global {

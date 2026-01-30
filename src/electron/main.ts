@@ -11,6 +11,7 @@ import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
+import { trayManager } from './tray';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -134,6 +135,11 @@ app.whenReady().then(async () => {
     // Initialize update manager with main window reference
     updateManager.setMainWindow(mainWindow);
 
+    // Initialize menu bar tray (macOS native companion)
+    if (process.platform === 'darwin') {
+      await trayManager.initialize(mainWindow, channelGateway, dbManager);
+    }
+
     // Show migration notification after window is ready
     if (migrationResult.migrated && migrationResult.migratedKeys.length > 0) {
       mainWindow.webContents.once('did-finish-load', () => {
@@ -166,6 +172,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  // Destroy tray
+  trayManager.destroy();
+
   if (channelGateway) {
     await channelGateway.shutdown();
   }

@@ -10,6 +10,15 @@ export interface AppearanceSettings {
   disclaimerAccepted?: boolean;
 }
 
+// Tray (Menu Bar) Settings
+export interface TraySettings {
+  enabled: boolean;
+  showDockIcon: boolean;
+  startMinimized: boolean;
+  closeToTray: boolean;
+  showNotifications: boolean;
+}
+
 export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'cyan', label: 'Cyan' },
   { id: 'blue', label: 'Blue' },
@@ -540,6 +549,15 @@ export const IPC_CHANNELS = {
   BUILTIN_TOOLS_GET_SETTINGS: 'builtinTools:getSettings',
   BUILTIN_TOOLS_SAVE_SETTINGS: 'builtinTools:saveSettings',
   BUILTIN_TOOLS_GET_CATEGORIES: 'builtinTools:getCategories',
+
+  // Tray (Menu Bar)
+  TRAY_GET_SETTINGS: 'tray:getSettings',
+  TRAY_SAVE_SETTINGS: 'tray:saveSettings',
+  TRAY_NEW_TASK: 'tray:newTask',
+  TRAY_SELECT_WORKSPACE: 'tray:selectWorkspace',
+  TRAY_OPEN_SETTINGS: 'tray:openSettings',
+  TRAY_OPEN_ABOUT: 'tray:openAbout',
+  TRAY_CHECK_UPDATES: 'tray:checkUpdates',
 } as const;
 
 // LLM Provider types
