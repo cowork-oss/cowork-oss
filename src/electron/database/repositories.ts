@@ -832,6 +832,30 @@ export class ChannelUserRepository {
     stmt.run(channelId);
   }
 
+  delete(id: string): void {
+    const stmt = this.db.prepare('DELETE FROM channel_users WHERE id = ?');
+    stmt.run(id);
+  }
+
+  /**
+   * Delete expired pending pairing entries
+   * These are placeholder entries created when generating pairing codes that have expired
+   * Returns the number of deleted entries
+   */
+  deleteExpiredPending(channelId: string): number {
+    const now = Date.now();
+    const stmt = this.db.prepare(`
+      DELETE FROM channel_users
+      WHERE channel_id = ?
+        AND allowed = 0
+        AND channel_user_id LIKE 'pending_%'
+        AND pairing_expires_at IS NOT NULL
+        AND pairing_expires_at < ?
+    `);
+    const result = stmt.run(channelId, now);
+    return result.changes;
+  }
+
   findByPairingCode(channelId: string, pairingCode: string): ChannelUser | undefined {
     const stmt = this.db.prepare('SELECT * FROM channel_users WHERE channel_id = ? AND UPPER(pairing_code) = UPPER(?)');
     const row = stmt.get(channelId, pairingCode) as Record<string, unknown> | undefined;

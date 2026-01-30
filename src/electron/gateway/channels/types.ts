@@ -168,6 +168,34 @@ export interface SlackConfig extends ChannelConfig {
 }
 
 /**
+ * WhatsApp-specific configuration
+ */
+export interface WhatsAppConfig extends ChannelConfig {
+  /** Directory to store auth credentials (optional, defaults to app data) */
+  authDir?: string;
+  /** Print QR code to terminal for debugging */
+  printQrToTerminal?: boolean;
+  /** Send read receipts for incoming messages (default: true) */
+  sendReadReceipts?: boolean;
+  /** Allowed phone numbers in E.164 format without + (e.g., "14155551234") */
+  allowedNumbers?: string[];
+  /** Enable message deduplication (default: true) */
+  deduplicationEnabled?: boolean;
+  /**
+   * Self-chat mode: When true, the bot is running on the same WhatsApp account
+   * as the user (messaging yourself). This mode:
+   * - Disables read receipts (to avoid marking your own messages as read)
+   * - Adds a response prefix to distinguish bot messages from user messages
+   */
+  selfChatMode?: boolean;
+  /**
+   * Prefix to add to bot responses (e.g., "[CoWork]" or "🤖")
+   * Only used when selfChatMode is true. Default: "🤖"
+   */
+  responsePrefix?: string;
+}
+
+/**
  * Channel adapter interface
  * All channel implementations must implement this interface
  */

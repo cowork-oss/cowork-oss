@@ -311,9 +311,21 @@ export class SecurityManager {
 
   /**
    * Get all users for a channel
+   * Automatically cleans up expired pending pairing entries before returning
    */
   getChannelUsers(channelId: string): ChannelUser[] {
+    // Cleanup expired pending entries first
+    this.cleanupExpiredPending(channelId);
     return this.userRepo.findByChannelId(channelId);
+  }
+
+  /**
+   * Cleanup expired pending pairing entries for a channel
+   * These are placeholder entries created when generating pairing codes that have expired
+   * Returns the number of deleted entries
+   */
+  cleanupExpiredPending(channelId: string): number {
+    return this.userRepo.deleteExpiredPending(channelId);
   }
 
   /**

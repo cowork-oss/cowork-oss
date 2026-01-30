@@ -329,6 +329,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('gateway:message', subscription);
   },
 
+  // WhatsApp-specific APIs
+  getWhatsAppInfo: () => ipcRenderer.invoke('whatsapp:get-info'),
+  whatsAppLogout: () => ipcRenderer.invoke('whatsapp:logout'),
+
+  // WhatsApp event listeners
+  onWhatsAppQRCode: (callback: (event: any, qr: string) => void) => {
+    ipcRenderer.on('whatsapp:qr-code', callback);
+  },
+  onWhatsAppConnected: (callback: () => void) => {
+    ipcRenderer.on('whatsapp:connected', callback);
+  },
+  onWhatsAppStatus: (callback: (event: any, data: { status: string; error?: string }) => void) => {
+    ipcRenderer.on('whatsapp:status', callback);
+  },
+
   // Search Settings APIs
   getSearchSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_SETTINGS),
   saveSearchSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, settings),
@@ -490,8 +505,8 @@ export interface ElectronAPI {
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<any[]>;
-  addGatewayChannel: (data: { type: string; name: string; botToken: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string }) => Promise<any>;
-  updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string }) => Promise<void>;
+  addGatewayChannel: (data: { type: string; name: string; botToken?: string; securityMode?: string; applicationId?: string; guildIds?: string[]; appToken?: string; signingSecret?: string; allowedNumbers?: string[]; selfChatMode?: boolean; responsePrefix?: string }) => Promise<any>;
+  updateGatewayChannel: (data: { id: string; name?: string; securityMode?: string; config?: { selfChatMode?: boolean; responsePrefix?: string; [key: string]: unknown } }) => Promise<void>;
   removeGatewayChannel: (id: string) => Promise<void>;
   enableGatewayChannel: (id: string) => Promise<void>;
   disableGatewayChannel: (id: string) => Promise<void>;
@@ -501,6 +516,12 @@ export interface ElectronAPI {
   revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
   generateGatewayPairing: (channelId: string, userId: string, displayName?: string) => Promise<string>;
   onGatewayMessage: (callback: (data: any) => void) => () => void;
+  // WhatsApp-specific APIs
+  getWhatsAppInfo: () => Promise<{ qrCode?: string; phoneNumber?: string; status?: string }>;
+  whatsAppLogout: () => Promise<void>;
+  onWhatsAppQRCode: (callback: (event: any, qr: string) => void) => void;
+  onWhatsAppConnected: (callback: () => void) => void;
+  onWhatsAppStatus: (callback: (event: any, data: { status: string; error?: string }) => void) => void;
   // Search Settings
   getSearchSettings: () => Promise<{
     primaryProvider: 'tavily' | 'brave' | 'serpapi' | 'google' | null;

@@ -881,6 +881,7 @@ export function setupIpcHandlers(
       botUsername: ch.botUsername,
       securityMode: ch.securityConfig.mode,
       createdAt: ch.createdAt,
+      config: ch.config,
     }));
   });
 
@@ -945,6 +946,33 @@ export function setupIpcHandlers(
       };
     }
 
+    if (validated.type === 'whatsapp') {
+      const channel = await gateway.addWhatsAppChannel(
+        validated.name,
+        validated.allowedNumbers,
+        validated.securityMode || 'pairing',
+        validated.selfChatMode ?? true,
+        validated.responsePrefix ?? '🤖'
+      );
+
+      // Automatically enable and connect WhatsApp to start QR code generation
+      // This is done asynchronously to not block the response
+      gateway.enableWhatsAppWithQRForwarding(channel.id).catch((err) => {
+        console.error('Failed to enable WhatsApp channel:', err);
+      });
+
+      return {
+        id: channel.id,
+        type: channel.type,
+        name: channel.name,
+        enabled: channel.enabled,
+        status: 'connecting', // Indicate we're connecting
+        securityMode: channel.securityConfig.mode,
+        createdAt: channel.createdAt,
+        config: channel.config,
+      };
+    }
+
     // TypeScript exhaustiveness check - should never reach here due to discriminated union
     throw new Error(`Unsupported channel type`);
   });
@@ -960,6 +988,9 @@ export function setupIpcHandlers(
     if (validated.name !== undefined) updates.name = validated.name;
     if (validated.securityMode !== undefined) {
       updates.securityConfig = { ...channel.securityConfig, mode: validated.securityMode };
+    }
+    if (validated.config !== undefined) {
+      updates.config = { ...channel.config, ...validated.config };
     }
 
     gateway.updateChannel(validated.id, updates);
@@ -1015,6 +1046,17 @@ export function setupIpcHandlers(
     if (!gateway) throw new Error('Gateway not initialized');
     const validated = validateInput(GeneratePairingSchema, data, 'generate pairing');
     return gateway.generatePairingCode(validated.channelId, validated.userId, validated.displayName);
+  });
+
+  // WhatsApp-specific handlers
+  ipcMain.handle('whatsapp:get-info', async () => {
+    if (!gateway) return {};
+    return gateway.getWhatsAppInfo();
+  });
+
+  ipcMain.handle('whatsapp:logout', async () => {
+    if (!gateway) throw new Error('Gateway not initialized');
+    await gateway.whatsAppLogout();
   });
 
   // App Update handlers

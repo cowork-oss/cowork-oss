@@ -202,16 +202,32 @@ export const AddSlackChannelSchema = z.object({
   securityMode: SecurityModeSchema.optional(),
 });
 
+export const AddWhatsAppChannelSchema = z.object({
+  type: z.literal('whatsapp'),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  allowedNumbers: z.array(z.string().max(20)).max(100).optional(),
+  securityMode: SecurityModeSchema.optional(),
+  selfChatMode: z.boolean().optional(),
+  responsePrefix: z.string().max(20).optional(),
+});
+
 export const AddChannelSchema = z.discriminatedUnion('type', [
   AddTelegramChannelSchema,
   AddDiscordChannelSchema,
   AddSlackChannelSchema,
+  AddWhatsAppChannelSchema,
 ]);
+
+export const ChannelConfigSchema = z.object({
+  selfChatMode: z.boolean().optional(),
+  responsePrefix: z.string().max(20).optional(),
+}).passthrough(); // Allow additional properties
 
 export const UpdateChannelSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(MAX_TITLE_LENGTH).optional(),
   securityMode: SecurityModeSchema.optional(),
+  config: ChannelConfigSchema.optional(),
 });
 
 export const GrantAccessSchema = z.object({

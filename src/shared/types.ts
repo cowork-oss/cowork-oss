@@ -631,6 +631,11 @@ export interface ChannelData {
   botUsername?: string;
   securityMode: SecurityMode;
   createdAt: number;
+  config?: {
+    selfChatMode?: boolean;
+    responsePrefix?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ChannelUserData {
@@ -646,17 +651,29 @@ export interface ChannelUserData {
 export interface AddChannelRequest {
   type: ChannelType;
   name: string;
-  botToken: string;
+  botToken?: string;
   securityMode?: SecurityMode;
   // Discord-specific fields
   applicationId?: string;
   guildIds?: string[];
+  // Slack-specific fields
+  appToken?: string;
+  signingSecret?: string;
+  // WhatsApp-specific fields
+  allowedNumbers?: string[];
+  selfChatMode?: boolean;
+  responsePrefix?: string;
 }
 
 export interface UpdateChannelRequest {
   id: string;
   name?: string;
   securityMode?: SecurityMode;
+  config?: {
+    selfChatMode?: boolean;
+    responsePrefix?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface TestChannelResult {

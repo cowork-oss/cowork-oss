@@ -123,6 +123,13 @@ export class MessageRouter {
   }
 
   /**
+   * Get the main window for sending IPC events
+   */
+  getMainWindow(): BrowserWindow | null {
+    return this.mainWindow;
+  }
+
+  /**
    * Register a channel adapter
    */
   registerAdapter(adapter: ChannelAdapter): void {
@@ -400,6 +407,42 @@ export class MessageRouter {
       return;
     }
 
+    // Check if session has no workspace - might be workspace selection
+    const session = this.sessionRepo.findById(sessionId);
+    if (!session?.workspaceId) {
+      // Check if this looks like workspace selection (number or short name)
+      const workspaces = this.workspaceRepo.findAll();
+      if (workspaces.length > 0) {
+        // Try to match by number
+        const num = parseInt(text, 10);
+        if (!isNaN(num) && num > 0 && num <= workspaces.length) {
+          const workspace = workspaces[num - 1];
+          this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: `✅ *${workspace.name}* selected!\n\nYou can now send me tasks.\n\nExample: "Create a new React component called Button"`,
+            parseMode: 'markdown',
+          });
+          return;
+        }
+
+        // Try to match by name (case-insensitive partial match)
+        const matchedWorkspace = workspaces.find(
+          ws => ws.name.toLowerCase() === text.toLowerCase() ||
+                ws.name.toLowerCase().startsWith(text.toLowerCase())
+        );
+        if (matchedWorkspace) {
+          this.sessionManager.setSessionWorkspace(sessionId, matchedWorkspace.id);
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: `✅ *${matchedWorkspace.name}* selected!\n\nYou can now send me tasks.\n\nExample: "Create a new React component called Button"`,
+            parseMode: 'markdown',
+          });
+          return;
+        }
+      }
+    }
+
     // Regular message - send to desktop app for task processing
     await this.forwardToDesktopApp(adapter, message, sessionId);
   }
@@ -416,16 +459,14 @@ export class MessageRouter {
 
     switch (command.toLowerCase()) {
       case '/start':
-        await adapter.sendMessage({
-          chatId: message.chatId,
-          text: this.config.welcomeMessage!,
-        });
+        await this.handleStartCommand(adapter, message, sessionId);
         break;
 
       case '/help':
         await adapter.sendMessage({
           chatId: message.chatId,
-          text: this.getHelpText(),
+          text: this.getHelpText(adapter.type),
+          parseMode: 'markdown',
         });
         break;
 
@@ -598,7 +639,25 @@ export class MessageRouter {
       return;
     }
 
-    // Build inline keyboard with workspace buttons
+    // WhatsApp doesn't support inline keyboards - use text-based selection
+    if (adapter.type === 'whatsapp') {
+      let text = '📁 *Available Workspaces*\n\n';
+      workspaces.forEach((ws, index) => {
+        text += `${index + 1}. *${ws.name}*\n   \`${ws.path}\`\n\n`;
+      });
+      text += '━━━━━━━━━━━━━━━\n';
+      text += 'Reply with the number or name to select.\n';
+      text += 'Example: `1` or `myproject`';
+
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Build inline keyboard with workspace buttons for Telegram/Discord
     const keyboard: InlineKeyboardButton[][] = [];
     for (const ws of workspaces) {
       // Create one button per row for better readability
@@ -1577,10 +1636,13 @@ export class MessageRouter {
       await adapter.startDraftStream(message.chatId);
     }
 
-    // Send acknowledgment
+    // Send acknowledgment - concise for WhatsApp
+    const ackMessage = adapter.type === 'whatsapp'
+      ? `⏳ Working on it...`
+      : `🚀 Task Started: "${taskTitle}"\n\nI'll notify you when it's complete or if I need your input.`;
     await adapter.sendMessage({
       chatId: message.chatId,
-      text: `🚀 Task Started: "${taskTitle}"\n\nI'll notify you when it's complete or if I need your input.`,
+      text: ackMessage,
       replyTo: message.messageId,
     });
 
@@ -1678,9 +1740,19 @@ export class MessageRouter {
     if (!pending) return;
 
     try {
-      const message = result
-        ? `✅ Task Done!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
-        : '✅ Task Done!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
+      // WhatsApp-optimized completion message
+      const isWhatsApp = pending.adapter.type === 'whatsapp';
+      let message: string;
+
+      if (isWhatsApp) {
+        message = result
+          ? `✅ Done!\n\n${result}`
+          : '✅ Done!';
+      } else {
+        message = result
+          ? `✅ Task Done!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
+          : '✅ Task Done!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
+      }
 
       // Finalize draft stream if using Telegram
       if (pending.adapter instanceof TelegramAdapter) {
@@ -1692,8 +1764,9 @@ export class MessageRouter {
           await pending.adapter.sendCompletionReaction(pending.chatId, pending.originalMessageId);
         }
       } else {
-        // Split long messages (Telegram has 4096 char limit)
-        const chunks = this.splitMessage(message, 4000);
+        // Split long messages (Telegram has 4096 char limit, WhatsApp ~65k but keep it reasonable)
+        const maxLen = isWhatsApp ? 4000 : 4000;
+        const chunks = this.splitMessage(message, maxLen);
         for (const chunk of chunks) {
           await pending.adapter.sendMessage({
             chatId: pending.chatId,
@@ -2474,9 +2547,97 @@ Node.js: \`${nodeVersion}\`
   }
 
   /**
-   * Get help text
+   * Handle /start command with smart onboarding
    */
-  private getHelpText(): string {
+  private async handleStartCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    const workspaces = this.workspaceRepo.findAll();
+
+    // WhatsApp-optimized welcome flow
+    if (adapter.type === 'whatsapp') {
+      if (session?.workspaceId) {
+        const workspace = this.workspaceRepo.findById(session.workspaceId);
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `👋 *Welcome back!*\n\nWorkspace: *${workspace?.name || 'Unknown'}*\n\nJust send me what you'd like me to do.\n\nType /help for commands.`,
+          parseMode: 'markdown',
+        });
+      } else if (workspaces.length === 0) {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `👋 *Welcome to CoWork!*\n\nI'm your AI coding assistant.\n\nFirst, add a workspace:\n\`/addworkspace /path/to/project\`\n\nOr add one from the desktop app.`,
+          parseMode: 'markdown',
+        });
+      } else if (workspaces.length === 1) {
+        // Auto-select the only workspace
+        const workspace = workspaces[0];
+        this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `👋 *Welcome to CoWork!*\n\n✅ Workspace: *${workspace.name}*\n\nJust tell me what you'd like me to do!\n\nExamples:\n• "Add dark mode support"\n• "Fix the login bug"\n• "Create a new API endpoint"`,
+          parseMode: 'markdown',
+        });
+      } else {
+        // Multiple workspaces - show selection
+        let text = `👋 *Welcome to CoWork!*\n\nSelect a workspace to start:\n\n`;
+        workspaces.forEach((ws, index) => {
+          text += `${index + 1}. *${ws.name}*\n`;
+        });
+        text += `\nReply with a number (e.g., \`1\`)`;
+
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text,
+          parseMode: 'markdown',
+        });
+      }
+      return;
+    }
+
+    // Standard welcome for Telegram/Discord
+    await adapter.sendMessage({
+      chatId: message.chatId,
+      text: this.config.welcomeMessage!,
+    });
+
+    // Show workspaces if none selected
+    if (!session?.workspaceId && workspaces.length > 0) {
+      await this.handleWorkspacesCommand(adapter, message);
+    }
+  }
+
+  /**
+   * Get help text - channel-specific for better UX
+   */
+  private getHelpText(channelType?: ChannelType): string {
+    // Compact help for WhatsApp (mobile-friendly)
+    if (channelType === 'whatsapp') {
+      return `📚 *Commands*
+
+*Basics*
+/workspaces - Select workspace
+/status - Current status
+/newtask - Fresh start
+
+*Tasks*
+/cancel - Stop task
+/approve or /yes - Approve action
+/deny or /no - Reject action
+
+*Settings*
+/shell on|off - Shell access
+/models - Change AI model
+
+━━━━━━━━━━━━━━━
+💡 Just send your task directly!
+Example: "Add a login form"`;
+    }
+
+    // Full help for other channels
     return `📚 *Available Commands*
 
 *Core*

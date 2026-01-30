@@ -8,3 +8,4 @@ export * from './types';
 export * from './telegram';
 export * from './discord';
 export * from './slack';
+export * from './whatsapp';

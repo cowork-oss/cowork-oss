@@ -16,11 +16,13 @@ import {
   TelegramConfig,
   DiscordConfig,
   SlackConfig,
+  WhatsAppConfig,
   GatewayEventHandler,
 } from './channels/types';
 import { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
 import { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 import { SlackAdapter, createSlackAdapter } from './channels/slack';
+import { WhatsAppAdapter, createWhatsAppAdapter } from './channels/whatsapp';
 import {
   ChannelRepository,
   ChannelUserRepository,
@@ -337,6 +339,45 @@ export class ChannelGateway {
   }
 
   /**
+   * Add a new WhatsApp channel
+   */
+  async addWhatsAppChannel(
+    name: string,
+    allowedNumbers?: string[],
+    securityMode: 'open' | 'allowlist' | 'pairing' = 'pairing',
+    selfChatMode: boolean = true,
+    responsePrefix: string = '🤖'
+  ): Promise<Channel> {
+    // Check if WhatsApp channel already exists
+    const existing = this.channelRepo.findByType('whatsapp');
+    if (existing) {
+      throw new Error('WhatsApp channel already configured. Update or remove it first.');
+    }
+
+    // Create channel record
+    const channel = this.channelRepo.create({
+      type: 'whatsapp',
+      name,
+      enabled: false, // Don't enable until QR code is scanned
+      config: {
+        allowedNumbers,
+        selfChatMode,
+        responsePrefix,
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: allowedNumbers,
+        pairingCodeTTL: 300, // 5 minutes
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: 'disconnected',
+    });
+
+    return channel;
+  }
+
+  /**
    * Update a channel configuration
    */
   updateChannel(channelId: string, updates: Partial<Channel>): void {
@@ -381,6 +422,97 @@ export class ChannelGateway {
     }
 
     this.channelRepo.update(channelId, { enabled: false, status: 'disconnected' });
+  }
+
+  /**
+   * Enable WhatsApp channel and set up QR code forwarding
+   * This method connects the WhatsApp adapter and forwards QR codes to the renderer
+   */
+  async enableWhatsAppWithQRForwarding(channelId: string): Promise<void> {
+    const channel = this.channelRepo.findById(channelId);
+    if (!channel || channel.type !== 'whatsapp') {
+      throw new Error('WhatsApp channel not found');
+    }
+
+    // Create and register adapter if not already done
+    let adapter = this.router.getAdapter('whatsapp') as WhatsAppAdapter | undefined;
+    if (!adapter) {
+      adapter = this.createAdapterForChannel(channel) as WhatsAppAdapter;
+      this.router.registerAdapter(adapter);
+    }
+
+    // Set up QR code forwarding to renderer
+    const mainWindow = this.router.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      adapter.onQrCode((qr: string) => {
+        console.log('WhatsApp QR code received, forwarding to renderer');
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whatsapp:qr-code', qr);
+        }
+      });
+
+      adapter.onStatusChange((status, error) => {
+        console.log(`WhatsApp status changed to: ${status}`);
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whatsapp:status', { status, error: error?.message });
+          if (status === 'connected') {
+            mainWindow.webContents.send('whatsapp:connected');
+            // Update channel status in database
+            this.channelRepo.update(channelId, {
+              enabled: true,
+              status: 'connected',
+              botUsername: adapter?.botUsername,
+            });
+          } else if (status === 'error') {
+            this.channelRepo.update(channelId, { status: 'error' });
+          } else if (status === 'disconnected') {
+            this.channelRepo.update(channelId, { status: 'disconnected' });
+          }
+        }
+      });
+    }
+
+    // Update channel state to connecting
+    this.channelRepo.update(channelId, { enabled: true, status: 'connecting' });
+
+    // Connect (this will trigger QR code generation)
+    await adapter.connect();
+  }
+
+  /**
+   * Get WhatsApp channel info including QR code
+   */
+  async getWhatsAppInfo(): Promise<{ qrCode?: string; phoneNumber?: string; status?: string }> {
+    const channel = this.channelRepo.findByType('whatsapp');
+    if (!channel) {
+      return {};
+    }
+
+    const adapter = this.router.getAdapter('whatsapp') as WhatsAppAdapter | undefined;
+    if (!adapter) {
+      return { status: channel.status };
+    }
+
+    return {
+      qrCode: adapter.qrCode,
+      phoneNumber: adapter.botUsername,
+      status: adapter.status,
+    };
+  }
+
+  /**
+   * Logout from WhatsApp and clear credentials
+   */
+  async whatsAppLogout(): Promise<void> {
+    const adapter = this.router.getAdapter('whatsapp') as WhatsAppAdapter | undefined;
+    if (adapter) {
+      await adapter.logout();
+    }
+
+    const channel = this.channelRepo.findByType('whatsapp');
+    if (channel) {
+      this.channelRepo.update(channel.id, { enabled: false, status: 'disconnected', botUsername: undefined });
+    }
   }
 
   /**
@@ -475,9 +607,11 @@ export class ChannelGateway {
 
   /**
    * Get users for a channel
+   * Automatically cleans up expired pending pairing entries
    */
   getChannelUsers(channelId: string): ReturnType<typeof this.userRepo.findByChannelId> {
-    return this.userRepo.findByChannelId(channelId);
+    // Use securityManager to trigger cleanup of expired pending entries
+    return this.securityManager.getChannelUsers(channelId);
   }
 
   // Messaging
@@ -605,6 +739,15 @@ export class ChannelGateway {
           signingSecret: channel.config.signingSecret as string | undefined,
         });
 
+      case 'whatsapp':
+        return createWhatsAppAdapter({
+          enabled: channel.enabled,
+          allowedNumbers: channel.config.allowedNumbers as string[] | undefined,
+          printQrToTerminal: true, // For debugging
+          selfChatMode: channel.config.selfChatMode as boolean | undefined ?? true,
+          responsePrefix: channel.config.responsePrefix as string | undefined ?? '🤖',
+        });
+
       default:
         throw new Error(`Unsupported channel type: ${channel.type}`);
     }
@@ -619,3 +762,4 @@ export * from './security';
 export { TelegramAdapter, createTelegramAdapter } from './channels/telegram';
 export { DiscordAdapter, createDiscordAdapter } from './channels/discord';
 export { SlackAdapter, createSlackAdapter } from './channels/slack';
+export { WhatsAppAdapter, createWhatsAppAdapter } from './channels/whatsapp';
