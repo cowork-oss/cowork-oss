@@ -361,6 +361,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
   const [appVersion, setAppVersion] = useState<string>('');
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
+  const [skillsSearchQuery, setSkillsSearchQuery] = useState('');
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   // Verbose mode - when false, only show important steps
@@ -401,6 +402,17 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
       .catch(err => console.error('Failed to load custom skills:', err));
   }, []);
 
+  // Filter skills based on search query
+  const filteredSkills = useMemo(() => {
+    if (!skillsSearchQuery.trim()) return customSkills;
+    const query = skillsSearchQuery.toLowerCase();
+    return customSkills.filter(skill =>
+      skill.name.toLowerCase().includes(query) ||
+      skill.description?.toLowerCase().includes(query) ||
+      skill.category?.toLowerCase().includes(query)
+    );
+  }, [customSkills, skillsSearchQuery]);
+
   // Sync shell permission state when workspace changes
   useEffect(() => {
     setShellEnabled(workspace?.permissions?.shell ?? false);
@@ -424,6 +436,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     const handleClickOutside = (e: MouseEvent) => {
       if (skillsMenuRef.current && !skillsMenuRef.current.contains(e.target as Node)) {
         setShowSkillsMenu(false);
+        setSkillsSearchQuery('');
       }
     };
     if (showSkillsMenu) {
@@ -434,6 +447,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
 
   const handleSkillSelect = (skill: CustomSkill) => {
     setShowSkillsMenu(false);
+    setSkillsSearchQuery('');
     // If skill has parameters, show the parameter modal
     if (skill.parameters && skill.parameters.length > 0) {
       setSelectedSkillForParams(skill);
@@ -823,23 +837,42 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                     {showSkillsMenu && (
                       <div className="skills-dropdown">
                         <div className="skills-dropdown-header">Custom Skills</div>
+                        <div className="skills-dropdown-search">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="M21 21l-4.35-4.35" />
+                          </svg>
+                          <input
+                            type="text"
+                            placeholder="Search skills..."
+                            value={skillsSearchQuery}
+                            onChange={(e) => setSkillsSearchQuery(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
                         {customSkills.length > 0 ? (
-                          <div className="skills-dropdown-list">
-                            {customSkills.map(skill => (
-                              <div
-                                key={skill.id}
-                                className="skills-dropdown-item"
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => handleSkillSelect(skill)}
-                              >
-                                <span className="skills-dropdown-icon">{skill.icon}</span>
-                                <div className="skills-dropdown-info">
-                                  <span className="skills-dropdown-name">{skill.name}</span>
-                                  <span className="skills-dropdown-desc">{skill.description}</span>
+                          filteredSkills.length > 0 ? (
+                            <div className="skills-dropdown-list">
+                              {filteredSkills.map(skill => (
+                                <div
+                                  key={skill.id}
+                                  className="skills-dropdown-item"
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => handleSkillSelect(skill)}
+                                >
+                                  <span className="skills-dropdown-icon">{skill.icon}</span>
+                                  <div className="skills-dropdown-info">
+                                    <span className="skills-dropdown-name">{skill.name}</span>
+                                    <span className="skills-dropdown-desc">{skill.description}</span>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="skills-dropdown-empty">
+                              No skills match "{skillsSearchQuery}"
+                            </div>
+                          )
                         ) : (
                           <div className="skills-dropdown-empty">
                             No custom skills yet.
@@ -850,6 +883,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                             className="skills-dropdown-create"
                             onClick={() => {
                               setShowSkillsMenu(false);
+                              setSkillsSearchQuery('');
                               onOpenSettings?.('skills');
                             }}
                           >

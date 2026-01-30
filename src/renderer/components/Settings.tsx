@@ -3,6 +3,7 @@ import { LLMSettingsData, ThemeMode, AccentColor } from '../../shared/types';
 import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { SlackSettings } from './SlackSettings';
+import { WhatsAppSettings } from './WhatsAppSettings';
 import { SearchSettings } from './SearchSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { GuardrailSettings } from './GuardrailSettings';
@@ -12,7 +13,7 @@ import { SkillsSettings } from './SkillsSettings';
 import { MCPSettings } from './MCPSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'mcp' | 'tools';
 
 interface SettingsProps {
   onBack: () => void;
@@ -690,6 +691,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             Web Search
           </button>
           <button
+            className={`settings-nav-item ${activeTab === 'whatsapp' ? 'active' : ''}`}
+            onClick={() => setActiveTab('whatsapp')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+            </svg>
+            WhatsApp
+          </button>
+          <button
             className={`settings-nav-item ${activeTab === 'telegram' ? 'active' : ''}`}
             onClick={() => setActiveTab('telegram')}
           >
@@ -801,6 +811,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             <DiscordSettings />
           ) : activeTab === 'slack' ? (
             <SlackSettings />
+          ) : activeTab === 'whatsapp' ? (
+            <WhatsAppSettings />
           ) : activeTab === 'search' ? (
             <SearchSettings />
           ) : activeTab === 'updates' ? (

@@ -588,6 +588,57 @@
   color: var(--color-accent-dark);
 }
 
+/* Light theme button overrides */
+.theme-light .button-secondary {
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: var(--color-text);
+}
+
+.theme-light .button-secondary:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.theme-light .button-danger {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.theme-light .button-danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.theme-light .channel-actions button {
+  padding: 8px 14px;
+}
+
+.theme-light .settings-select {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.theme-light .settings-input {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.theme-light .pairing-code-display {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.theme-light .settings-info-box {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.theme-light .user-item {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
 html, body {
   height: 100%;
 }
@@ -3698,6 +3749,37 @@ button {
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+.skills-dropdown-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.skills-dropdown-search svg {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.skills-dropdown-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--color-text);
+  padding: 4px 0;
+}
+
+.skills-dropdown-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.theme-light .skills-dropdown-search {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 .skills-dropdown-list {
   max-height: 300px;
   overflow-y: auto;
@@ -4844,6 +4926,41 @@ button {
   font-size: 11px;
   color: var(--color-text-muted);
   margin-top: 6px;
+}
+
+.settings-info-box {
+  padding: 12px 16px;
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.settings-info-box strong {
+  color: var(--color-text);
+}
+
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.settings-checkbox-label span {
+  user-select: none;
 }
 
 .channel-header {
