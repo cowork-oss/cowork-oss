@@ -8,10 +8,16 @@
  * - Gateway status monitoring
  */
 
-import { app, Tray, Menu, nativeImage, BrowserWindow, shell, NativeImage } from 'electron';
+import { app, Tray, Menu, nativeImage, BrowserWindow, shell, NativeImage, globalShortcut } from 'electron';
 import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 import { ChannelGateway } from '../gateway';
 import { DatabaseManager } from '../database/schema';
+import { TaskRepository, WorkspaceRepository } from '../database/repositories';
+import { AgentDaemon } from '../agent/daemon';
+import { QuickInputWindow } from './QuickInputWindow';
+import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
 
 export interface TrayManagerOptions {
   showDockIcon?: boolean;
@@ -40,9 +46,16 @@ export class TrayManager {
   private mainWindow: BrowserWindow | null = null;
   private gateway: ChannelGateway | null = null;
   private dbManager: DatabaseManager | null = null;
+  private agentDaemon: AgentDaemon | null = null;
+  private taskRepo: TaskRepository | null = null;
+  private workspaceRepo: WorkspaceRepository | null = null;
   private settings: TraySettings = DEFAULT_SETTINGS;
   private connectedChannels: number = 0;
   private activeTaskCount: number = 0;
+  private quickInputWindow: QuickInputWindow | null = null;
+  private currentQuickTaskId: string | null = null;
+  private quickTaskAccumulatedResponse: string = '';
+  private currentStepInfo: string = '';
 
   private static instance: TrayManager | null = null;
 
@@ -62,11 +75,18 @@ export class TrayManager {
     mainWindow: BrowserWindow,
     gateway: ChannelGateway,
     dbManager: DatabaseManager,
+    agentDaemon?: AgentDaemon,
     options: TrayManagerOptions = {}
   ): Promise<void> {
     this.mainWindow = mainWindow;
     this.gateway = gateway;
     this.dbManager = dbManager;
+    this.agentDaemon = agentDaemon || null;
+
+    // Initialize repositories
+    const db = dbManager.getDatabase();
+    this.taskRepo = new TaskRepository(db);
+    this.workspaceRepo = new WorkspaceRepository(db);
 
     // Load settings
     this.loadSettings();
@@ -101,7 +121,318 @@ export class TrayManager {
     // Update status periodically
     this.startStatusUpdates();
 
+    // Set up task event listening for quick input responses
+    this.setupTaskEventListener();
+
+    // Initialize quick input window
+    this.quickInputWindow = new QuickInputWindow();
+    this.quickInputWindow.setOnSubmit((task, workspaceId) => {
+      this.handleQuickTaskSubmit(task, workspaceId);
+    });
+    this.quickInputWindow.setOnOpenMain(() => {
+      this.showMainWindow();
+      this.quickInputWindow?.hide();
+    });
+
+    // Register global shortcut for quick input (Cmd+Shift+Space)
+    this.registerGlobalShortcut();
+
     console.log('[TrayManager] Initialized');
+  }
+
+  /**
+   * Set up listener for task events to stream to quick input
+   */
+  private setupTaskEventListener(): void {
+    if (!this.agentDaemon) return;
+
+    // Listen for assistant messages (the main text response)
+    this.agentDaemon.on('assistant_message', (event: { taskId: string; message?: string }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      const message = event.message || '';
+      if (message) {
+        // Append to accumulated response (assistant may send multiple messages)
+        if (this.quickTaskAccumulatedResponse) {
+          this.quickTaskAccumulatedResponse += '\n\n' + message;
+        } else {
+          this.quickTaskAccumulatedResponse = message;
+        }
+        this.quickInputWindow?.updateResponse(
+          this.formatResponseWithQuestion(this.quickTaskAccumulatedResponse),
+          false
+        );
+      }
+    });
+
+    // Listen for progress updates
+    this.agentDaemon.on('progress_update', (event: { taskId: string; message?: string; progress?: number }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      // Only show progress if we don't have response content yet
+      if (!this.quickTaskAccumulatedResponse && event.message) {
+        this.quickInputWindow?.updateResponse(
+          `<p style="color: rgba(255,255,255,0.6);">${event.message}</p>`,
+          false
+        );
+      }
+    });
+
+    // Listen for task completion
+    this.agentDaemon.on('task_completed', (event: { taskId: string; message?: string; result?: string }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      // Show the accumulated response as complete (without step prefix)
+      const finalContent = this.quickTaskAccumulatedResponse || event.result || event.message || 'Task completed successfully';
+      this.quickInputWindow?.updateResponse(
+        this.formatResponseWithQuestion(finalContent),
+        true
+      );
+      this.currentQuickTaskId = null;
+      this.quickTaskAccumulatedResponse = '';
+      this.currentStepInfo = '';
+    });
+
+    // Listen for errors
+    this.agentDaemon.on('error', (event: { taskId: string; message?: string }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      const question = this.quickInputWindow?.getCurrentQuestion() || '';
+      const questionHtml = question ? `<div class="user-question"><strong>You:</strong> ${question.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>` : '';
+      this.quickInputWindow?.updateResponse(
+        `${questionHtml}<div class="error-message">Error: ${event.message || 'An error occurred'}</div>`,
+        true
+      );
+      this.currentQuickTaskId = null;
+      this.quickTaskAccumulatedResponse = '';
+      this.currentStepInfo = '';
+    });
+
+    // Listen for step started (show what step is being executed)
+    this.agentDaemon.on('step_started', (event: { taskId: string; step?: { id: number; description: string } }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      // Show step info above the response
+      if (event.step?.description) {
+        const stepInfo = `**Step ${event.step.id}:** ${event.step.description}\n\n`;
+        // Prepend step info (it will be replaced by next step)
+        this.currentStepInfo = stepInfo;
+        this.quickInputWindow?.updateResponse(
+          this.formatResponseWithQuestion(this.currentStepInfo + this.quickTaskAccumulatedResponse),
+          false
+        );
+      }
+    });
+
+    // Listen for plan created (show what the agent is going to do)
+    this.agentDaemon.on('plan_created', (event: { taskId: string; plan?: { steps: Array<{ id: number; description: string }> } }) => {
+      if (event.taskId !== this.currentQuickTaskId) return;
+      if (event.plan?.steps && event.plan.steps.length > 0) {
+        const planSummary = event.plan.steps.map((s, i) => `${i + 1}. ${s.description}`).join('\n');
+        this.quickTaskAccumulatedResponse = `**Plan:**\n${planSummary}\n\n`;
+        this.quickInputWindow?.updateResponse(
+          this.formatResponseWithQuestion(this.quickTaskAccumulatedResponse),
+          false
+        );
+      }
+    });
+  }
+
+  /**
+   * Format response text for HTML display
+   */
+  private formatResponseForDisplay(text: string): string {
+    // Basic markdown-like formatting
+    return text
+      // Escape HTML
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // Bold
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Code blocks
+      .replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+      // Inline code
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // Line breaks
+      .replace(/\n/g, '<br>');
+  }
+
+  /**
+   * Format response with user's question prepended
+   */
+  private formatResponseWithQuestion(text: string): string {
+    const question = this.quickInputWindow?.getCurrentQuestion() || '';
+    const formattedResponse = this.formatResponseForDisplay(text);
+
+    if (question) {
+      const escapedQuestion = question
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<div class="user-question"><strong>You:</strong> ${escapedQuestion}</div>${formattedResponse}`;
+    }
+
+    return formattedResponse;
+  }
+
+  /**
+   * Get or create the temp workspace
+   */
+  private async getOrCreateTempWorkspace(): Promise<Workspace> {
+    if (!this.dbManager) throw new Error('Database not available');
+
+    const db = this.dbManager.getDatabase();
+
+    // Check if temp workspace exists
+    const existing = this.workspaceRepo?.findById(TEMP_WORKSPACE_ID);
+    if (existing) {
+      // Verify directory exists
+      if (fs.existsSync(existing.path)) {
+        return { ...existing, isTemp: true };
+      }
+      // Directory deleted, remove and recreate
+      this.workspaceRepo?.delete(TEMP_WORKSPACE_ID);
+    }
+
+    // Create temp directory
+    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // Create workspace record
+    const tempWorkspace: Workspace = {
+      id: TEMP_WORKSPACE_ID,
+      name: TEMP_WORKSPACE_NAME,
+      path: tempDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: false,
+      },
+      isTemp: true,
+    };
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO workspaces (id, name, path, created_at, permissions)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      tempWorkspace.id,
+      tempWorkspace.name,
+      tempWorkspace.path,
+      tempWorkspace.createdAt,
+      JSON.stringify(tempWorkspace.permissions)
+    );
+
+    return tempWorkspace;
+  }
+
+  /**
+   * Handle quick task submission - create and run task
+   */
+  private async handleQuickTaskSubmit(prompt: string, workspaceId?: string): Promise<void> {
+    if (!this.taskRepo || !this.workspaceRepo || !this.agentDaemon) {
+      // Fall back to sending to main window
+      console.log('[TrayManager] Agent daemon not available, falling back to main window');
+      this.showMainWindow();
+      this.mainWindow?.webContents.send('tray:quick-task', { task: prompt, workspaceId });
+      return;
+    }
+
+    // Show loading state and reset accumulated response
+    this.quickInputWindow?.showLoading();
+    this.quickTaskAccumulatedResponse = '';
+    this.currentStepInfo = '';
+
+    try {
+      // Get or select workspace
+      let wsId = workspaceId;
+      if (!wsId) {
+        // Get the first non-temp workspace, or use temp workspace as fallback
+        const workspaces = this.workspaceRepo.findAll().filter(w => w.id !== TEMP_WORKSPACE_ID);
+        if (workspaces.length > 0) {
+          wsId = workspaces[0].id;
+        } else {
+          // No user workspaces, use temp workspace
+          const tempWorkspace = await this.getOrCreateTempWorkspace();
+          wsId = tempWorkspace.id;
+        }
+      }
+
+      // Create task
+      const task = this.taskRepo.create({
+        title: prompt.slice(0, 50) + (prompt.length > 50 ? '...' : ''),
+        prompt,
+        workspaceId: wsId,
+        status: 'queued',
+      });
+
+      this.currentQuickTaskId = task.id;
+
+      // Start task execution
+      await this.agentDaemon.startTask(task);
+
+      // Also notify main window so it updates the task list
+      this.mainWindow?.webContents.send('tray:task-created', { taskId: task.id });
+
+    } catch (error) {
+      console.error('[TrayManager] Failed to create quick task:', error);
+      const question = this.quickInputWindow?.getCurrentQuestion() || '';
+      const questionHtml = question ? `<div class="user-question"><strong>You:</strong> ${question.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>` : '';
+      this.quickInputWindow?.updateResponse(
+        `${questionHtml}<div class="error-message">Failed to create task: ${error instanceof Error ? error.message : 'Unknown error'}</div>`,
+        true
+      );
+      this.currentQuickTaskId = null;
+    }
+  }
+
+  /**
+   * Show the quick input window
+   */
+  showQuickInput(): void {
+    this.quickInputWindow?.show();
+  }
+
+  /**
+   * Toggle the quick input window
+   */
+  toggleQuickInput(): void {
+    this.quickInputWindow?.toggle();
+  }
+
+  /**
+   * Register global keyboard shortcut for quick input
+   */
+  private registerGlobalShortcut(): void {
+    try {
+      // Unregister first in case it's already registered
+      globalShortcut.unregister('CommandOrControl+Shift+Space');
+
+      const registered = globalShortcut.register('CommandOrControl+Shift+Space', () => {
+        this.showQuickInput();
+      });
+
+      if (registered) {
+        console.log('[TrayManager] Global shortcut registered: Cmd+Shift+Space');
+      } else {
+        console.warn('[TrayManager] Failed to register global shortcut - may be in use by another app');
+      }
+    } catch (error) {
+      console.error('[TrayManager] Error registering global shortcut:', error);
+    }
+  }
+
+  /**
+   * Unregister global keyboard shortcut
+   */
+  private unregisterGlobalShortcut(): void {
+    try {
+      globalShortcut.unregister('CommandOrControl+Shift+Space');
+      console.log('[TrayManager] Global shortcut unregistered');
+    } catch (error) {
+      console.error('[TrayManager] Error unregistering global shortcut:', error);
+    }
   }
 
   /**
@@ -249,6 +580,13 @@ export class TrayManager {
 
       // Quick actions
       {
+        label: 'Quick Task...',
+        accelerator: 'CmdOrCtrl+Shift+Space',
+        click: () => {
+          this.showQuickInput();
+        },
+      },
+      {
         label: 'New Task...',
         accelerator: 'CmdOrCtrl+N',
         click: () => {
@@ -374,15 +712,15 @@ export class TrayManager {
   }
 
   /**
-   * Get workspaces from database
+   * Get workspaces from database (excluding temp workspace)
    */
   private getWorkspaces(): Array<{ id: string; name: string; path: string }> {
     if (!this.dbManager) return [];
 
     try {
       const db = this.dbManager.getDatabase();
-      const stmt = db.prepare('SELECT id, name, path FROM workspaces ORDER BY name');
-      return stmt.all() as Array<{ id: string; name: string; path: string }>;
+      const stmt = db.prepare('SELECT id, name, path FROM workspaces WHERE id != ? ORDER BY name');
+      return stmt.all(TEMP_WORKSPACE_ID) as Array<{ id: string; name: string; path: string }>;
     } catch (error) {
       console.error('[TrayManager] Failed to get workspaces:', error);
       return [];
@@ -558,6 +896,13 @@ export class TrayManager {
    * Destroy the tray
    */
   destroy(): void {
+    // Unregister global shortcut
+    this.unregisterGlobalShortcut();
+
+    if (this.quickInputWindow) {
+      this.quickInputWindow.destroy();
+      this.quickInputWindow = null;
+    }
     if (this.tray) {
       this.tray.destroy();
       this.tray = null;
