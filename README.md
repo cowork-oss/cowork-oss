@@ -1846,6 +1846,17 @@ SkillHub is CoWork-OSS's built-in skill registry for discovering, installing, an
 | **Browse Registry** | Search and install new skills from skill-hub.com |
 | **Status** | Dashboard showing all skills with eligibility status |
 
+#### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `SKILLHUB_REGISTRY` | Custom registry URL for skill discovery | `https://skill-hub.com/api` |
+
+To use a custom registry, set the environment variable before launching the app:
+```bash
+export SKILLHUB_REGISTRY=https://your-registry.com/api
+```
+
 #### Skill Sources (Precedence)
 
 Skills are loaded from three locations. Higher precedence sources override lower ones:
