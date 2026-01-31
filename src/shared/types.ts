@@ -597,6 +597,22 @@ export const IPC_CHANNELS = {
   HOOKS_START_GMAIL_WATCHER: 'hooks:startGmailWatcher',
   HOOKS_STOP_GMAIL_WATCHER: 'hooks:stopGmailWatcher',
   HOOKS_EVENT: 'hooks:event',
+
+  // Control Plane (WebSocket Gateway)
+  CONTROL_PLANE_GET_SETTINGS: 'controlPlane:getSettings',
+  CONTROL_PLANE_SAVE_SETTINGS: 'controlPlane:saveSettings',
+  CONTROL_PLANE_ENABLE: 'controlPlane:enable',
+  CONTROL_PLANE_DISABLE: 'controlPlane:disable',
+  CONTROL_PLANE_START: 'controlPlane:start',
+  CONTROL_PLANE_STOP: 'controlPlane:stop',
+  CONTROL_PLANE_GET_STATUS: 'controlPlane:getStatus',
+  CONTROL_PLANE_REGENERATE_TOKEN: 'controlPlane:regenerateToken',
+  CONTROL_PLANE_EVENT: 'controlPlane:event',
+
+  // Tailscale Integration
+  TAILSCALE_GET_STATUS: 'tailscale:getStatus',
+  TAILSCALE_CHECK_AVAILABILITY: 'tailscale:checkAvailability',
+  TAILSCALE_SET_MODE: 'tailscale:setMode',
 } as const;
 
 // LLM Provider types
@@ -1059,4 +1075,88 @@ export interface HooksStatus {
   gmailWatcherRunning: boolean;
   gmailAccount?: string;
   gogAvailable: boolean;
+}
+
+// ============ Control Plane (WebSocket Gateway) Types ============
+
+/**
+ * Tailscale mode options
+ */
+export type TailscaleMode = 'off' | 'serve' | 'funnel';
+
+/**
+ * Control Plane settings for UI
+ */
+export interface ControlPlaneSettingsData {
+  enabled: boolean;
+  port: number;
+  host: string;
+  token: string; // Will be masked in UI
+  handshakeTimeoutMs: number;
+  heartbeatIntervalMs: number;
+  maxPayloadBytes: number;
+  tailscale: {
+    mode: TailscaleMode;
+    resetOnExit: boolean;
+  };
+}
+
+/**
+ * Control Plane client info
+ */
+export interface ControlPlaneClientInfo {
+  id: string;
+  remoteAddress: string;
+  deviceName?: string;
+  authenticated: boolean;
+  scopes: string[];
+  connectedAt: number;
+  lastActivityAt: number;
+}
+
+/**
+ * Control Plane status
+ */
+export interface ControlPlaneStatus {
+  enabled: boolean;
+  running: boolean;
+  address?: {
+    host: string;
+    port: number;
+    wsUrl: string;
+  };
+  clients: {
+    total: number;
+    authenticated: number;
+    pending: number;
+    list: ControlPlaneClientInfo[];
+  };
+  tailscale: {
+    active: boolean;
+    mode?: TailscaleMode;
+    hostname?: string;
+    httpsUrl?: string;
+    wssUrl?: string;
+  };
+}
+
+/**
+ * Tailscale availability status
+ */
+export interface TailscaleAvailability {
+  installed: boolean;
+  funnelAvailable: boolean;
+  hostname: string | null;
+}
+
+/**
+ * Control Plane server event for monitoring
+ */
+export interface ControlPlaneEvent {
+  action: 'started' | 'stopped' | 'client_connected' | 'client_disconnected' | 'client_authenticated' | 'request' | 'error';
+  timestamp: number;
+  clientId?: string;
+  method?: string;
+  error?: string;
+  details?: unknown;
 }

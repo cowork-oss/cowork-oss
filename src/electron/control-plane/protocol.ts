@@ -1,0 +1,249 @@
+/**
+ * WebSocket Control Plane Protocol
+ *
+ * Defines the frame types for communication over the WebSocket control plane.
+ * Uses a tagged union pattern for type-safe message handling.
+ */
+
+import { randomUUID } from 'crypto';
+
+/**
+ * Frame type discriminator
+ */
+export const FrameType = {
+  Request: 'req',
+  Response: 'res',
+  Event: 'event',
+} as const;
+
+export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType];
+
+/**
+ * Error shape for response frames
+ */
+export interface ErrorShape {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+/**
+ * Request frame - sent by client to invoke a method
+ */
+export interface RequestFrame {
+  type: typeof FrameType.Request;
+  id: string;
+  method: string;
+  params?: unknown;
+}
+
+/**
+ * Response frame - sent by server in response to a request
+ */
+export interface ResponseFrame {
+  type: typeof FrameType.Response;
+  id: string;
+  ok: boolean;
+  payload?: unknown;
+  error?: ErrorShape;
+}
+
+/**
+ * Event frame - sent by server to broadcast events
+ */
+export interface EventFrame {
+  type: typeof FrameType.Event;
+  event: string;
+  payload?: unknown;
+  seq?: number;
+  stateVersion?: string;
+}
+
+/**
+ * Union type for all frame types
+ */
+export type Frame = RequestFrame | ResponseFrame | EventFrame;
+
+/**
+ * Error codes
+ */
+export const ErrorCodes = {
+  // Connection errors
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  CONNECTION_CLOSED: 'CONNECTION_CLOSED',
+  HANDSHAKE_TIMEOUT: 'HANDSHAKE_TIMEOUT',
+
+  // Request errors
+  INVALID_FRAME: 'INVALID_FRAME',
+  UNKNOWN_METHOD: 'UNKNOWN_METHOD',
+  INVALID_PARAMS: 'INVALID_PARAMS',
+  METHOD_FAILED: 'METHOD_FAILED',
+
+  // Internal errors
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
+/**
+ * Validate and parse a frame from JSON
+ *
+ * Note: String fields (id, method, event) are validated to be non-empty after trimming.
+ * This prevents whitespace-only values from being accepted.
+ */
+export function parseFrame(data: string): Frame | null {
+  try {
+    const parsed = JSON.parse(data);
+
+    // Check frame type
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const type = parsed.type;
+
+    if (type === FrameType.Request) {
+      if (typeof parsed.id !== 'string' || !parsed.id.trim()) return null;
+      if (typeof parsed.method !== 'string' || !parsed.method.trim()) return null;
+      return parsed as RequestFrame;
+    }
+
+    if (type === FrameType.Response) {
+      if (typeof parsed.id !== 'string' || !parsed.id.trim()) return null;
+      if (typeof parsed.ok !== 'boolean') return null;
+      return parsed as ResponseFrame;
+    }
+
+    if (type === FrameType.Event) {
+      if (typeof parsed.event !== 'string' || !parsed.event.trim()) return null;
+      return parsed as EventFrame;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serialize a frame to JSON
+ */
+export function serializeFrame(frame: Frame): string {
+  return JSON.stringify(frame);
+}
+
+/**
+ * Create a request frame
+ */
+export function createRequestFrame(method: string, params?: unknown): RequestFrame {
+  return {
+    type: FrameType.Request,
+    id: randomUUID(),
+    method,
+    params,
+  };
+}
+
+/**
+ * Create a success response frame
+ */
+export function createResponseFrame(
+  requestId: string,
+  payload?: unknown
+): ResponseFrame {
+  return {
+    type: FrameType.Response,
+    id: requestId,
+    ok: true,
+    payload,
+  };
+}
+
+/**
+ * Create an error response frame
+ */
+export function createErrorResponse(
+  requestId: string,
+  code: ErrorCode,
+  message: string,
+  details?: unknown
+): ResponseFrame {
+  return {
+    type: FrameType.Response,
+    id: requestId,
+    ok: false,
+    error: { code, message, details },
+  };
+}
+
+/**
+ * Create an event frame
+ */
+export function createEventFrame(
+  event: string,
+  payload?: unknown,
+  seq?: number,
+  stateVersion?: string
+): EventFrame {
+  const frame: EventFrame = {
+    type: FrameType.Event,
+    event,
+  };
+
+  if (payload !== undefined) frame.payload = payload;
+  if (seq !== undefined) frame.seq = seq;
+  if (stateVersion !== undefined) frame.stateVersion = stateVersion;
+
+  return frame;
+}
+
+/**
+ * Standard event names
+ */
+export const Events = {
+  // Connection events
+  CONNECT_CHALLENGE: 'connect.challenge',
+  CONNECT_SUCCESS: 'connect.success',
+
+  // Task events
+  TASK_CREATED: 'task.created',
+  TASK_UPDATED: 'task.updated',
+  TASK_COMPLETED: 'task.completed',
+  TASK_FAILED: 'task.failed',
+  TASK_EVENT: 'task.event',
+
+  // System events
+  HEARTBEAT: 'heartbeat',
+  CONFIG_CHANGED: 'config.changed',
+  SHUTDOWN: 'shutdown',
+} as const;
+
+/**
+ * Standard method names
+ */
+export const Methods = {
+  // Connection
+  CONNECT: 'connect',
+  PING: 'ping',
+  HEALTH: 'health',
+
+  // Task operations
+  TASK_CREATE: 'task.create',
+  TASK_GET: 'task.get',
+  TASK_LIST: 'task.list',
+  TASK_CANCEL: 'task.cancel',
+  TASK_SEND_MESSAGE: 'task.sendMessage',
+
+  // Agent operations
+  AGENT_WAKE: 'agent.wake',
+  AGENT_SEND: 'agent.send',
+
+  // System operations
+  STATUS: 'status',
+  CONFIG_GET: 'config.get',
+  CONFIG_SET: 'config.set',
+
+  // Workspace operations
+  WORKSPACE_LIST: 'workspace.list',
+  WORKSPACE_GET: 'workspace.get',
+} as const;

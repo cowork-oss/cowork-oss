@@ -1,0 +1,27 @@
+/**
+ * WebSocket Control Plane
+ *
+ * A WebSocket-based control plane for remote management of CoWork.
+ * Provides a single entry point for clients, tools, and events.
+ */
+
+export { ControlPlaneServer, type ControlPlaneConfig } from './server';
+export { type ControlPlaneClient, type ClientInfo } from './client';
+export {
+  type RequestFrame,
+  type ResponseFrame,
+  type EventFrame,
+  type Frame,
+  FrameType,
+  parseFrame,
+  serializeFrame,
+  createRequestFrame,
+  createResponseFrame,
+  createEventFrame,
+} from './protocol';
+export { ControlPlaneSettingsManager, type ControlPlaneSettings } from './settings';
+export {
+  setupControlPlaneHandlers,
+  shutdownControlPlane,
+  getControlPlaneServer,
+} from './handlers';

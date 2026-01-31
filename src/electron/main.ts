@@ -13,6 +13,7 @@ import { AppearanceManager } from './settings/appearance-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
 import { CronService, setCronService, DEFAULT_CRON_STORE_PATH } from './cron';
+import { setupControlPlaneHandlers, shutdownControlPlane } from './control-plane';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -276,6 +277,9 @@ app.whenReady().then(async () => {
     // Initialize update manager with main window reference
     updateManager.setMainWindow(mainWindow);
 
+    // Initialize control plane (WebSocket gateway)
+    setupControlPlaneHandlers(mainWindow);
+
     // Initialize menu bar tray (macOS native companion)
     if (process.platform === 'darwin') {
       await trayManager.initialize(mainWindow, channelGateway, dbManager, agentDaemon);
@@ -321,6 +325,9 @@ app.on('before-quit', async () => {
     await cronService.stop();
     setCronService(null);
   }
+
+  // Shutdown control plane (WebSocket gateway and Tailscale)
+  await shutdownControlPlane();
 
   if (channelGateway) {
     await channelGateway.shutdown();

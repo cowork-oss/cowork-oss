@@ -156,6 +156,20 @@ const IPC_CHANNELS = {
   HOOKS_START_GMAIL_WATCHER: 'hooks:startGmailWatcher',
   HOOKS_STOP_GMAIL_WATCHER: 'hooks:stopGmailWatcher',
   HOOKS_EVENT: 'hooks:event',
+  // Control Plane (WebSocket Gateway)
+  CONTROL_PLANE_GET_SETTINGS: 'controlPlane:getSettings',
+  CONTROL_PLANE_SAVE_SETTINGS: 'controlPlane:saveSettings',
+  CONTROL_PLANE_ENABLE: 'controlPlane:enable',
+  CONTROL_PLANE_DISABLE: 'controlPlane:disable',
+  CONTROL_PLANE_START: 'controlPlane:start',
+  CONTROL_PLANE_STOP: 'controlPlane:stop',
+  CONTROL_PLANE_GET_STATUS: 'controlPlane:getStatus',
+  CONTROL_PLANE_REGENERATE_TOKEN: 'controlPlane:regenerateToken',
+  CONTROL_PLANE_EVENT: 'controlPlane:event',
+  // Tailscale
+  TAILSCALE_GET_STATUS: 'tailscale:getStatus',
+  TAILSCALE_CHECK_AVAILABILITY: 'tailscale:checkAvailability',
+  TAILSCALE_SET_MODE: 'tailscale:setMode',
 } as const;
 
 // Custom Skill types (inlined for sandboxed preload)
@@ -518,6 +532,74 @@ interface HooksEvent {
   error?: string;
 }
 
+// Control Plane types (inlined for sandboxed preload)
+// NOTE: These types are intentionally duplicated from shared/types.ts because
+// the preload script runs in a sandboxed context and cannot import from other modules.
+// When updating these types, ensure shared/types.ts is also updated to stay in sync.
+type TailscaleMode = 'off' | 'serve' | 'funnel';
+
+interface ControlPlaneSettingsData {
+  enabled: boolean;
+  port: number;
+  host: string;
+  token: string;
+  handshakeTimeoutMs: number;
+  heartbeatIntervalMs: number;
+  maxPayloadBytes: number;
+  tailscale: {
+    mode: TailscaleMode;
+    resetOnExit: boolean;
+  };
+}
+
+interface ControlPlaneClientInfo {
+  id: string;
+  remoteAddress: string;
+  deviceName?: string;
+  authenticated: boolean;
+  scopes: string[];
+  connectedAt: number;
+  lastActivityAt: number;
+}
+
+interface ControlPlaneStatus {
+  enabled: boolean;
+  running: boolean;
+  address?: {
+    host: string;
+    port: number;
+    wsUrl: string;
+  };
+  clients: {
+    total: number;
+    authenticated: number;
+    pending: number;
+    list: ControlPlaneClientInfo[];
+  };
+  tailscale: {
+    active: boolean;
+    mode?: TailscaleMode;
+    hostname?: string;
+    httpsUrl?: string;
+    wssUrl?: string;
+  };
+}
+
+interface ControlPlaneEvent {
+  action: 'started' | 'stopped' | 'client_connected' | 'client_disconnected' | 'client_authenticated' | 'request' | 'error';
+  timestamp: number;
+  clientId?: string;
+  method?: string;
+  error?: string;
+  details?: unknown;
+}
+
+interface TailscaleAvailability {
+  installed: boolean;
+  funnelAvailable: boolean;
+  hostname: string | null;
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -813,6 +895,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.HOOKS_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.HOOKS_EVENT, subscription);
   },
+
+  // Control Plane (WebSocket Gateway)
+  getControlPlaneSettings: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_SETTINGS),
+  saveControlPlaneSettings: (settings: ControlPlaneSettingsData) => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_SAVE_SETTINGS, settings),
+  enableControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_ENABLE),
+  disableControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_DISABLE),
+  startControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_START),
+  stopControlPlane: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_STOP),
+  getControlPlaneStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_GET_STATUS),
+  regenerateControlPlaneToken: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROL_PLANE_REGENERATE_TOKEN),
+  onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: ControlPlaneEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CONTROL_PLANE_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CONTROL_PLANE_EVENT, subscription);
+  },
+
+  // Tailscale
+  checkTailscaleAvailability: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_CHECK_AVAILABILITY),
+  getTailscaleStatus: () => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_GET_STATUS),
+  setTailscaleMode: (mode: TailscaleMode) => ipcRenderer.invoke(IPC_CHANNELS.TAILSCALE_SET_MODE, mode),
 });
 
 // Type declarations for TypeScript
@@ -1093,6 +1195,27 @@ export interface ElectronAPI {
   startGmailWatcher: () => Promise<{ ok: boolean; error?: string }>;
   stopGmailWatcher: () => Promise<{ ok: boolean }>;
   onHooksEvent: (callback: (event: HooksEvent) => void) => () => void;
+
+  // Control Plane (WebSocket Gateway)
+  getControlPlaneSettings: () => Promise<ControlPlaneSettingsData>;
+  saveControlPlaneSettings: (settings: Partial<ControlPlaneSettingsData>) => Promise<{ ok: boolean; error?: string }>;
+  enableControlPlane: () => Promise<{ ok: boolean; token?: string; error?: string }>;
+  disableControlPlane: () => Promise<{ ok: boolean; error?: string }>;
+  startControlPlane: () => Promise<{
+    ok: boolean;
+    address?: { host: string; port: number; wsUrl: string };
+    tailscale?: { httpsUrl?: string; wssUrl?: string };
+    error?: string;
+  }>;
+  stopControlPlane: () => Promise<{ ok: boolean; error?: string }>;
+  getControlPlaneStatus: () => Promise<ControlPlaneStatus>;
+  regenerateControlPlaneToken: () => Promise<{ ok: boolean; token?: string; error?: string }>;
+  onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
+
+  // Tailscale
+  checkTailscaleAvailability: () => Promise<TailscaleAvailability>;
+  getTailscaleStatus: () => Promise<{ settings: any; exposure: any }>;
+  setTailscaleMode: (mode: TailscaleMode) => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {

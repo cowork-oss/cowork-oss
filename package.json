@@ -76,6 +76,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "uuid": "^13.0.0",
+    "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -90,6 +91,7 @@
     "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "@vitejs/plugin-react": "^5.1.2",
@@ -115,6 +117,13 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/skills",
+        "to": "skills",
+        "filter": ["**/*.json"]
+      }
     ],
     "mac": {
       "target": [
