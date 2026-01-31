@@ -6,6 +6,7 @@ import { LLMTool } from '../llm/types';
  * WebFetchTools provides lightweight URL fetching without browser automation.
  * This is faster and more efficient than browser tools for reading web content.
  * Converts HTML to readable markdown format.
+ * Also includes curl-like http_request tool for raw HTTP requests.
  */
 export class WebFetchTools {
   constructor(
@@ -44,6 +45,50 @@ export class WebFetchTools {
             maxLength: {
               type: 'number',
               description: 'Maximum content length to return (default: 50000 characters)',
+            },
+          },
+          required: ['url'],
+        },
+      },
+      {
+        name: 'http_request',
+        description:
+          'Make HTTP requests like curl. Supports all HTTP methods, custom headers, and request bodies. ' +
+          'Returns raw response without HTML-to-markdown conversion. ' +
+          'Use this for APIs, raw file downloads, or when you need full control over the HTTP request. ' +
+          'For reading web pages as markdown, prefer web_fetch instead.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The URL to make the request to',
+            },
+            method: {
+              type: 'string',
+              enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
+              description: 'HTTP method (default: GET)',
+            },
+            headers: {
+              type: 'object',
+              description: 'Custom headers as key-value pairs (e.g., {"Authorization": "Bearer token", "Content-Type": "application/json"})',
+              additionalProperties: { type: 'string' },
+            },
+            body: {
+              type: 'string',
+              description: 'Request body for POST/PUT/PATCH requests. For JSON, stringify the object first.',
+            },
+            timeout: {
+              type: 'number',
+              description: 'Request timeout in milliseconds (default: 30000)',
+            },
+            followRedirects: {
+              type: 'boolean',
+              description: 'Whether to follow redirects (default: true)',
+            },
+            maxLength: {
+              type: 'number',
+              description: 'Maximum response length to return (default: 100000 characters)',
             },
           },
           required: ['url'],
@@ -157,6 +202,136 @@ export class WebFetchTools {
         success: false,
         url,
         content: '',
+        contentLength: 0,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Make an HTTP request like curl - returns raw response
+   */
+  async httpRequest(input: {
+    url: string;
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
+    headers?: Record<string, string>;
+    body?: string;
+    timeout?: number;
+    followRedirects?: boolean;
+    maxLength?: number;
+  }): Promise<{
+    success: boolean;
+    url: string;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: string;
+    contentLength: number;
+    error?: string;
+  }> {
+    const {
+      url,
+      method = 'GET',
+      headers = {},
+      body,
+      timeout = 30000,
+      followRedirects = true,
+      maxLength = 100000,
+    } = input;
+
+    this.daemon.logEvent(this.taskId, 'log', {
+      message: `HTTP ${method}: ${url}`,
+    });
+
+    try {
+      // Validate URL
+      const parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('Only HTTP and HTTPS URLs are supported');
+      }
+
+      // Setup abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      // Default headers
+      const requestHeaders: Record<string, string> = {
+        'User-Agent': 'CoWork-OSS/1.0 (curl-like http_request tool)',
+        Accept: '*/*',
+        ...headers,
+      };
+
+      // Make the request
+      const response = await fetch(url, {
+        method,
+        headers: requestHeaders,
+        body: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined,
+        signal: controller.signal,
+        redirect: followRedirects ? 'follow' : 'manual',
+      });
+
+      clearTimeout(timeoutId);
+
+      // Extract response headers
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+
+      // Get response body
+      let responseBody: string;
+      const contentType = response.headers.get('content-type') || '';
+
+      if (method === 'HEAD') {
+        responseBody = ''; // HEAD requests don't have a body
+      } else if (contentType.includes('application/json')) {
+        const json = await response.json();
+        responseBody = JSON.stringify(json, null, 2);
+      } else {
+        responseBody = await response.text();
+      }
+
+      // Truncate if needed
+      const truncated = responseBody.length > maxLength;
+      if (truncated) {
+        responseBody = responseBody.substring(0, maxLength) + '\n\n... [Response truncated]';
+      }
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'http_request',
+        result: {
+          url,
+          method,
+          status: response.status,
+          contentLength: responseBody.length,
+          truncated,
+        },
+      });
+
+      return {
+        success: response.ok,
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        body: responseBody,
+        contentLength: responseBody.length,
+      };
+    } catch (error: any) {
+      const errorMessage = error.name === 'AbortError' ? 'Request timed out' : error.message;
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'http_request',
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        url,
+        status: 0,
+        statusText: 'Error',
+        headers: {},
+        body: '',
         contentLength: 0,
         error: errorMessage,
       };

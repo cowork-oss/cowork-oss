@@ -7,6 +7,9 @@ import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
 import { SearchTools } from './search-tools';
 import { WebFetchTools } from './web-fetch-tools';
+import { GlobTools } from './glob-tools';
+import { GrepTools } from './grep-tools';
+import { EditTools } from './edit-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
@@ -28,6 +31,9 @@ export class ToolRegistry {
   private skillTools: SkillTools;
   private searchTools: SearchTools;
   private webFetchTools: WebFetchTools;
+  private globTools: GlobTools;
+  private grepTools: GrepTools;
+  private editTools: EditTools;
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
@@ -46,6 +52,9 @@ export class ToolRegistry {
     this.skillTools = new SkillTools(workspace, daemon, taskId);
     this.searchTools = new SearchTools(workspace, daemon, taskId);
     this.webFetchTools = new WebFetchTools(workspace, daemon, taskId);
+    this.globTools = new GlobTools(workspace, daemon, taskId);
+    this.grepTools = new GrepTools(workspace, daemon, taskId);
+    this.editTools = new EditTools(workspace, daemon, taskId);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
@@ -78,6 +87,9 @@ export class ToolRegistry {
     const allTools: LLMTool[] = [
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
+      ...GlobTools.getToolDefinitions(),
+      ...GrepTools.getToolDefinitions(),
+      ...EditTools.getToolDefinitions(),
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
     ];
@@ -228,13 +240,14 @@ export class ToolRegistry {
     let descriptions = `
 File Operations:
 - read_file: Read contents of a file (supports plain text, DOCX, and PDF)
-- write_file: Write content to a file (creates or overwrites)
+- write_file: Write content to a file (creates or overwrites). Use edit_file for targeted changes instead.
+- edit_file: Surgical text replacement (preferred over write_file for modifications)
 - copy_file: Copy a file (supports binary files like DOCX, PDF, images)
 - list_directory: List files and folders in a directory
 - rename_file: Rename or move a file
 - delete_file: Delete a file (requires approval)
 - create_directory: Create a new directory
-- search_files: Search for files by name or content
+- search_files: Basic file search. Use glob for pattern matching, grep for content search instead.
 
 Skills:
 - create_spreadsheet: Create Excel spreadsheets with data and formulas
@@ -243,9 +256,19 @@ Skills:
 - create_presentation: Create PowerPoint presentations
 - organize_folder: Organize and structure files in folders
 
+Code Tools (PREFERRED for code navigation and editing):
+- glob: Fast pattern-based file search (e.g., "**/*.ts", "src/**/*.test.ts")
+  Use this FIRST to find files by pattern - much faster than search_files.
+- grep: Powerful regex content search (e.g., "async function.*fetch", "class\\s+\\w+")
+  Use this FIRST for searching file contents - supports full regex.
+- edit_file: Surgical text replacement in files (old_string -> new_string)
+  Use this INSTEAD of write_file for targeted changes - safer and preserves structure.
+
 Web Fetch (PREFERRED for reading web content):
 - web_fetch: Fetch and read content from a URL as markdown (fast, lightweight, no browser needed)
   Use this FIRST when you need to read any web page, documentation, GitHub repo, or article.
+- http_request: Make raw HTTP requests like curl (GET, POST, PUT, DELETE, etc.)
+  Use this for APIs, raw file downloads, or when you need custom headers/body.
 
 Browser Automation (use only when interaction is needed):
 - browser_navigate: Navigate to a URL (use only for pages requiring JS or when you need to interact)
@@ -342,8 +365,14 @@ Plan Control:
     if (name === 'create_presentation') return await this.skillTools.createPresentation(input);
     if (name === 'organize_folder') return await this.skillTools.organizeFolder(input);
 
-    // Web fetch tool (preferred for reading web content)
+    // Code tools (glob, grep, edit)
+    if (name === 'glob') return await this.globTools.glob(input);
+    if (name === 'grep') return await this.grepTools.grep(input);
+    if (name === 'edit_file') return await this.editTools.editFile(input);
+
+    // Web fetch tools (preferred for reading web content)
     if (name === 'web_fetch') return await this.webFetchTools.webFetch(input);
+    if (name === 'http_request') return await this.webFetchTools.httpRequest(input);
 
     // Browser tools
     if (BrowserTools.isBrowserTool(name)) {
