@@ -541,6 +541,13 @@ describe('WebFetchTools', () => {
         expect(result.error).toBeDefined();
       });
 
+      it('should reject empty URLs', async () => {
+        const result = await webFetchTools.httpRequest({ url: '' });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBeDefined();
+      });
+
       it('should accept HTTP URLs', async () => {
         mockFetch.mockResolvedValueOnce({
           ok: true,
