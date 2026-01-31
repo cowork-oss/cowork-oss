@@ -92,6 +92,15 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 #### Search Tools
 - [x] web_search - Multi-provider web search
 
+#### Code Tools (3 tools)
+- [x] glob - Fast pattern-based file search
+- [x] grep - Regex content search across files
+- [x] edit_file - Surgical file editing with find-and-replace
+
+#### Web Fetch Tools (2 tools)
+- [x] web_fetch - Fetch and parse web pages
+- [x] http_request - Full HTTP client (curl-like)
+
 #### Shell Tools
 - [x] execute_command - Shell command execution (requires approval)
 

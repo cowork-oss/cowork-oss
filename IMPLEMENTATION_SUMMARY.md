@@ -48,6 +48,8 @@ A **fully functional macOS desktop application** for agentic task automation wit
 |  |  +------------------------v------------------------------+ | |
 |  |  |           Tool Registry                                | | |
 |  |  |  - File Operations (7 tools)                           | | |
+|  |  |  - Code Tools (glob, grep, edit_file)                  | | |
+|  |  |  - Web Fetch Tools (web_fetch, http_request)           | | |
 |  |  |  - Skill Tools (4 skills)                              | | |
 |  |  |  - Search Tools (web search)                           | | |
 |  |  |  - Browser Tools (12 tools)                            | | |
@@ -415,6 +417,10 @@ cowork-oss/
     │       ├── tools/
     │       │   ├── registry.ts
     │       │   ├── file-tools.ts
+    │       │   ├── glob-tools.ts
+    │       │   ├── grep-tools.ts
+    │       │   ├── edit-tools.ts
+    │       │   ├── web-fetch-tools.ts
     │       │   ├── skill-tools.ts
     │       │   ├── search-tools.ts
     │       │   ├── browser-tools.ts
@@ -491,6 +497,8 @@ npm run type-check       # Check TypeScript types
 | Multi-LLM support | Production | 5 providers |
 | Web search | Production | 4 providers with fallback |
 | Browser automation | Production | 12 Playwright tools |
+| Code tools | Production | glob, grep, edit_file |
+| Web fetch tools | Production | web_fetch, http_request |
 | Telegram bot | Production | Full integration |
 | Discord bot | Production | Slash commands + DMs |
 | Slack bot | Production | Socket Mode + DMs + mentions |
@@ -602,6 +610,8 @@ CoWork-OSS is a production-ready agentic task automation app with:
 - **5 LLM providers** (cloud and local)
 - **4 search providers** with fallback
 - **12 browser automation tools**
+- **3 code tools** (glob, grep, edit_file)
+- **2 web fetch tools** (web_fetch, http_request)
 - **4 document skills** with real Office output
 - **4 channel integrations** (WhatsApp, Telegram, Discord, Slack)
 - **Full MCP support** (Client, Host, Registry with SSE/WebSocket)
