@@ -1382,6 +1382,159 @@ If no provider is explicitly selected, CoWork-OSS auto-detects available provide
 4. Google (requires both API key and Search Engine ID)
 
 ---
+---
+
+## Code Tools
+
+CoWork-OSS includes Claude Code-style tools for efficient code navigation and editing. These tools are designed for developers who need fast, precise file operations within their workspace.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| **glob** | Fast pattern-based file search using glob patterns |
+| **grep** | Regex-powered content search across files |
+| **edit_file** | Surgical file editing with find-and-replace |
+
+### glob - Pattern-Based File Search
+
+Find files matching glob patterns like `**/*.ts` or `src/**/*.tsx`. Results are sorted by modification time (newest first).
+
+**Parameters:**
+- `pattern` (required): Glob pattern to match (e.g., `**/*.ts`, `*.{js,jsx,ts,tsx}`)
+- `path` (optional): Directory to search in (defaults to workspace root)
+- `maxResults` (optional): Maximum number of results (default: 100)
+
+**Example usage by the agent:**
+```
+"Find all TypeScript test files"
+→ glob pattern="**/*.test.ts"
+
+"List React components in src/components"
+→ glob pattern="*.tsx" path="src/components"
+```
+
+### grep - Regex Content Search
+
+Search file contents using regular expressions. Supports context lines and multiple output modes.
+
+**Parameters:**
+- `pattern` (required): Regex pattern to search for
+- `path` (optional): Directory or file to search in
+- `glob` (optional): File pattern filter (e.g., `*.ts`)
+- `ignoreCase` (optional): Case-insensitive search
+- `contextLines` (optional): Lines of context to show around matches
+- `maxResults` (optional): Maximum number of results
+- `outputMode` (optional): `content` (default), `files_only`, or `count`
+
+**Example usage by the agent:**
+```
+"Find all TODO comments in TypeScript files"
+→ grep pattern="TODO:" glob="*.ts"
+
+"Search for function definitions"
+→ grep pattern="function\s+\w+" contextLines=2
+```
+
+### edit_file - Surgical File Editing
+
+Make precise text replacements in files. Requires an exact match of the old string.
+
+**Parameters:**
+- `file_path` (required): Path to the file to edit
+- `old_string` (required): Exact text to replace
+- `new_string` (required): Replacement text
+- `replace_all` (optional): Replace all occurrences (default: false)
+
+**Example usage by the agent:**
+```
+"Rename the function getUser to fetchUser"
+→ edit_file file_path="src/api.ts" old_string="function getUser" new_string="function fetchUser"
+
+"Update the version number"
+→ edit_file file_path="package.json" old_string="\"version\": \"1.0.0\"" new_string="\"version\": \"1.1.0\""
+```
+
+### Security
+
+All code tools respect workspace boundaries:
+- Paths outside the workspace are rejected
+- Path traversal attempts (e.g., `../../../etc/passwd`) are blocked
+- Operations are logged in the task timeline
+
+---
+
+## Web Fetch Tools
+
+CoWork-OSS provides lightweight HTTP tools for fetching web content and making API requests.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| **web_fetch** | Fetch and parse web pages with HTML-to-text conversion |
+| **http_request** | Full HTTP client for API calls (curl-like) |
+
+### web_fetch - Web Page Fetching
+
+Fetch web pages and extract content. Automatically converts HTML to readable text and can extract specific elements using CSS selectors.
+
+**Parameters:**
+- `url` (required): URL to fetch (HTTP/HTTPS)
+- `selector` (optional): CSS selector to extract specific content
+- `includeLinks` (optional): Include links in output (default: true)
+- `maxLength` (optional): Maximum response length (default: 100000)
+
+**Example usage by the agent:**
+```
+"Get the main content from a documentation page"
+→ web_fetch url="https://docs.example.com/guide" selector="main"
+
+"Fetch a webpage and include all links"
+→ web_fetch url="https://example.com" includeLinks=true
+```
+
+### http_request - HTTP Client
+
+Full-featured HTTP client for making API requests with custom methods, headers, and request bodies.
+
+**Parameters:**
+- `url` (required): URL for the request (HTTP/HTTPS)
+- `method` (optional): HTTP method - GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS (default: GET)
+- `headers` (optional): Custom request headers as key-value pairs
+- `body` (optional): Request body (for POST, PUT, PATCH)
+- `timeout` (optional): Request timeout in milliseconds (default: 30000)
+- `followRedirects` (optional): Whether to follow redirects (default: true)
+- `maxLength` (optional): Maximum response length (default: 100000)
+
+**Example usage by the agent:**
+```
+"Check if an API endpoint is accessible"
+→ http_request url="https://api.example.com/health" method="GET"
+
+"Create a new resource via API"
+→ http_request url="https://api.example.com/items" method="POST"
+  headers={"Content-Type": "application/json", "Authorization": "Bearer token"}
+  body="{\"name\": \"test\"}"
+
+"Check headers without downloading body"
+→ http_request url="https://example.com/large-file.zip" method="HEAD"
+```
+
+### Response Handling
+
+- **JSON responses**: Automatically pretty-printed for readability
+- **HTML responses**: Raw HTML returned (use `web_fetch` for parsed content)
+- **Large responses**: Automatically truncated with `[Response truncated]` marker
+- **Error responses**: Include status code, status text, and error body
+
+### Security
+
+- Only HTTP and HTTPS URLs are supported
+- Requests include a `User-Agent` header identifying CoWork-OSS
+- Response size is limited to prevent memory issues
+- Timeout prevents hanging on slow responses
+
 
 ## Ollama Integration (Local LLMs)
 
