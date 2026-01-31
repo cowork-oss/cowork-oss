@@ -9,7 +9,7 @@ import {
   loadNotificationStore,
   loadNotificationStoreSync,
   saveNotificationStore,
-  DEFAULT_NOTIFICATION_STORE_PATH,
+  getNotificationStorePath,
 } from './store';
 
 export type NotificationEventType = 'added' | 'updated' | 'removed' | 'cleared';
@@ -31,7 +31,7 @@ export class NotificationService {
   private onEvent?: (event: NotificationEvent) => void;
 
   constructor(config: NotificationServiceConfig = {}) {
-    this.storePath = config.storePath || DEFAULT_NOTIFICATION_STORE_PATH;
+    this.storePath = config.storePath || getNotificationStorePath();
     this.onEvent = config.onEvent;
 
     // Load notifications synchronously on startup

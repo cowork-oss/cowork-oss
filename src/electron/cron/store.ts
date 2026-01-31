@@ -9,13 +9,27 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { CronStoreFile } from './types';
 
-// Get the app data directory
-function getConfigDir(): string {
-  return path.join(app.getPath('userData'));
+// Lazy-evaluated paths (app.getPath() is not available until app is ready)
+let _cronDir: string | null = null;
+let _cronStorePath: string | null = null;
+
+export function getCronDir(): string {
+  if (!_cronDir) {
+    _cronDir = path.join(app.getPath('userData'), 'cron');
+  }
+  return _cronDir;
 }
 
-export const DEFAULT_CRON_DIR = path.join(getConfigDir(), 'cron');
-export const DEFAULT_CRON_STORE_PATH = path.join(DEFAULT_CRON_DIR, 'jobs.json');
+export function getCronStorePath(): string {
+  if (!_cronStorePath) {
+    _cronStorePath = path.join(getCronDir(), 'jobs.json');
+  }
+  return _cronStorePath;
+}
+
+// Legacy exports - use getter functions instead
+export const DEFAULT_CRON_DIR = '' as string;
+export const DEFAULT_CRON_STORE_PATH = '' as string;
 
 /**
  * Resolve the cron store path, supporting ~ expansion
@@ -28,7 +42,7 @@ export function resolveCronStorePath(storePath?: string): string {
     }
     return path.resolve(raw);
   }
-  return DEFAULT_CRON_STORE_PATH;
+  return getCronStorePath();
 }
 
 /**

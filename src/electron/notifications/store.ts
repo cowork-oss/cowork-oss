@@ -109,10 +109,11 @@ export function loadNotificationStoreSync(storePath?: string): NotificationStore
  */
 export async function saveNotificationStore(
   store: NotificationStoreFile,
-  storePath: string = DEFAULT_NOTIFICATION_STORE_PATH
+  storePath?: string
 ): Promise<void> {
+  const effectivePath = storePath || getNotificationStorePath();
   // Ensure directory exists
-  await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
+  await fs.promises.mkdir(path.dirname(effectivePath), { recursive: true });
 
   // Trim to max notifications (keep most recent)
   if (store.notifications.length > MAX_NOTIFICATIONS) {
@@ -122,14 +123,14 @@ export async function saveNotificationStore(
   }
 
   // Generate temp file path with process ID and random suffix
-  const tmp = `${storePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+  const tmp = `${effectivePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
 
   // Write to temp file
   const json = JSON.stringify(store, null, 2);
   await fs.promises.writeFile(tmp, json, 'utf-8');
 
   // Atomic rename
-  await fs.promises.rename(tmp, storePath);
+  await fs.promises.rename(tmp, effectivePath);
 }
 
 /**
@@ -137,10 +138,11 @@ export async function saveNotificationStore(
  */
 export function saveNotificationStoreSync(
   store: NotificationStoreFile,
-  storePath: string = DEFAULT_NOTIFICATION_STORE_PATH
+  storePath?: string
 ): void {
+  const effectivePath = storePath || getNotificationStorePath();
   // Ensure directory exists
-  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.mkdirSync(path.dirname(effectivePath), { recursive: true });
 
   // Trim to max notifications (keep most recent)
   if (store.notifications.length > MAX_NOTIFICATIONS) {
@@ -150,12 +152,12 @@ export function saveNotificationStoreSync(
   }
 
   // Generate temp file path
-  const tmp = `${storePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+  const tmp = `${effectivePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
 
   // Write to temp file
   const json = JSON.stringify(store, null, 2);
   fs.writeFileSync(tmp, json, 'utf-8');
 
   // Atomic rename
-  fs.renameSync(tmp, storePath);
+  fs.renameSync(tmp, effectivePath);
 }

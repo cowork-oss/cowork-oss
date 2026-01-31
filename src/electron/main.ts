@@ -12,7 +12,7 @@ import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
-import { CronService, setCronService, DEFAULT_CRON_STORE_PATH } from './cron';
+import { CronService, setCronService, getCronStorePath } from './cron';
 import { setupControlPlaneHandlers, shutdownControlPlane } from './control-plane';
 // Canvas feature is WIP - uncomment when ready
 // import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
   try {
     cronService = new CronService({
       cronEnabled: true,
-      storePath: DEFAULT_CRON_STORE_PATH,
+      storePath: getCronStorePath(),
       maxConcurrentRuns: 3, // Allow up to 3 concurrent jobs
       // Webhook configuration (disabled by default, can be enabled in settings)
       webhook: {
