@@ -23,7 +23,7 @@ const PROTOCOL_VERSION = '2024-11-05';
 
 // Server info
 const SERVER_INFO: MCPServerInfo = {
-  name: 'CoWork-OSS',
+  name: 'CoWork-OS',
   version: '1.0.0',
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {

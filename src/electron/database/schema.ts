@@ -7,7 +7,7 @@ export class DatabaseManager {
 
   constructor() {
     const userDataPath = app.getPath('userData');
-    const dbPath = path.join(userDataPath, 'cowork-oss.db');
+    const dbPath = path.join(userDataPath, 'cowork-os.db');
     this.db = new Database(dbPath);
     this.initializeSchema();
   }

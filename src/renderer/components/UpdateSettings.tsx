@@ -275,7 +275,7 @@ export function UpdateSettings() {
         <div className="manual-update-commands">
           {versionInfo?.isNpmGlobal ? (
             <code>
-              npm update -g cowork-oss
+              npm update -g cowork-os
             </code>
           ) : (
             <code>

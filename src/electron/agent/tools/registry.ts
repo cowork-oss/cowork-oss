@@ -430,7 +430,7 @@ Skill Management (create, modify, duplicate skills):
 - skill_duplicate: Duplicate an existing skill with modifications (great for variations)
 - skill_update: Update an existing skill (managed/workspace only, not bundled)
 - skill_delete: Delete a skill (managed/workspace only, not bundled)
-Skills are stored in ~/Library/Application Support/cowork-oss/skills/ (managed) or workspace/skills/ (workspace).
+Skills are stored in ~/Library/Application Support/cowork-os/skills/ (managed) or workspace/skills/ (workspace).
 
 Code Tools (PREFERRED for code navigation and editing):
 - glob: Fast pattern-based file search (e.g., "**/*.ts", "src/**/*.test.ts")
@@ -1700,7 +1700,7 @@ ${skillDescriptions}`;
         name: 'skill_create',
         description:
           'Create a new custom skill. The skill will be saved to the managed skills directory ' +
-          '(~/Library/Application Support/cowork-oss/skills/). Provide the full skill definition.',
+          '(~/Library/Application Support/cowork-os/skills/). Provide the full skill definition.',
         input_schema: {
           type: 'object',
           properties: {

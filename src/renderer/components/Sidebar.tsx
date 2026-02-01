@@ -325,7 +325,7 @@ export function Sidebar({
       <div className="sidebar-footer cli-sidebar-footer">
         <div className="cli-footer-info">
           <span className="cli-footer-label">SYS:</span>
-          <span className="cli-footer-value">CoWork-OSS</span>
+          <span className="cli-footer-value">CoWork OS</span>
         </div>
         <button className="settings-btn cli-settings-btn" onClick={onOpenSettings} title="Settings">
           [cfg]

@@ -1261,7 +1261,7 @@ export interface SkillInstallProgress {
 }
 
 export interface SkillsConfig {
-  skillsDirectory: string;  // Default: ~/Library/Application Support/cowork-oss/skills/
+  skillsDirectory: string;  // Default: ~/Library/Application Support/cowork-os/skills/
   enabledSkillIds: string[];
   registryUrl?: string;  // Default: https://skill-hub.com
   autoUpdate?: boolean;  // Auto-update managed skills

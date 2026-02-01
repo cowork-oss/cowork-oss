@@ -255,7 +255,7 @@ export class DocumentBuilder {
     }
 
     const doc = new Document({
-      creator: options.author || 'CoWork-OSS',
+      creator: options.author || 'CoWork OS',
       title: options.title,
       subject: options.subject,
       sections: [
@@ -298,7 +298,7 @@ export class DocumentBuilder {
         },
         info: {
           Title: options.title || '',
-          Author: options.author || 'CoWork-OSS',
+          Author: options.author || 'CoWork OS',
           Subject: options.subject || ''
         }
       });

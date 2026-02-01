@@ -947,18 +947,18 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
           <div className="welcome-content cli-style">
             {/* Logo */}
             <div className="welcome-logo">
-              <img src="./cowork-oss-logo.png" alt="CoWork-OSS" className="welcome-logo-img" />
+              <img src="./cowork-os-logo.png" alt="CoWork OS" className="welcome-logo-img" />
             </div>
 
             {/* ASCII Terminal Header */}
             <div className="cli-header">
               <pre className="ascii-art">{`
-  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗███████╗
- ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝██╔════╝
- ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗███████╗
- ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
- ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
-  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝`}</pre>
               <div className="cli-version">{appVersion ? `v${appVersion}` : ''}</div>
             </div>
 
@@ -966,7 +966,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
             <div className="cli-info">
               <div className="cli-line">
                 <span className="cli-prompt">$</span>
-                <span className="cli-text">Welcome to CoWork-OSS - your AI-powered task automation assistant</span>
+                <span className="cli-text">Welcome to CoWork OS - your AI-powered task automation assistant</span>
               </div>
               <div className="cli-line cli-line-disclosure">
                 <span className="cli-prompt">#</span>

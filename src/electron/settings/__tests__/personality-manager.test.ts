@@ -468,7 +468,7 @@ describe('PersonalityManager - agent name', () => {
 
       expect(prompt).toContain('YOUR IDENTITY:');
       expect(prompt).toContain('You are CoWork');
-      expect(prompt).toContain('CoWork-OSS');
+      expect(prompt).toContain('CoWork OS');
       expect(prompt).toContain('Do NOT claim to be Claude');
     });
 

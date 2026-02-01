@@ -307,7 +307,7 @@ export class DiscordAdapter implements ChannelAdapter {
         .setDescription('Pair with a pairing code to gain access')
         .addStringOption(option =>
           option.setName('code')
-            .setDescription('The pairing code from CoWork-OSS app')
+            .setDescription('The pairing code from CoWork OS app')
             .setRequired(true)),
       new SlashCommandBuilder()
         .setName('approve')

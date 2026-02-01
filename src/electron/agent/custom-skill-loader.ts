@@ -3,7 +3,7 @@
  *
  * Loads skills from multiple sources with precedence:
  * - Bundled skills (resources/skills/) - lowest precedence
- * - Managed skills (~/Library/Application Support/cowork-oss/skills/) - medium precedence
+ * - Managed skills (~/Library/Application Support/cowork-os/skills/) - medium precedence
  * - Workspace skills (workspace/skills/) - highest precedence
  *
  * Skills with the same ID from higher precedence sources override lower ones.

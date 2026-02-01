@@ -153,7 +153,7 @@ export async function setupIpcHandlers(
     }
 
     // Create temp directory
-    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
     await fs.mkdir(tempDir, { recursive: true });
 
     // Create the temp workspace with a known ID

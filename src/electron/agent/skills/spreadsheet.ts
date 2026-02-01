@@ -46,7 +46,7 @@ export class SpreadsheetBuilder {
 
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'CoWork-OSS';
+    workbook.creator = 'CoWork OS';
     workbook.created = new Date();
 
     for (const sheetData of sheets) {

@@ -20,12 +20,12 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
         {/* ASCII Art Logo */}
         <pre className="disclaimer-ascii-art">
 {`
- ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗        ██████╗ ███████╗███████╗
-██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝       ██╔═══██╗██╔════╝██╔════╝
-██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝  █████╗██║   ██║███████╗███████╗
-██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗  ╚════╝██║   ██║╚════██║╚════██║
-╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗       ╚██████╔╝███████║███████║
- ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝        ╚═════╝ ╚══════╝╚══════╝
+ ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗
+██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝
+██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝  █████╗██║   ██║███████╗
+██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗  ╚════╝██║   ██║╚════██║
+╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗       ╚██████╔╝███████║
+ ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝        ╚═════╝ ╚══════╝
 `}
         </pre>
         <div className="disclaimer-subtitle">AGENTIC TASK AUTOMATION</div>
@@ -43,7 +43,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
             </p>
 
             <div className="disclaimer-section">
-              <h4>What CoWork-OSS agents can do:</h4>
+              <h4>What CoWork OS agents can do:</h4>
               <ul>
                 <li>Execute shell commands on your system</li>
                 <li>Read, write, and delete files in your workspace</li>
@@ -115,7 +115,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
 
         {selectedOption === 'no' && (
           <div className="disclaimer-exit-message">
-            You must accept to use CoWork-OSS. Close the app if you disagree.
+            You must accept to use CoWork OS. Close the app if you disagree.
           </div>
         )}
       </div>

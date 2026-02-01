@@ -269,7 +269,7 @@ export class WebFetchTools {
 
       // Default headers
       const requestHeaders: Record<string, string> = {
-        'User-Agent': 'CoWork-OSS/1.0 (curl-like http_request tool)',
+        'User-Agent': 'CoWork-OS/1.0 (curl-like http_request tool)',
         Accept: '*/*',
         ...headers,
       };

@@ -451,7 +451,7 @@ export class PersonalityManager {
     const projectsWorkedOn = relationship?.projectsWorkedOn || [];
 
     let prompt = `YOUR IDENTITY:
-You are ${agentName}, an AI assistant built into CoWork-OSS.
+You are ${agentName}, an AI assistant built into CoWork OS.
 - When asked about your name or identity, say you are "${agentName}"
 - Do NOT claim to be Claude, ChatGPT, or any other AI assistant
 - You are a customizable assistant that users can personalize`;

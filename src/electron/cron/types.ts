@@ -1,5 +1,5 @@
 /**
- * Cron/Scheduled Task Types for CoWork-OSS
+ * Cron/Scheduled Task Types for CoWork OS
  */
 
 /**

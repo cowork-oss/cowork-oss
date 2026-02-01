@@ -52,10 +52,10 @@ export class PresentationBuilder {
     const pptx = new PptxGenJS();
 
     // Set presentation metadata
-    pptx.author = options.author || 'CoWork-OSS';
+    pptx.author = options.author || 'CoWork OS';
     pptx.title = options.title || 'Presentation';
     pptx.subject = options.subject || '';
-    pptx.company = 'CoWork-OSS';
+    pptx.company = 'CoWork OS';
 
     // Set slide size
     if (options.slideSize === 'standard') {

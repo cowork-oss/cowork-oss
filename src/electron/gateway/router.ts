@@ -144,13 +144,13 @@ export class MessageRouter {
         return { ...existing, isTemp: true };
       }
       // Directory was deleted, recreate it
-      const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+      const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
       fs.mkdirSync(tempDir, { recursive: true });
       return { ...existing, isTemp: true };
     }
 
     // Create temp directory
-    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
     fs.mkdirSync(tempDir, { recursive: true });
 
     // Create workspace record
@@ -2379,7 +2379,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
       if (skills.length === 0) {
         await adapter.sendMessage({
           chatId: message.chatId,
-          text: '📚 No skills available.\n\nSkills are stored in:\n`~/Library/Application Support/cowork-oss/skills/`',
+          text: '📚 No skills available.\n\nSkills are stored in:\n`~/Library/Application Support/cowork-os/skills/`',
           parseMode: 'markdown',
         });
         return;
@@ -2628,14 +2628,14 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     const platform = process.platform;
     const arch = process.arch;
 
-    const text = `📦 *CoWork-OSS*
+    const text = `📦 *CoWork OS*
 
 Version: \`${version}\`
 Platform: \`${platform}\` (${arch})
 Electron: \`${electronVersion}\`
 Node.js: \`${nodeVersion}\`
 
-🔗 [GitHub](https://github.com/CoWork-OS/cowork-oss)`;
+🔗 [GitHub](https://github.com/CoWork-OS/cowork-os)`;
 
     await adapter.sendMessage({
       chatId: message.chatId,

@@ -783,7 +783,7 @@ describe('WebFetchTools', () => {
           'https://example.com',
           expect.objectContaining({
             headers: expect.objectContaining({
-              'User-Agent': expect.stringContaining('CoWork-OSS'),
+              'User-Agent': expect.stringContaining('CoWork-OS'),
             }),
           })
         );

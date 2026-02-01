@@ -229,7 +229,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
                 <span style={{ fontSize: '13px' }}>
                   imsg needs Full Disk Access to read the Messages database.<br />
                   Open <strong>System Settings → Privacy & Security → Full Disk Access</strong><br />
-                  Enable access for your <strong>Terminal</strong> application (or CoWork-OSS if running as app)
+                  Enable access for your <strong>Terminal</strong> application (or CoWork OS if running as app)
                 </span>
               </li>
               <li style={{ marginBottom: '8px' }}>

@@ -93,7 +93,7 @@ export class BrowserService {
 
       context = await browser.newContext({
         viewport: this.options.viewport,
-        userAgent: 'CoWork-OSS Browser Automation'
+        userAgent: 'CoWork OS Browser Automation'
       });
 
       const page = await context.newPage();

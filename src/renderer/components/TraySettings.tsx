@@ -79,7 +79,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             <div className="toggle-info">
               <span className="toggle-label">Enable Menu Bar Icon</span>
               <span className="toggle-description">
-                Show CoWork-OSS icon in the macOS menu bar
+                Show CoWork OS icon in the macOS menu bar
               </span>
             </div>
             <label className="toggle-switch">
@@ -97,7 +97,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             <div className="toggle-info">
               <span className="toggle-label">Show Dock Icon</span>
               <span className="toggle-description">
-                Show CoWork-OSS in the macOS Dock when running
+                Show CoWork OS in the macOS Dock when running
               </span>
             </div>
             <label className="toggle-switch">

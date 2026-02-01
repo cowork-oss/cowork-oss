@@ -1,5 +1,5 @@
 /**
- * Cron Module - Scheduled Task Execution for CoWork-OSS
+ * Cron Module - Scheduled Task Execution for CoWork OS
  */
 
 export * from './types';

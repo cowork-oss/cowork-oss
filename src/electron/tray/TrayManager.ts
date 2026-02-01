@@ -291,7 +291,7 @@ export class TrayManager {
     }
 
     // Create temp directory
-    const tempDir = path.join(os.tmpdir(), 'cowork-oss-temp');
+    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -448,7 +448,7 @@ export class TrayManager {
       const icon = this.getTrayIcon('idle');
 
       this.tray = new Tray(icon);
-      this.tray.setToolTip('CoWork-OSS');
+      this.tray.setToolTip('CoWork OS');
 
       // Build and set context menu
       this.updateContextMenu();
@@ -635,7 +635,7 @@ export class TrayManager {
 
       // App controls
       {
-        label: 'About CoWork-OSS',
+        label: 'About CoWork OS',
         click: () => {
           this.showMainWindow();
           this.mainWindow?.webContents.send('tray:open-about');
@@ -650,7 +650,7 @@ export class TrayManager {
       },
       { type: 'separator' },
       {
-        label: 'Quit CoWork-OSS',
+        label: 'Quit CoWork OS',
         accelerator: 'CmdOrCtrl+Q',
         click: () => {
           // Force quit (bypass close-to-tray)

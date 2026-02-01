@@ -67,23 +67,23 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
             <span className="cli-dot"></span>
             <span className="cli-dot active"></span>
           </div>
-          <span className="cli-terminal-title">CoWork-OSS — init</span>
+          <span className="cli-terminal-title">CoWork OS — init</span>
         </div>
 
         {/* Logo Section */}
         <div className="cli-logo-section">
           <img
-            src="./cowork-oss-logo.png"
-            alt="CoWork-OSS"
+            src="./cowork-os-logo.png"
+            alt="CoWork OS"
             className="cli-mascot-logo"
           />
           <pre className="cli-ascii-logo">{`
-  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗███████╗
- ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝██╔════╝
- ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗███████╗
- ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║╚════██║
- ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║███████║
-  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝╚══════╝`}</pre>
+  ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗       ██████╗ ███████╗
+ ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝      ██╔═══██╗██╔════╝
+ ██║     ██║   ██║██║ █╗ ██║██║   ██║██████╔╝█████╔╝ █████╗██║   ██║███████╗
+ ██║     ██║   ██║██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════╝██║   ██║╚════██║
+ ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗      ╚██████╔╝███████║
+  ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚══════╝`}</pre>
           <div className="cli-version">{appVersion ? `v${appVersion}` : ''}</div>
         </div>
 
@@ -91,7 +91,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
         <div className="cli-init-info">
           <div className="cli-line">
             <span className="cli-prompt">$</span>
-            <span className="cli-text">Welcome to CoWork-OSS</span>
+            <span className="cli-text">Welcome to CoWork OS</span>
           </div>
           <div className="cli-line">
             <span className="cli-prompt">$</span>
@@ -136,7 +136,7 @@ export function WorkspaceSelector({ onWorkspaceSelected }: WorkspaceSelectorProp
             <span className="cli-btn-bracket">]</span>
             <span className="cli-btn-text">select_folder</span>
           </button>
-          <p className="cli-hint"># choose a directory for CoWork-OSS to operate in</p>
+          <p className="cli-hint"># choose a directory for CoWork OS to operate in</p>
         </div>
 
         {/* Footer */}

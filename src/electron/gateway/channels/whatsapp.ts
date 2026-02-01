@@ -219,7 +219,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
         version,
         logger: logger as any,
         // Note: printQRInTerminal is deprecated - QR codes are handled via connection.update event
-        browser: ['CoWork-OSS', 'Desktop', '1.0.0'],
+        browser: ['CoWork-OS', 'Desktop', '1.0.0'],
         syncFullHistory: false,
         markOnlineOnConnect: false,
       });
