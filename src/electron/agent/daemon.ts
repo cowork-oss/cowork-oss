@@ -10,7 +10,7 @@ import {
   ApprovalRepository,
   ArtifactRepository,
 } from '../database/repositories';
-import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions } from '../../shared/types';
+import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -214,6 +214,53 @@ export class AgentDaemon extends EventEmitter {
       prompt: params.prompt,
       status: 'pending',
       workspaceId: params.workspaceId,
+      budgetTokens: params.budgetTokens,
+      budgetCost: params.budgetCost,
+    });
+
+    // Start the task (will be queued if necessary)
+    await this.startTask(task);
+
+    return task;
+  }
+
+  /**
+   * Get a task by its ID
+   */
+  async getTaskById(taskId: string): Promise<Task | undefined> {
+    return this.taskRepo.findById(taskId);
+  }
+
+  /**
+   * Get all child tasks for a given parent task
+   */
+  async getChildTasks(parentTaskId: string): Promise<Task[]> {
+    return this.taskRepo.findByParent(parentTaskId);
+  }
+
+  /**
+   * Create a child task (sub-agent or parallel agent)
+   */
+  async createChildTask(params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    parentTaskId: string;
+    agentType: AgentType;
+    agentConfig?: AgentConfig;
+    depth?: number;
+    budgetTokens?: number;
+    budgetCost?: number;
+  }): Promise<Task> {
+    const task = this.taskRepo.create({
+      title: params.title,
+      prompt: params.prompt,
+      status: 'pending',
+      workspaceId: params.workspaceId,
+      parentTaskId: params.parentTaskId,
+      agentType: params.agentType,
+      agentConfig: params.agentConfig,
+      depth: params.depth ?? 0,
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
     });

@@ -137,8 +137,8 @@ export class TaskRepository {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -153,7 +153,12 @@ export class TaskRepository {
       newTask.budgetCost || null,
       newTask.successCriteria ? JSON.stringify(newTask.successCriteria) : null,
       newTask.maxAttempts || null,
-      newTask.currentAttempt || 1
+      newTask.currentAttempt || 1,
+      newTask.parentTaskId || null,
+      newTask.agentType || 'main',
+      newTask.agentConfig ? JSON.stringify(newTask.agentConfig) : null,
+      newTask.depth ?? 0,
+      newTask.resultSummary || null
     );
 
     return newTask;
@@ -162,7 +167,8 @@ export class TaskRepository {
   // Whitelist of allowed update fields to prevent SQL injection
   private static readonly ALLOWED_UPDATE_FIELDS = new Set([
     'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost',
-    'successCriteria', 'maxAttempts', 'currentAttempt', 'completedAt'
+    'successCriteria', 'maxAttempts', 'currentAttempt', 'completedAt',
+    'parentTaskId', 'agentType', 'agentConfig', 'depth', 'resultSummary'
   ]);
 
   update(id: string, updates: Partial<Task>): void {
@@ -178,7 +184,7 @@ export class TaskRepository {
       const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
       fields.push(`${snakeKey} = ?`);
       // JSON serialize object fields
-      if (key === 'successCriteria' && value != null) {
+      if ((key === 'successCriteria' || key === 'agentConfig') && value != null) {
         values.push(JSON.stringify(value));
       } else {
         values.push(value);
@@ -283,7 +289,26 @@ export class TaskRepository {
       successCriteria: row.success_criteria ? safeJsonParse(row.success_criteria, undefined, 'task.successCriteria') : undefined,
       maxAttempts: row.max_attempts || undefined,
       currentAttempt: row.current_attempt || undefined,
+      // Sub-Agent / Parallel Agent fields
+      parentTaskId: row.parent_task_id || undefined,
+      agentType: row.agent_type || undefined,
+      agentConfig: row.agent_config ? safeJsonParse(row.agent_config, undefined, 'task.agentConfig') : undefined,
+      depth: row.depth ?? undefined,
+      resultSummary: row.result_summary || undefined,
     };
+  }
+
+  /**
+   * Find tasks by parent task ID
+   */
+  findByParent(parentTaskId: string): Task[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE parent_task_id = ?
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all(parentTaskId) as any[];
+    return rows.map(row => this.mapRowToTask(row));
   }
 }
 

@@ -281,6 +281,30 @@ export class DatabaseManager {
         // Column already exists, ignore
       }
     }
+
+    // Migration: Add Sub-Agent / Parallel Agent columns to tasks table
+    const subAgentColumns = [
+      'ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id)',
+      'ALTER TABLE tasks ADD COLUMN agent_type TEXT DEFAULT "main"',
+      'ALTER TABLE tasks ADD COLUMN agent_config TEXT',
+      'ALTER TABLE tasks ADD COLUMN depth INTEGER DEFAULT 0',
+      'ALTER TABLE tasks ADD COLUMN result_summary TEXT',
+    ];
+
+    for (const sql of subAgentColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+
+    // Add index for parent_task_id lookups
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)');
+    } catch {
+      // Index already exists, ignore
+    }
   }
 
   private seedDefaultModels() {
