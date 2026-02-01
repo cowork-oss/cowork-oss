@@ -523,7 +523,7 @@ cowork-oss/
 
 ```bash
 # Clone and install
-git clone https://github.com/mesutfelat/cowork-oss.git
+git clone https://github.com/cowork-oss/cowork-oss.git
 cd cowork-oss
 npm install
 

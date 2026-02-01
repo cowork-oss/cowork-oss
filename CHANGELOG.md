@@ -269,10 +269,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/mesutfelat/cowork-oss/compare/v0.1.6...HEAD
-[0.1.6]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.6
-[0.1.5]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.5
-[0.1.4]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.4
-[0.1.3]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.3
-[0.1.0]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.1.0
-[0.0.1]: https://github.com/mesutfelat/cowork-oss/releases/tag/v0.0.1
+[Unreleased]: https://github.com/cowork-oss/cowork-oss/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.1.6
+[0.1.5]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.1.5
+[0.1.4]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.1.4
+[0.1.3]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.1.3
+[0.1.0]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.1.0
+[0.0.1]: https://github.com/cowork-oss/cowork-oss/releases/tag/v0.0.1

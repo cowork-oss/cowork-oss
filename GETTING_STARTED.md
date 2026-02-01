@@ -5,7 +5,7 @@
 ### Step 1: Install Dependencies
 
 ```bash
-git clone https://github.com/mesutfelat/cowork-oss.git
+git clone https://github.com/cowork-oss/cowork-oss.git
 cd cowork-oss
 npm install
 ```
@@ -334,4 +334,4 @@ Don't use system folders like `/System` or `/Applications`.
 - Check console output for errors
 - Review the task timeline for clues
 - Read error messages in the UI
-- Report issues at [GitHub Issues](https://github.com/mesutfelat/cowork-oss/issues)
+- Report issues at [GitHub Issues](https://github.com/cowork-oss/cowork-oss/issues)

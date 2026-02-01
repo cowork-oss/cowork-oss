@@ -256,7 +256,7 @@ docs(readme): update installation instructions for M1 Macs
 ## Questions?
 
 Feel free to:
-- Open a [Discussion](https://github.com/mesutfelat/cowork-oss/discussions) for questions
+- Open a [Discussion](https://github.com/cowork-oss/cowork-oss/discussions) for questions
 - Reach out on X/Twitter: [@MesutGenAI](https://x.com/MesutGenAI)
 - Tag maintainers in issues for guidance
 

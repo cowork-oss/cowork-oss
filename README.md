@@ -4,7 +4,7 @@
 
 # CoWork-OSS
 
-[![CI](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/mesutfelat/cowork-oss/actions/workflows/ci.yml)
+[![CI](https://github.com/cowork-oss/cowork-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/cowork-oss/cowork-oss/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/platform-macOS-blue.svg)](https://www.apple.com/macos/)
 [![Electron](https://img.shields.io/badge/electron-40.0.0-47848F.svg)](https://www.electronjs.org/)
@@ -252,7 +252,7 @@ Customize agent behavior via Settings or conversation:
 
 ```bash
 # Clone the repository
-git clone https://github.com/mesutfelat/cowork-oss.git
+git clone https://github.com/cowork-oss/cowork-oss.git
 cd cowork-oss
 
 # Install dependencies

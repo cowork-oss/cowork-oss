@@ -96,7 +96,7 @@ Moving to CoWork-OSS provides several advantages:
 ### 1. Install CoWork-OSS
 
 ```bash
-git clone https://github.com/mesutfelat/cowork-oss.git
+git clone https://github.com/cowork-oss/cowork-oss.git
 cd cowork-oss
 npm install
 npm run dev
@@ -184,5 +184,5 @@ No. Task history, conversations, and artifacts are stored locally per platform. 
 
 - **Documentation**: See [README.md](README.md) for full feature documentation
 - **Security**: See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) for security best practices
-- **Issues**: Report bugs at [GitHub Issues](https://github.com/mesutfelat/cowork-oss/issues)
+- **Issues**: Report bugs at [GitHub Issues](https://github.com/cowork-oss/cowork-oss/issues)
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines

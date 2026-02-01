@@ -8,13 +8,13 @@
   "main": "dist/electron/electron/main.js",
   "author": "CoWork-OSS Contributors",
   "license": "MIT",
-  "homepage": "https://github.com/mesutfelat/cowork-oss#readme",
+  "homepage": "https://github.com/cowork-oss/cowork-oss#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mesutfelat/cowork-oss.git"
+    "url": "git+https://github.com/cowork-oss/cowork-oss.git"
   },
   "bugs": {
-    "url": "https://github.com/mesutfelat/cowork-oss/issues"
+    "url": "https://github.com/cowork-oss/cowork-oss/issues"
   },
   "keywords": [
     "ai-assistant",
@@ -150,7 +150,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "mesutfelat",
+      "owner": "cowork-oss",
       "repo": "cowork-oss"
     }
   }
