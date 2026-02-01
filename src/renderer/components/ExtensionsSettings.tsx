@@ -8,7 +8,6 @@ export function ExtensionsSettings() {
   const [extensions, setExtensions] = useState<ExtensionData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
-  const [extensionConfig, setExtensionConfig] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -44,14 +43,8 @@ export function ExtensionsSettings() {
     }
   };
 
-  const handleSelectExtension = async (name: string) => {
-    setSelectedExtension(name);
-    try {
-      const config = await window.electronAPI.getExtensionConfig(name);
-      setExtensionConfig(config);
-    } catch (error) {
-      console.error('Failed to load extension config:', error);
-    }
+  const handleSelectExtension = (name: string) => {
+    setSelectedExtension(selectedExtension === name ? null : name);
   };
 
   const handleEnableExtension = async (name: string) => {
