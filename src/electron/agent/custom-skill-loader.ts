@@ -21,6 +21,7 @@ import {
 } from '../../shared/types';
 import { SkillEligibilityChecker, getSkillEligibilityChecker } from './skill-eligibility';
 import { getSkillRegistry } from './skill-registry';
+import { InputSanitizer } from './security';
 
 const SKILLS_FOLDER_NAME = 'skills';
 const SKILL_FILE_EXTENSION = '.json';
@@ -301,6 +302,7 @@ export class CustomSkillLoader {
   /**
    * Get enabled guideline skills for system prompt injection
    * Returns the combined prompt content of all enabled guideline skills
+   * Guidelines are validated and sanitized to prevent injection attacks
    */
   getEnabledGuidelinesPrompt(): string {
     const enabledGuidelines = this.listGuidelineSkills().filter(
@@ -309,7 +311,18 @@ export class CustomSkillLoader {
     if (enabledGuidelines.length === 0) {
       return '';
     }
-    return enabledGuidelines.map((skill) => skill.prompt).join('\n\n');
+    // Validate and sanitize each guideline before injection
+    return enabledGuidelines.map((skill) => {
+      const validation = InputSanitizer.validateSkillGuidelines(skill.prompt);
+      if (!validation.valid) {
+        console.warn(
+          `[CustomSkillLoader] Security: Skill "${skill.id}" guidelines contain suspicious patterns:`,
+          validation.issues
+        );
+        return validation.sanitized;
+      }
+      return skill.prompt;
+    }).join('\n\n');
   }
 
   /**

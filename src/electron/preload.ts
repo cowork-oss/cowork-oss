@@ -2099,11 +2099,13 @@ export interface ElectronAPI {
     themeMode: 'light' | 'dark' | 'system';
     accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
     disclaimerAccepted?: boolean;
+    onboardingCompleted?: boolean;
   }>;
   saveAppearanceSettings: (settings: {
     themeMode?: 'light' | 'dark' | 'system';
     accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
     disclaimerAccepted?: boolean;
+    onboardingCompleted?: boolean;
   }) => Promise<{ success: boolean }>;
   // Personality Settings
   getPersonalitySettings: () => Promise<{

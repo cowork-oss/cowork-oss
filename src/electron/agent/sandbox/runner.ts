@@ -12,11 +12,10 @@
  */
 
 // Re-export the sandbox factory and types for backward compatibility
+// Note: SandboxOptions and SandboxResult are defined locally below to avoid conflicts
 export {
   ISandbox,
   SandboxType,
-  SandboxOptions,
-  SandboxResult,
   createSandbox,
   detectAvailableSandbox,
   isDockerAvailable,

@@ -3,7 +3,7 @@ import { LLMTool } from '../llm/types';
 import { MentionRepository } from '../../agents/MentionRepository';
 import { AgentRoleRepository } from '../../agents/AgentRoleRepository';
 import { DatabaseManager } from '../../database/schema';
-import { MentionType } from '../../../shared/types';
+import { MentionType, AgentRole } from '../../../shared/types';
 
 /**
  * MentionTools provides tools for agents to @mention and communicate with other specialized agents
@@ -51,10 +51,10 @@ export class MentionTools {
       tool: 'list_agent_roles',
     });
 
-    const roles = this.agentRoleRepo.list({ isActive: true });
+    const roles = this.agentRoleRepo.findAll(false); // false = only active roles
 
     const result = {
-      agents: roles.map((role) => ({
+      agents: roles.map((role: AgentRole) => ({
         id: role.id,
         name: role.name,
         displayName: role.displayName,
@@ -106,15 +106,15 @@ export class MentionTools {
     });
 
     // Find the agent role by name or displayName
-    const allRoles = this.agentRoleRepo.list({ isActive: true });
+    const allRoles = this.agentRoleRepo.findAll(false); // false = only active roles
     const targetRole = allRoles.find(
-      (r) =>
+      (r: AgentRole) =>
         r.name.toLowerCase() === agentRole.toLowerCase() ||
         r.displayName.toLowerCase() === agentRole.toLowerCase()
     );
 
     if (!targetRole) {
-      const availableRoles = allRoles.map((r) => r.name).join(', ');
+      const availableRoles = allRoles.map((r: AgentRole) => r.name).join(', ');
       throw new Error(
         `Agent role "${agentRole}" not found. Available roles: ${availableRoles}`
       );

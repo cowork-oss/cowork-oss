@@ -175,9 +175,9 @@ export class LineClient extends EventEmitter {
   async getBotInfo(): Promise<LineUserProfile> {
     const response = await this.apiRequest('GET', '/bot/info');
     return {
-      userId: response.userId,
-      displayName: response.displayName,
-      pictureUrl: response.pictureUrl,
+      userId: response.userId as string,
+      displayName: response.displayName as string,
+      pictureUrl: response.pictureUrl as string | undefined,
     };
   }
 
@@ -444,10 +444,10 @@ export class LineClient extends EventEmitter {
 
     const response = await this.apiRequest('GET', `/bot/profile/${userId}`);
     const profile: LineUserProfile = {
-      userId: response.userId,
-      displayName: response.displayName,
-      pictureUrl: response.pictureUrl,
-      statusMessage: response.statusMessage,
+      userId: response.userId as string,
+      displayName: response.displayName as string,
+      pictureUrl: response.pictureUrl as string | undefined,
+      statusMessage: response.statusMessage as string | undefined,
     };
 
     // Cache the profile
@@ -461,9 +461,9 @@ export class LineClient extends EventEmitter {
   async getGroupMemberProfile(groupId: string, userId: string): Promise<LineUserProfile> {
     const response = await this.apiRequest('GET', `/bot/group/${groupId}/member/${userId}`);
     return {
-      userId: response.userId,
-      displayName: response.displayName,
-      pictureUrl: response.pictureUrl,
+      userId: response.userId as string,
+      displayName: response.displayName as string,
+      pictureUrl: response.pictureUrl as string | undefined,
     };
   }
 
@@ -473,9 +473,9 @@ export class LineClient extends EventEmitter {
   async getRoomMemberProfile(roomId: string, userId: string): Promise<LineUserProfile> {
     const response = await this.apiRequest('GET', `/bot/room/${roomId}/member/${userId}`);
     return {
-      userId: response.userId,
-      displayName: response.displayName,
-      pictureUrl: response.pictureUrl,
+      userId: response.userId as string,
+      displayName: response.displayName as string,
+      pictureUrl: response.pictureUrl as string | undefined,
     };
   }
 

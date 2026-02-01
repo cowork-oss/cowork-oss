@@ -488,11 +488,11 @@ export class EmailClient extends EventEmitter {
    */
   private decodeHeader(header: string): string {
     // Handle =?charset?encoding?text?= format
-    return header.replace(/=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi, (_, charset, encoding, text) => {
+    return header.replace(/=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi, (_: string, charset: string, encoding: string, text: string) => {
       if (encoding.toUpperCase() === 'B') {
         return Buffer.from(text, 'base64').toString('utf8');
       } else {
-        return text.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__, hex) =>
+        return text.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__: string, hex: string) =>
           String.fromCharCode(parseInt(hex, 16))
         );
       }

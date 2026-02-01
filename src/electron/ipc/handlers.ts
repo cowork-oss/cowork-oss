@@ -120,6 +120,12 @@ rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limit
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 
+// Helper function to get the main window
+function getMainWindow(): BrowserWindow | null {
+  const windows = BrowserWindow.getAllWindows();
+  return windows.length > 0 ? windows[0] : null;
+}
+
 export async function setupIpcHandlers(
   dbManager: DatabaseManager,
   agentDaemon: AgentDaemon,
@@ -1656,7 +1662,7 @@ export async function setupIpcHandlers(
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
     const activity = activityRepo.create({ ...request, workspaceId: validatedWorkspaceId });
     // Emit activity event for real-time updates
-    mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+    getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
     return activity;
   });
 
@@ -1665,7 +1671,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'activity ID');
     const success = activityRepo.markRead(validated);
     if (success) {
-      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'read', id: validated });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'read', id: validated });
     }
     return { success };
   });
@@ -1674,7 +1680,7 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ);
     const validated = validateInput(UUIDSchema, workspaceId, 'workspace ID');
     const count = activityRepo.markAllRead(validated);
-    mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'all_read', workspaceId: validated });
+    getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'all_read', workspaceId: validated });
     return { count };
   });
 
@@ -1683,7 +1689,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'activity ID');
     const activity = activityRepo.togglePin(validated);
     if (activity) {
-      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'pinned', activity });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'pinned', activity });
     }
     return activity;
   });
@@ -1693,7 +1699,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'activity ID');
     const success = activityRepo.delete(validated);
     if (success) {
-      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'deleted', id: validated });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'deleted', id: validated });
     }
     return { success };
   });
@@ -1708,7 +1714,7 @@ export async function setupIpcHandlers(
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
     const mention = mentionRepo.create({ ...request, workspaceId: validatedWorkspaceId });
     // Emit mention event for real-time updates
-    mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
+    getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
     // Also create an activity entry for the mention
     const fromAgent = request.fromAgentRoleId ? agentRoleRepo.findById(request.fromAgentRoleId) : null;
     const toAgent = agentRoleRepo.findById(request.toAgentRoleId);
@@ -1730,7 +1736,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'mention ID');
     const mention = mentionRepo.acknowledge(validated);
     if (mention) {
-      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'acknowledged', mention });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'acknowledged', mention });
     }
     return mention;
   });
@@ -1740,7 +1746,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'mention ID');
     const mention = mentionRepo.complete(validated);
     if (mention) {
-      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'completed', mention });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'completed', mention });
     }
     return mention;
   });
@@ -1750,7 +1756,7 @@ export async function setupIpcHandlers(
     const validated = validateInput(UUIDSchema, id, 'mention ID');
     const mention = mentionRepo.dismiss(validated);
     if (mention) {
-      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'dismissed', mention });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'dismissed', mention });
     }
     return mention;
   });
@@ -1761,7 +1767,7 @@ export async function setupIpcHandlers(
     const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
     const task = taskRepo.moveToColumn(validatedId, column);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'moved', task, column });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'moved', task, column });
     }
     return task;
   });
@@ -1771,7 +1777,7 @@ export async function setupIpcHandlers(
     const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
     const task = taskRepo.setPriority(validatedId, priority);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'priority_changed', task });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'priority_changed', task });
     }
     return task;
   });
@@ -1781,7 +1787,7 @@ export async function setupIpcHandlers(
     const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
     const task = taskRepo.setDueDate(validatedId, dueDate);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'due_date_changed', task });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'due_date_changed', task });
     }
     return task;
   });
@@ -1791,7 +1797,7 @@ export async function setupIpcHandlers(
     const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
     const task = taskRepo.setEstimate(validatedId, minutes);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'estimate_changed', task });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'estimate_changed', task });
     }
     return task;
   });
@@ -1802,7 +1808,7 @@ export async function setupIpcHandlers(
     const validatedLabelId = validateInput(UUIDSchema, labelId, 'label ID');
     const task = taskRepo.addLabel(validatedTaskId, validatedLabelId);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_added', task, labelId: validatedLabelId });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_added', task, labelId: validatedLabelId });
     }
     return task;
   });
@@ -1813,7 +1819,7 @@ export async function setupIpcHandlers(
     const validatedLabelId = validateInput(UUIDSchema, labelId, 'label ID');
     const task = taskRepo.removeLabel(validatedTaskId, validatedLabelId);
     if (task) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_removed', task, labelId: validatedLabelId });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_removed', task, labelId: validatedLabelId });
     }
     return task;
   });

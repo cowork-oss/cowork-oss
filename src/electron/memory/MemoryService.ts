@@ -20,6 +20,7 @@ import {
 } from '../database/repositories';
 import { LLMProviderFactory } from '../agent/llm';
 import { estimateTokens } from '../agent/context-manager';
+import { InputSanitizer } from '../agent/security';
 
 // Privacy patterns to exclude - matches common sensitive data patterns
 const SENSITIVE_PATTERNS = [
@@ -243,7 +244,9 @@ export class MemoryService {
     if (recentMemories.length > 0) {
       parts.push('\n## Recent Activity');
       for (const memory of recentMemories) {
-        const text = memory.summary || this.truncate(memory.content, 150);
+        const rawText = memory.summary || this.truncate(memory.content, 150);
+        // Sanitize memory content to prevent injection via stored memories
+        const text = InputSanitizer.sanitizeMemoryContent(rawText);
         const date = new Date(memory.createdAt).toLocaleDateString();
         parts.push(`- [${memory.type}] (${date}) ${text}`);
       }
@@ -254,7 +257,9 @@ export class MemoryService {
       parts.push('\n## Relevant to Current Task');
       for (const result of relevantMemories) {
         const date = new Date(result.createdAt).toLocaleDateString();
-        parts.push(`- [${result.type}] (${date}) ${result.snippet}`);
+        // Sanitize memory content to prevent injection via stored memories
+        const sanitizedSnippet = InputSanitizer.sanitizeMemoryContent(result.snippet);
+        parts.push(`- [${result.type}] (${date}) ${sanitizedSnippet}`);
       }
     }
 

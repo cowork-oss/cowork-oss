@@ -173,9 +173,10 @@ export class BlueBubblesClient extends EventEmitter {
   async checkConnection(): Promise<{ success: boolean; serverVersion?: string; error?: string }> {
     try {
       const response = await this.apiRequest('GET', '/server/info');
+      const data = response.data as { os_version?: string; server_version?: string } | undefined;
       return {
         success: true,
-        serverVersion: response.data?.os_version || response.data?.server_version,
+        serverVersion: data?.os_version || data?.server_version,
       };
     } catch (error) {
       return {

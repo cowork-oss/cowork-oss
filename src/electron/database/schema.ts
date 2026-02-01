@@ -4,6 +4,7 @@ import fs from 'fs';
 import { app } from 'electron';
 
 export class DatabaseManager {
+  private static instance: DatabaseManager | null = null;
   private db: Database.Database;
 
   constructor() {
@@ -15,6 +16,20 @@ export class DatabaseManager {
     const dbPath = path.join(userDataPath, 'cowork-os.db');
     this.db = new Database(dbPath);
     this.initializeSchema();
+
+    // Store as singleton instance
+    DatabaseManager.instance = this;
+  }
+
+  /**
+   * Get the singleton instance of DatabaseManager.
+   * Must be called after the instance has been created in main.ts.
+   */
+  static getInstance(): DatabaseManager {
+    if (!DatabaseManager.instance) {
+      throw new Error('DatabaseManager has not been initialized. Call new DatabaseManager() first in main.ts.');
+    }
+    return DatabaseManager.instance;
   }
 
   // Migration version - increment this to force re-migration for users with partial migrations

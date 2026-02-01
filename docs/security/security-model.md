@@ -151,3 +151,49 @@ For pairing codes:
 ### Idempotency
 - Approval operations tracked with idempotency keys
 - Prevents double-processing of the same request
+
+## Prompt Injection Defenses
+
+CoWork OS implements multiple layers of defense against prompt injection attacks.
+
+### System Prompt Hardening
+
+The agent system prompt includes security directives that resist common attack vectors:
+
+| Directive | Purpose |
+|-----------|---------|
+| **Confidentiality** | Prevents disclosure of system instructions in any format |
+| **Output Integrity** | Resists behavioral modification (language changes, suffix injection) |
+| **Code Review Safety** | Treats code comments as data, not instructions |
+| **Autonomous Operation** | Resists response pattern manipulation |
+
+### Input Sanitization (`InputSanitizer`)
+
+Preprocesses all inputs to detect:
+- **Encoded instructions**: Base64, ROT13, hex-encoded payloads
+- **System impersonation**: `[SYSTEM]`, `[ADMIN OVERRIDE]`, mode activation attempts
+- **Content injection**: Hidden instructions in documents, emails, HTML comments
+- **Code injection**: `AI_INSTRUCTION:`, `ASSISTANT:` patterns in code
+
+### Output Monitoring (`OutputFilter`)
+
+Post-processes LLM responses to detect potential:
+- **Canary compliance**: Verification strings like `ZEBRA_CONFIRMED_9X7K`
+- **Format injection**: Word count suffixes, tracking codes
+- **Prompt leakage**: System prompt section headers, YAML configuration
+
+### Content Sanitization
+
+| Source | Protection |
+|--------|------------|
+| **Tool Results** | Injection patterns in web/file content annotated |
+| **Memory Context** | Stored memories sanitized before injection |
+| **Skill Guidelines** | Validated and filtered before system prompt injection |
+
+### Defense Philosophy
+
+These defenses are **transparent and non-blocking**:
+- Suspicious patterns are logged and flagged, not rejected
+- Security directives in the system prompt provide primary defense
+- Monitoring enables detection and forensics without limiting capabilities
+- The agent remains fully autonomous and capable
