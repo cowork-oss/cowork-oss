@@ -6735,7 +6735,8 @@ button {
 .settings-page-header {
   display: flex;
   align-items: center;
-  padding: 16px 24px 16px 80px; /* Extra left padding for macOS window controls */
+  justify-content: center;
+  padding: 16px 80px; /* Symmetric padding for macOS window controls */
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   -webkit-app-region: drag;
@@ -11447,4 +11448,525 @@ button {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.15);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* ============================================
+   Personality Settings
+   ============================================ */
+
+.personality-settings {
+  max-width: 800px;
+}
+
+.personality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.personality-card {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.personality-card:hover {
+  border-color: var(--color-border-active);
+  background: var(--color-bg-hover);
+}
+
+.personality-card.selected {
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.1);
+}
+
+.personality-card-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.personality-card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.personality-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.personality-card-description {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.personality-card-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.personality-trait {
+  padding: 2px 8px;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.personality-card.selected .personality-trait {
+  background: rgba(var(--color-accent-rgb), 0.2);
+  color: var(--color-accent);
+}
+
+.personality-card-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--color-accent);
+}
+
+.personality-preview {
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+}
+
+.personality-preview pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.settings-tip {
+  background: rgba(var(--color-accent-rgb), 0.1);
+  border: 1px solid rgba(var(--color-accent-rgb), 0.2);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.settings-tip h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: 8px;
+}
+
+.command-examples {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.command-examples li {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.command-examples code {
+  background: var(--color-bg);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.settings-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  resize: vertical;
+}
+
+.settings-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.settings-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.agent-name-input-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.agent-name-input-row .settings-input {
+  flex: 1;
+  max-width: 300px;
+}
+
+.agent-name-input-row .button-primary {
+  flex-shrink: 0;
+}
+
+/* Personality Navigation */
+.personality-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.personality-nav-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.personality-nav-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.personality-nav-btn.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Persona Grid */
+.persona-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.persona-card {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.persona-card:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.persona-card.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.persona-card-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.persona-card-content {
+  flex: 1;
+}
+
+.persona-card-name {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--color-text);
+}
+
+.persona-card-description {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.persona-card-sample {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.persona-card-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--color-accent);
+}
+
+.persona-preview {
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  margin-top: 16px;
+}
+
+.persona-preview h4 {
+  margin-bottom: 8px;
+  color: var(--color-accent);
+}
+
+.persona-suggestion {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.button-small {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.button-small:hover {
+  background: var(--color-accent-subtle);
+}
+
+/* Style Controls */
+.style-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.style-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.style-control label {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.style-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.style-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.style-option {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.style-option:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.style-option.selected {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Quirks Controls */
+.quirks-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Analogy Grid */
+.analogy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.analogy-option {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analogy-option:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.analogy-option.selected {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+}
+
+.analogy-name {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.analogy-example {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Relationship Stats */
+.relationship-stats {
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.relationship-stats h4 {
+  margin-bottom: 16px;
+  color: var(--color-accent);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  padding: 16px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+.milestone-progress {
+  margin-top: 16px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  text-align: center;
+}
+
+/* Custom Personality Editor */
+.custom-personality-editor {
+  margin-top: 20px;
+  padding: 20px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.custom-personality-editor h4 {
+  margin-bottom: 8px;
+  color: var(--color-accent);
+}
+
+/* Light mode adjustments */
+.theme-light .personality-card {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.theme-light .personality-card:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.theme-light .personality-preview {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.theme-light .settings-tip {
+  background: rgba(var(--color-accent-rgb), 0.08);
 }

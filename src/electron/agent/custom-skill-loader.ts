@@ -313,6 +313,57 @@ export class CustomSkillLoader {
   }
 
   /**
+   * List skills that can be automatically invoked by the model
+   * Excludes guidelines and skills with disableModelInvocation set
+   */
+  listModelInvocableSkills(): CustomSkill[] {
+    return this.listSkills().filter((skill) => {
+      // Exclude guideline skills
+      if (skill.type === 'guideline') return false;
+      // Exclude disabled skills
+      if (skill.enabled === false) return false;
+      // Exclude skills that explicitly disable model invocation
+      if (skill.invocation?.disableModelInvocation === true) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Get formatted skill descriptions for the model's system prompt
+   * Groups skills by category and includes parameter info
+   */
+  getSkillDescriptionsForModel(): string {
+    const skills = this.listModelInvocableSkills();
+    if (skills.length === 0) {
+      return '';
+    }
+
+    // Group skills by category
+    const byCategory: Record<string, CustomSkill[]> = {};
+    for (const skill of skills) {
+      const category = skill.category || 'General';
+      if (!byCategory[category]) {
+        byCategory[category] = [];
+      }
+      byCategory[category].push(skill);
+    }
+
+    // Format descriptions
+    const lines: string[] = [];
+    for (const [category, categorySkills] of Object.entries(byCategory).sort()) {
+      lines.push(`\n${category}:`);
+      for (const skill of categorySkills) {
+        const paramInfo = skill.parameters?.length
+          ? ` (params: ${skill.parameters.map(p => p.name + (p.required ? '*' : '')).join(', ')})`
+          : '';
+        lines.push(`- ${skill.id}: ${skill.description}${paramInfo}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
    * Get a specific skill by ID
    */
   getSkill(id: string): CustomSkill | undefined {

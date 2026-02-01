@@ -18,8 +18,9 @@ import { TraySettings } from './TraySettings';
 import { ScheduledTasksSettings } from './ScheduledTasksSettings';
 import { HooksSettings } from './HooksSettings';
 import { ControlPlaneSettings } from './ControlPlaneSettings';
+import { PersonalitySettings } from './PersonalitySettings';
 
-type SettingsTab = 'appearance' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane';
+type SettingsTab = 'appearance' | 'personality' | 'tray' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane';
 
 interface SettingsProps {
   onBack: () => void;
@@ -677,6 +678,16 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             </svg>
             Appearance
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === 'personality' ? 'active' : ''}`}
+            onClick={() => setActiveTab('personality')}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="8" r="5" />
+              <path d="M20 21a8 8 0 0 0-16 0" />
+            </svg>
+            Personality
+          </button>
           {navigator.platform.toLowerCase().includes('mac') && (
             <button
               className={`settings-nav-item ${activeTab === 'tray' ? 'active' : ''}`}
@@ -878,6 +889,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
               onThemeChange={onThemeChange}
               onAccentChange={onAccentChange}
             />
+          ) : activeTab === 'personality' ? (
+            <PersonalitySettings onSettingsChanged={onSettingsChanged} />
           ) : activeTab === 'tray' ? (
             <TraySettings />
           ) : activeTab === 'telegram' ? (

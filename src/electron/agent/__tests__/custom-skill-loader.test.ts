@@ -437,6 +437,237 @@ describe('CustomSkillLoader', () => {
   });
 });
 
+describe('listModelInvocableSkills', () => {
+  let loader: CustomSkillLoader;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFiles.clear();
+    mockDirExists = true;
+    loader = new CustomSkillLoader();
+  });
+
+  it('should return empty array when no skills', async () => {
+    await loader.reloadSkills();
+    expect(loader.listModelInvocableSkills()).toEqual([]);
+  });
+
+  it('should exclude guideline skills', async () => {
+    const taskSkill = createTestSkill({ id: 'task-skill', type: 'task' });
+    const guidelineSkill = createTestSkill({ id: 'guideline-skill', type: 'guideline' });
+
+    mockFiles.set('task-skill.json', JSON.stringify(taskSkill));
+    mockFiles.set('guideline-skill.json', JSON.stringify(guidelineSkill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills();
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('task-skill');
+  });
+
+  it('should exclude disabled skills', async () => {
+    const enabledSkill = createTestSkill({ id: 'enabled-skill', enabled: true });
+    const disabledSkill = createTestSkill({ id: 'disabled-skill', enabled: false });
+
+    mockFiles.set('enabled-skill.json', JSON.stringify(enabledSkill));
+    mockFiles.set('disabled-skill.json', JSON.stringify(disabledSkill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills();
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('enabled-skill');
+  });
+
+  it('should exclude skills with disableModelInvocation set', async () => {
+    const invocableSkill = createTestSkill({ id: 'invocable-skill' });
+    const nonInvocableSkill = createTestSkill({
+      id: 'non-invocable-skill',
+      invocation: { disableModelInvocation: true },
+    });
+
+    mockFiles.set('invocable-skill.json', JSON.stringify(invocableSkill));
+    mockFiles.set('non-invocable-skill.json', JSON.stringify(nonInvocableSkill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills();
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('invocable-skill');
+  });
+
+  it('should include skills with disableModelInvocation false', async () => {
+    const skill = createTestSkill({
+      id: 'explicit-invocable',
+      invocation: { disableModelInvocation: false },
+    });
+
+    mockFiles.set('explicit-invocable.json', JSON.stringify(skill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills();
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('explicit-invocable');
+  });
+
+  it('should include skills without invocation policy', async () => {
+    const skill = createTestSkill({ id: 'no-policy-skill' });
+    // Ensure no invocation property
+    delete (skill as any).invocation;
+
+    mockFiles.set('no-policy-skill.json', JSON.stringify(skill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills();
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('no-policy-skill');
+  });
+});
+
+describe('getSkillDescriptionsForModel', () => {
+  let loader: CustomSkillLoader;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFiles.clear();
+    mockDirExists = true;
+    loader = new CustomSkillLoader();
+  });
+
+  it('should return empty string when no skills', async () => {
+    await loader.reloadSkills();
+    expect(loader.getSkillDescriptionsForModel()).toBe('');
+  });
+
+  it('should format skills by category', async () => {
+    const devSkill = createTestSkill({
+      id: 'git-commit',
+      name: 'Git Commit',
+      description: 'Create a commit',
+      category: 'Development',
+    });
+    const writingSkill = createTestSkill({
+      id: 'translate',
+      name: 'Translate',
+      description: 'Translate content',
+      category: 'Writing',
+    });
+
+    mockFiles.set('git-commit.json', JSON.stringify(devSkill));
+    mockFiles.set('translate.json', JSON.stringify(writingSkill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('Development:');
+    expect(descriptions).toContain('Writing:');
+    expect(descriptions).toContain('git-commit: Create a commit');
+    expect(descriptions).toContain('translate: Translate content');
+  });
+
+  it('should use General category for skills without category', async () => {
+    const skill = createTestSkill({
+      id: 'no-category',
+      description: 'A skill without category',
+    });
+    delete (skill as any).category;
+
+    mockFiles.set('no-category.json', JSON.stringify(skill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('General:');
+    expect(descriptions).toContain('no-category: A skill without category');
+  });
+
+  it('should include parameter info with required markers', async () => {
+    const skill = createTestSkill({
+      id: 'parameterized-skill',
+      description: 'A skill with params',
+      category: 'Testing',
+      parameters: [
+        { name: 'path', type: 'string', description: 'File path', required: true },
+        { name: 'language', type: 'select', description: 'Target language', required: false },
+      ],
+    });
+
+    mockFiles.set('parameterized-skill.json', JSON.stringify(skill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('parameterized-skill: A skill with params (params: path*, language)');
+  });
+
+  it('should not include param info for skills without parameters', async () => {
+    const skill = createTestSkill({
+      id: 'no-params',
+      description: 'A skill without params',
+      category: 'Testing',
+      parameters: [],
+    });
+
+    mockFiles.set('no-params.json', JSON.stringify(skill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('no-params: A skill without params');
+    expect(descriptions).not.toContain('(params:');
+  });
+
+  it('should exclude guideline skills from descriptions', async () => {
+    const taskSkill = createTestSkill({
+      id: 'task-skill',
+      description: 'A task skill',
+      category: 'Testing',
+    });
+    const guidelineSkill = createTestSkill({
+      id: 'guideline-skill',
+      description: 'A guideline skill',
+      category: 'Testing',
+      type: 'guideline',
+    });
+
+    mockFiles.set('task-skill.json', JSON.stringify(taskSkill));
+    mockFiles.set('guideline-skill.json', JSON.stringify(guidelineSkill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('task-skill');
+    expect(descriptions).not.toContain('guideline-skill');
+  });
+
+  it('should exclude disabled skills from descriptions', async () => {
+    const enabledSkill = createTestSkill({
+      id: 'enabled-skill',
+      description: 'An enabled skill',
+      category: 'Testing',
+      enabled: true,
+    });
+    const disabledSkill = createTestSkill({
+      id: 'disabled-skill',
+      description: 'A disabled skill',
+      category: 'Testing',
+      enabled: false,
+    });
+
+    mockFiles.set('enabled-skill.json', JSON.stringify(enabledSkill));
+    mockFiles.set('disabled-skill.json', JSON.stringify(disabledSkill));
+
+    await loader.reloadSkills();
+    const descriptions = loader.getSkillDescriptionsForModel();
+
+    expect(descriptions).toContain('enabled-skill');
+    expect(descriptions).not.toContain('disabled-skill');
+  });
+});
+
 describe('getCustomSkillLoader', () => {
   it('should return singleton instance', () => {
     const instance1 = getCustomSkillLoader();

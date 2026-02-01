@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID } from '../../shared/types';
@@ -388,6 +388,7 @@ interface ActiveCommand {
   output: string;
   isRunning: boolean;
   exitCode: number | null;
+  startTimestamp: number; // When the command started, for positioning in timeline
 }
 
 // Canvas session type
@@ -453,6 +454,19 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     }
     return events.filter(isImportantEvent);
   }, [events, verboseSteps]);
+
+  // Find the index where command output should be inserted (after the last event before command started)
+  const commandOutputInsertIndex = useMemo(() => {
+    if (!activeCommand || !activeCommand.startTimestamp) return -1;
+    // Find the last event that started before or at the same time as the command
+    for (let i = filteredEvents.length - 1; i >= 0; i--) {
+      if (filteredEvents[i].timestamp <= activeCommand.startTimestamp) {
+        return i;
+      }
+    }
+    // If no events before command, insert at beginning (index -1 means render before all events)
+    return -1;
+  }, [filteredEvents, activeCommand]);
 
   // Toggle verbose mode and persist to localStorage
   const toggleVerboseSteps = () => {
@@ -766,6 +780,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
     let output = '';
     let isRunning = false;
     let exitCode: number | null = null;
+    let startTimestamp: number = 0;
 
     for (const event of commandOutputEvents) {
       const payload = event.payload;
@@ -775,6 +790,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
         output = payload.output || '';
         isRunning = true;
         exitCode = null;
+        startTimestamp = event.timestamp;
       } else if (payload.type === 'stdout' || payload.type === 'stderr' || payload.type === 'stdin') {
         // Append output (stdin shows what user typed)
         output += payload.output || '';
@@ -819,6 +835,7 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
         output: truncatedOutput,
         isRunning,
         exitCode,
+        startTimestamp,
       });
     } else {
       setActiveCommand(null);
@@ -1280,22 +1297,47 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
           {/* Conversation Flow - renders all events in order */}
           {events.length > 0 && (
             <div className="conversation-flow" ref={timelineRef}>
+              {/* Render CommandOutput at beginning if it should appear before all events */}
+              {activeCommand && commandOutputInsertIndex === -1 && (
+                <CommandOutput
+                  command={activeCommand.command}
+                  output={activeCommand.output}
+                  isRunning={activeCommand.isRunning}
+                  exitCode={activeCommand.exitCode}
+                  taskId={task?.id}
+                  onClose={handleDismissCommandOutput}
+                />
+              )}
               {filteredEvents.map((event, index) => {
                 const isUserMessage = event.type === 'user_message';
                 const isAssistantMessage = event.type === 'assistant_message';
+                // Check if CommandOutput should be rendered after this event
+                const shouldRenderCommandOutput = activeCommand && index === commandOutputInsertIndex;
 
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
                   const messageText = event.payload?.message || 'User message';
                   return (
-                    <div key={event.id || `event-${index}`} className="chat-message user-message">
-                      <div className="chat-bubble user-bubble markdown-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {messageText}
-                        </ReactMarkdown>
+                    <Fragment key={event.id || `event-${index}`}>
+                      <div className="chat-message user-message">
+                        <div className="chat-bubble user-bubble markdown-content">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {messageText}
+                          </ReactMarkdown>
+                        </div>
+                        <MessageCopyButton text={messageText} />
                       </div>
-                      <MessageCopyButton text={messageText} />
-                    </div>
+                      {shouldRenderCommandOutput && (
+                        <CommandOutput
+                          command={activeCommand.command}
+                          output={activeCommand.output}
+                          isRunning={activeCommand.isRunning}
+                          exitCode={activeCommand.exitCode}
+                          taskId={task?.id}
+                          onClose={handleDismissCommandOutput}
+                        />
+                      )}
+                    </Fragment>
                   );
                 }
 
@@ -1304,77 +1346,106 @@ export function MainContent({ task, workspace, events, onSendMessage, onCreateTa
                   const messageText = event.payload?.message || '';
                   const isLastAssistant = event === lastAssistantMessage;
                   return (
-                    <div key={event.id || `event-${index}`} className="chat-message assistant-message">
-                      <div className="chat-bubble assistant-bubble">
-                        {isLastAssistant && (
-                          <div className="chat-bubble-header">
-                            {task.status === 'completed' && <span className="chat-status">✅ Task Done!</span>}
-                            {task.status === 'executing' && (
-                              <span className="chat-status executing">
-                                <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                                </svg>
-                                Working...
-                              </span>
-                            )}
+                    <Fragment key={event.id || `event-${index}`}>
+                      <div className="chat-message assistant-message">
+                        <div className="chat-bubble assistant-bubble">
+                          {isLastAssistant && (
+                            <div className="chat-bubble-header">
+                              {task.status === 'completed' && <span className="chat-status">✅ Task Done!</span>}
+                              {task.status === 'executing' && (
+                                <span className="chat-status executing">
+                                  <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                                    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                                  </svg>
+                                  Working...
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div className="chat-bubble-content markdown-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                              {messageText}
+                            </ReactMarkdown>
                           </div>
-                        )}
-                        <div className="chat-bubble-content markdown-content">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {messageText}
-                          </ReactMarkdown>
                         </div>
+                        <MessageCopyButton text={messageText} />
                       </div>
-                      <MessageCopyButton text={messageText} />
-                    </div>
+                      {shouldRenderCommandOutput && (
+                        <CommandOutput
+                          command={activeCommand.command}
+                          output={activeCommand.output}
+                          isRunning={activeCommand.isRunning}
+                          exitCode={activeCommand.exitCode}
+                          taskId={task?.id}
+                          onClose={handleDismissCommandOutput}
+                        />
+                      )}
+                    </Fragment>
                   );
                 }
 
                 // Technical events - only show when showSteps is true
-                if (!showSteps) return null;
+                if (!showSteps) {
+                  // Even if we're not showing steps, we may still need to render CommandOutput here
+                  if (shouldRenderCommandOutput) {
+                    return (
+                      <Fragment key={event.id || `event-${index}`}>
+                        <CommandOutput
+                          command={activeCommand.command}
+                          output={activeCommand.output}
+                          isRunning={activeCommand.isRunning}
+                          exitCode={activeCommand.exitCode}
+                          taskId={task?.id}
+                          onClose={handleDismissCommandOutput}
+                        />
+                      </Fragment>
+                    );
+                  }
+                  return null;
+                }
 
                 const isExpandable = hasEventDetails(event);
                 const isExpanded = isEventExpanded(event);
 
                 return (
-                  <div key={event.id || `event-${index}`} className="timeline-event">
-                    <div className="event-indicator">
-                      <div className={`event-dot ${getEventDotClass(event.type)}`} />
-                    </div>
-                    <div className="event-content">
-                      <div
-                        className={`event-header ${isExpandable ? 'expandable' : ''} ${isExpanded ? 'expanded' : ''}`}
-                        onClick={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
-                      >
-                        <div className="event-header-left">
-                          {isExpandable && (
-                            <svg className="event-expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M9 18l6-6-6-6" />
-                            </svg>
-                          )}
-                          <div className="event-title">{renderEventTitle(event, workspace?.path, setViewerFilePath)}</div>
-                        </div>
-                        <div className="event-time">{formatTime(event.timestamp)}</div>
+                  <Fragment key={event.id || `event-${index}`}>
+                    <div className="timeline-event">
+                      <div className="event-indicator">
+                        <div className={`event-dot ${getEventDotClass(event.type)}`} />
                       </div>
-                      {isExpanded && renderEventDetails(event)}
+                      <div className="event-content">
+                        <div
+                          className={`event-header ${isExpandable ? 'expandable' : ''} ${isExpanded ? 'expanded' : ''}`}
+                          onClick={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
+                        >
+                          <div className="event-header-left">
+                            {isExpandable && (
+                              <svg className="event-expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9 18l6-6-6-6" />
+                              </svg>
+                            )}
+                            <div className="event-title">{renderEventTitle(event, workspace?.path, setViewerFilePath)}</div>
+                          </div>
+                          <div className="event-time">{formatTime(event.timestamp)}</div>
+                        </div>
+                        {isExpanded && renderEventDetails(event)}
+                      </div>
                     </div>
-                  </div>
+                    {shouldRenderCommandOutput && (
+                      <CommandOutput
+                        command={activeCommand.command}
+                        output={activeCommand.output}
+                        isRunning={activeCommand.isRunning}
+                        exitCode={activeCommand.exitCode}
+                        taskId={task?.id}
+                        onClose={handleDismissCommandOutput}
+                      />
+                    )}
+                  </Fragment>
                 );
               })}
             </div>
-          )}
-
-          {/* Live Command Output - shown when a command is running or has output */}
-          {activeCommand && (
-            <CommandOutput
-              command={activeCommand.command}
-              output={activeCommand.output}
-              isRunning={activeCommand.isRunning}
-              exitCode={activeCommand.exitCode}
-              taskId={task?.id}
-              onClose={handleDismissCommandOutput}
-            />
           )}
 
           {/* Live Canvas Previews - shown when canvas sessions are active */}

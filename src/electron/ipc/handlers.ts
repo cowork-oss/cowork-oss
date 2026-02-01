@@ -47,6 +47,7 @@ import {
 } from '../utils/validation';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { AppearanceManager } from '../settings/appearance-manager';
+import { PersonalityManager } from '../settings/personality-manager';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { CustomSkill } from '../../shared/types';
 import { MCPSettingsManager } from '../mcp/settings';
@@ -1285,6 +1286,38 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.APPEARANCE_SAVE_SETTINGS, async (_, settings) => {
     AppearanceManager.saveSettings(settings);
+    return { success: true };
+  });
+
+  // Personality Settings handlers
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_GET_SETTINGS, async () => {
+    return PersonalityManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings) => {
+    PersonalityManager.saveSettings(settings);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_GET_DEFINITIONS, async () => {
+    return PersonalityManager.getDefinitions();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_GET_PERSONAS, async () => {
+    return PersonalityManager.getPersonaDefinitions();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_GET_RELATIONSHIP_STATS, async () => {
+    return PersonalityManager.getRelationshipStats();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SET_ACTIVE, async (_, personalityId) => {
+    PersonalityManager.setActivePersonality(personalityId);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SET_PERSONA, async (_, personaId) => {
+    PersonalityManager.setActivePersona(personaId);
     return { success: true };
   });
 

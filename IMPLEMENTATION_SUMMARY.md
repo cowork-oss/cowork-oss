@@ -258,6 +258,7 @@ SQLite with 6 tables:
 | GuardrailSettings | `GuardrailSettings.tsx` | Safety limits config |
 | QueueSettings | `QueueSettings.tsx` | Parallel queue config |
 | SkillsSettings | `SkillsSettings.tsx` | Custom skills management |
+| PersonalitySettings | `PersonalitySettings.tsx` | Agent personality config |
 | MCPSettings | `MCPSettings.tsx` | MCP server config |
 | WorkspaceSelector | `WorkspaceSelector.tsx` | Folder picker |
 | ApprovalDialog | `ApprovalDialog.tsx` | Permission requests |
@@ -294,7 +295,60 @@ User-defined reusable workflows:
 - Priority-based sorting
 - Parameter input modal for skills with variables
 
-### 11. System Tools
+### 11. Personality System
+
+**Location**: `src/electron/settings/personality-manager.ts`
+
+Customizable agent personality and behavior:
+
+**Components**:
+- **PersonalityManager** - Centralized personality settings management
+- **PersonalitySettings** UI - React component for configuration
+- **Personality Tools** - Prompt-based personality control
+
+**Personalities** (Communication Styles):
+| ID | Name | Description |
+|----|------|-------------|
+| professional | Professional | Formal, thorough, business-appropriate |
+| friendly | Friendly | Warm, approachable, conversational |
+| concise | Concise | Brief, direct, minimal |
+| creative | Creative | Expressive, uses analogies |
+| technical | Technical | Detailed, precise, jargon-comfortable |
+| casual | Casual | Relaxed, informal |
+
+**Personas** (Character Overlays):
+| ID | Name | Description |
+|----|------|-------------|
+| jarvis | J.A.R.V.I.S. | Sophisticated AI assistant |
+| friday | F.R.I.D.A.Y. | Helpful, personable AI |
+| hal | HAL 9000 | Calm, measured, formal |
+| computer | Computer | Star Trek style |
+| alfred | Alfred | British butler manner |
+| intern | Intern | Eager, asks questions |
+| sensei | Sensei | Wise mentor style |
+| pirate | Pirate | Nautical vocabulary |
+| noir | Noir Detective | 1940s detective style |
+
+**Response Style Options**:
+- `emoji_usage`: none, minimal, moderate, expressive
+- `response_length`: brief, standard, detailed, comprehensive
+- `code_comments`: none, minimal, moderate, extensive
+- `explanation_depth`: surface, standard, deep, exhaustive
+
+**Quirks**:
+- `catchphrase`: Custom phrase used occasionally
+- `sign_off`: Custom message to end conversations
+- `analogy_domain`: cooking, sports, space, music, nature, gaming, movies, construction
+
+**Prompt-Based Control Tools**:
+- `set_personality` - Change communication style
+- `set_persona` - Apply character overlay
+- `set_response_style` - Adjust response formatting
+- `set_quirks` - Set catchphrase, sign-off, analogy domain
+- `set_agent_name` - Change agent's display name
+- `set_user_name` - Set user's preferred name
+
+### 12. System Tools
 
 **Location**: `src/electron/agent/tools/system-tools.ts`
 
@@ -306,7 +360,7 @@ System-level capabilities:
 - `show_in_finder` - Reveal files in Finder
 - `get_system_info` - System information and environment
 
-### 12. Configurable Guardrails
+### 13. Configurable Guardrails
 
 **Location**: `src/electron/agent/guardrails/`
 
@@ -320,7 +374,7 @@ Safety limits configurable in Settings:
 - File size limits (1 - 500 MB)
 - Domain allowlist for browser automation
 
-### 13. Parallel Task Queue
+### 14. Parallel Task Queue
 
 **Location**: `src/electron/agent/queue-manager.ts`
 
@@ -387,6 +441,9 @@ cowork-oss/
     │   │   ├── validation.ts
     │   │   └── env-migration.ts
     │   │
+    │   ├── settings/
+    │   │   └── personality-manager.ts
+    │   │
     │   └── agent/
     │       ├── daemon.ts
     │       ├── executor.ts
@@ -452,6 +509,7 @@ cowork-oss/
         │   ├── DiscordSettings.tsx
         │   ├── SlackSettings.tsx
         │   ├── UpdateSettings.tsx
+        │   ├── PersonalitySettings.tsx
         │   ├── WorkspaceSelector.tsx
         │   └── ApprovalDialog.tsx
         │
@@ -519,6 +577,7 @@ npm run type-check       # Check TypeScript types
 | MCP Registry | Production | One-click server installation |
 | MCP SSE/WebSocket | Production | Web-based MCP transports |
 | In-app file viewer | Production | View artifacts without leaving app |
+| Personality System | Production | Customizable agent behavior, personas, response styles |
 
 ### Planned
 
@@ -598,6 +657,7 @@ npm run type-check       # Check TypeScript types
 | Custom Skills | Yes | Yes | Complete |
 | MCP connectors | Yes | Yes (Client, Host, Registry) | Complete |
 | Parallel task queue | Yes | Yes | Complete |
+| Personality System | Yes | Yes (6 personalities, 9 personas) | Complete |
 | VM sandbox | Yes | No | Planned |
 | Sub-agents | Yes | No | Planned |
 
@@ -616,6 +676,7 @@ CoWork-OSS is a production-ready agentic task automation app with:
 - **4 channel integrations** (WhatsApp, Telegram, Discord, Slack)
 - **Full MCP support** (Client, Host, Registry with SSE/WebSocket)
 - **Custom Skills** (user-defined reusable workflows)
+- **Personality System** (6 personalities, 9 personas, response styles, quirks)
 - **Goal Mode** (success criteria with auto-retry)
 - **Configurable guardrails** (token/cost budgets, blocked commands)
 - **Parallel task queue** (1-10 concurrent tasks)

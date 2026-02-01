@@ -118,6 +118,15 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Parameter input modal for skill variables
 - [x] Located: `~/Library/Application Support/cowork-oss/skills/`
 
+#### Personality System
+- [x] 6 personality styles (professional, friendly, concise, creative, technical, casual)
+- [x] 9 persona overlays (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir)
+- [x] Response style options (emoji usage, response length, code comments, explanation depth)
+- [x] Quirks (catchphrase, sign-off, analogy domain)
+- [x] Prompt-based control via conversation
+- [x] Relationship tracking (user name, interaction count)
+- [x] Located: `src/electron/settings/personality-manager.ts`
+
 #### MCP (Model Context Protocol)
 - [x] MCP Client - Connect to external MCP servers
 - [x] MCP Host - Expose CoWork's tools as MCP server
@@ -149,6 +158,7 @@ CoWork-OSS has reached **production status** with comprehensive features for age
 - [x] Guardrail settings (budgets, limits)
 - [x] Queue settings (concurrency)
 - [x] Custom Skills management
+- [x] Personality settings (styles, personas, quirks)
 - [x] MCP server configuration
 
 ### 4. Infrastructure
@@ -217,6 +227,7 @@ cowork-oss/
 │   │   │   ├── skills/        # Document skills
 │   │   │   └── guardrails/    # Safety limits
 │   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
+│   │   ├── settings/          # Personality manager
 │   │   ├── mcp/               # Model Context Protocol
 │   │   │   ├── client/        # Connect to servers
 │   │   │   ├── host/          # Expose tools
@@ -324,6 +335,7 @@ Operations Requiring Approval:
 15. Configure safety guardrails (budgets, blocked commands)
 16. Use system tools (screenshots, clipboard, open apps)
 17. View artifacts with the in-app file viewer
+18. Customize agent personality via Settings or conversation prompts
 
 ### You Cannot (Yet):
 1. Execute arbitrary code in a VM sandbox
@@ -404,6 +416,7 @@ Expected behavior:
 - Remote access via WhatsApp, Telegram, Discord, and Slack
 - Full MCP support (Client, Host, Registry)
 - Custom Skills system
+- Personality System (6 styles, 9 personas, prompt-based control)
 - Goal Mode with auto-retry
 - Configurable guardrails
 - Parallel task queue

@@ -176,6 +176,12 @@ CoWork-OSS is **free and open source**. To run tasks, you must configure your ow
   - Encrypted transport with OS keychain token storage
   - Auto-reconnection with exponential backoff
   - Connection testing before committing
+- **Personality & Customization**: Customize agent behavior via prompts or Settings UI:
+  - **Personalities**: Communication styles (professional, friendly, concise, creative, technical, casual)
+  - **Personas**: Character overlays (Jarvis, Friday, HAL, Computer, Alfred, Intern, Sensei, Pirate, Noir)
+  - **Response Style**: Emoji usage, response length, code comments, explanation depth
+  - **Quirks**: Catchphrases, sign-offs, analogy domains
+  - **Relationship**: Agent remembers your name and tracks completed tasks
 
 ## Data handling (local-first, BYOK)
 - Stored locally: task metadata, timeline events, artifact index, workspace config (SQLite).
@@ -1594,6 +1600,70 @@ Full-featured HTTP client for making API requests with custom methods, headers, 
 - Response size is limited to prevent memory issues
 - Timeout prevents hanging on slow responses
 
+---
+
+## Personality & Customization
+
+CoWork-OSS includes a comprehensive personality system that lets you customize how the agent communicates. All settings can be changed via natural language prompts or the **Settings > Personality** tab.
+
+### Conversation Commands
+
+Simply tell the agent what you want:
+
+| What to say | What happens |
+|-------------|--------------|
+| "be more professional" | Changes to professional communication style |
+| "be like Jarvis" | Adopts the Jarvis persona (sophisticated AI butler) |
+| "use more emojis" | Sets emoji usage to expressive |
+| "be brief" | Sets response length to terse |
+| "explain like I'm a beginner" | Sets explanation depth to teaching |
+| "use space analogies" | Uses space-themed analogies and examples |
+| "call yourself Max" | Changes the agent's name to Max |
+| "I'm Alice" | Agent remembers your name for future sessions |
+
+### Available Personalities
+
+| Style | Description |
+|-------|-------------|
+| Professional | Formal, business-oriented communication |
+| Friendly | Warm, encouraging, supportive |
+| Concise | Brief, to-the-point responses |
+| Creative | Imaginative, expressive language |
+| Technical | Detailed, precise explanations |
+| Casual | Relaxed, informal tone |
+
+### Available Personas
+
+| Persona | Description |
+|---------|-------------|
+| Jarvis | Sophisticated AI butler (Iron Man style) |
+| Friday | Friendly AI colleague |
+| HAL | Calm, formal AI (2001: A Space Odyssey) |
+| Computer | Star Trek efficient assistant |
+| Alfred | Refined gentleman's gentleman |
+| Intern | Eager, enthusiastic learner |
+| Sensei | Wise, patient teacher |
+| Pirate | Swashbuckling adventurer |
+| Noir | 1940s detective style |
+
+### Response Style Options
+
+- **Emoji Usage**: none, minimal, moderate, expressive
+- **Response Length**: terse, balanced, detailed
+- **Code Comments**: minimal, moderate, verbose
+- **Explanation Depth**: expert, balanced, teaching
+
+### Quirks
+
+- **Catchphrase**: A signature phrase (e.g., "At your service!")
+- **Sign-off**: How to end responses (e.g., "Happy coding!")
+- **Analogy Domain**: Theme for examples (cooking, sports, space, music, gaming, movies, etc.)
+
+### Relationship Tracking
+
+The agent remembers your name and tracks your working relationship across sessions, enabling personalized greetings and milestone celebrations.
+
+---
 
 ## Ollama Integration (Local LLMs)
 

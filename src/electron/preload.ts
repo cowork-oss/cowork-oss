@@ -70,6 +70,14 @@ const IPC_CHANNELS = {
   // Appearance
   APPEARANCE_GET_SETTINGS: 'appearance:getSettings',
   APPEARANCE_SAVE_SETTINGS: 'appearance:saveSettings',
+  // Agent Personality
+  PERSONALITY_GET_SETTINGS: 'personality:getSettings',
+  PERSONALITY_SAVE_SETTINGS: 'personality:saveSettings',
+  PERSONALITY_GET_DEFINITIONS: 'personality:getDefinitions',
+  PERSONALITY_GET_PERSONAS: 'personality:getPersonas',
+  PERSONALITY_GET_RELATIONSHIP_STATS: 'personality:getRelationshipStats',
+  PERSONALITY_SET_ACTIVE: 'personality:setActive',
+  PERSONALITY_SET_PERSONA: 'personality:setPersona',
   // Task Queue
   QUEUE_GET_STATUS: 'queue:getStatus',
   QUEUE_GET_SETTINGS: 'queue:getSettings',
@@ -985,6 +993,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppearanceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_GET_SETTINGS),
   saveAppearanceSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_SAVE_SETTINGS, settings),
 
+  // Personality Settings APIs
+  getPersonalitySettings: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_SETTINGS),
+  savePersonalitySettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, settings),
+  getPersonalityDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_DEFINITIONS),
+  getPersonaDefinitions: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_PERSONAS),
+  getRelationshipStats: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_RELATIONSHIP_STATS),
+  setActivePersonality: (personalityId: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_ACTIVE, personalityId),
+  setActivePersona: (personaId: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SET_PERSONA, personaId),
+
   // Queue APIs
   getQueueStatus: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_STATUS),
   getQueueSettings: () => ipcRenderer.invoke(IPC_CHANNELS.QUEUE_GET_SETTINGS),
@@ -1404,6 +1421,83 @@ export interface ElectronAPI {
     accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
     disclaimerAccepted?: boolean;
   }) => Promise<{ success: boolean }>;
+  // Personality Settings
+  getPersonalitySettings: () => Promise<{
+    activePersonality: 'professional' | 'friendly' | 'concise' | 'creative' | 'technical' | 'casual' | 'custom';
+    customPrompt?: string;
+    customName?: string;
+    agentName?: string;
+    activePersona?: 'none' | 'jarvis' | 'friday' | 'hal' | 'computer' | 'alfred' | 'intern' | 'sensei' | 'pirate' | 'noir';
+    responseStyle?: {
+      emojiUsage: 'none' | 'minimal' | 'moderate' | 'expressive';
+      responseLength: 'terse' | 'balanced' | 'detailed';
+      codeCommentStyle: 'minimal' | 'moderate' | 'verbose';
+      explanationDepth: 'expert' | 'balanced' | 'teaching';
+    };
+    quirks?: {
+      catchphrase?: string;
+      signOff?: string;
+      analogyDomain: 'none' | 'cooking' | 'sports' | 'space' | 'music' | 'nature' | 'gaming' | 'movies' | 'construction';
+    };
+    relationship?: {
+      userName?: string;
+      tasksCompleted: number;
+      firstInteraction?: number;
+      lastMilestoneCelebrated: number;
+      projectsWorkedOn: string[];
+    };
+  }>;
+  savePersonalitySettings: (settings: {
+    activePersonality?: 'professional' | 'friendly' | 'concise' | 'creative' | 'technical' | 'casual' | 'custom';
+    customPrompt?: string;
+    customName?: string;
+    agentName?: string;
+    activePersona?: 'none' | 'jarvis' | 'friday' | 'hal' | 'computer' | 'alfred' | 'intern' | 'sensei' | 'pirate' | 'noir';
+    responseStyle?: {
+      emojiUsage?: 'none' | 'minimal' | 'moderate' | 'expressive';
+      responseLength?: 'terse' | 'balanced' | 'detailed';
+      codeCommentStyle?: 'minimal' | 'moderate' | 'verbose';
+      explanationDepth?: 'expert' | 'balanced' | 'teaching';
+    };
+    quirks?: {
+      catchphrase?: string;
+      signOff?: string;
+      analogyDomain?: 'none' | 'cooking' | 'sports' | 'space' | 'music' | 'nature' | 'gaming' | 'movies' | 'construction';
+    };
+    relationship?: {
+      userName?: string;
+      tasksCompleted?: number;
+      firstInteraction?: number;
+      lastMilestoneCelebrated?: number;
+      projectsWorkedOn?: string[];
+    };
+  }) => Promise<{ success: boolean }>;
+  getPersonalityDefinitions: () => Promise<Array<{
+    id: 'professional' | 'friendly' | 'concise' | 'creative' | 'technical' | 'casual' | 'custom';
+    name: string;
+    description: string;
+    icon: string;
+    traits: string[];
+    promptTemplate: string;
+  }>>;
+  getPersonaDefinitions: () => Promise<Array<{
+    id: 'none' | 'jarvis' | 'friday' | 'hal' | 'computer' | 'alfred' | 'intern' | 'sensei' | 'pirate' | 'noir';
+    name: string;
+    description: string;
+    icon: string;
+    promptTemplate: string;
+    suggestedName?: string;
+    sampleCatchphrase?: string;
+    sampleSignOff?: string;
+  }>>;
+  getRelationshipStats: () => Promise<{
+    tasksCompleted: number;
+    projectsCount: number;
+    daysTogether: number;
+    nextMilestone: number | null;
+  }>;
+  setActivePersonality: (personalityId: string) => Promise<{ success: boolean }>;
+  setActivePersona: (personaId: string) => Promise<{ success: boolean }>;
   // Queue APIs
   getQueueStatus: () => Promise<{
     runningCount: number;

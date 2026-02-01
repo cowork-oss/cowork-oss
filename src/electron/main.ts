@@ -10,6 +10,7 @@ import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
+import { PersonalityManager } from './settings/personality-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
 import { CronService, setCronService, getCronStorePath } from './cron';
@@ -23,6 +24,12 @@ let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
+
+// Suppress GPU-related Chromium errors that occur with transparent windows and vibrancy
+// These are cosmetic errors that don't affect functionality
+app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 // Register canvas:// protocol scheme (must be called before app.ready)
 registerCanvasScheme();
@@ -106,6 +113,7 @@ app.whenReady().then(async () => {
   SearchProviderFactory.initialize();
   GuardrailManager.initialize();
   AppearanceManager.initialize();
+  PersonalityManager.initialize();
 
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();

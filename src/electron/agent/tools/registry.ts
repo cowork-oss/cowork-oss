@@ -24,7 +24,7 @@ import { isToolAllowedQuick } from '../../security/policy-manager';
 import { BuiltinToolsSettingsManager } from './builtin-settings';
 import { getCustomSkillLoader } from '../custom-skill-loader';
 import { PersonalityManager } from '../../settings/personality-manager';
-import { PersonalityId, PERSONALITY_DEFINITIONS } from '../../../shared/types';
+import { PersonalityId, PersonaId, PERSONALITY_DEFINITIONS, PERSONA_DEFINITIONS } from '../../../shared/types';
 
 /**
  * ToolRegistry manages all available tools and their execution
@@ -213,7 +213,7 @@ export class ToolRegistry {
         return true;
       }
       // Meta tools are always enabled
-      if (tool.name === 'revise_plan' || tool.name === 'set_personality' || tool.name === 'set_agent_name') {
+      if (['revise_plan', 'set_personality', 'set_persona', 'set_agent_name', 'set_user_name', 'set_response_style', 'set_quirks'].includes(tool.name)) {
         return true;
       }
       // Check built-in tool settings
@@ -423,6 +423,15 @@ Skills:
 - organize_folder: Organize and structure files in folders
 - use_skill: Invoke a custom skill by ID to help accomplish tasks (see available skills below)
 
+Skill Management (create, modify, duplicate skills):
+- skill_list: List all skills with metadata (source, path, status)
+- skill_get: Get full JSON content of a skill by ID
+- skill_create: Create a new custom skill
+- skill_duplicate: Duplicate an existing skill with modifications (great for variations)
+- skill_update: Update an existing skill (managed/workspace only, not bundled)
+- skill_delete: Delete a skill (managed/workspace only, not bundled)
+Skills are stored in ~/Library/Application Support/cowork-oss/skills/ (managed) or workspace/skills/ (workspace).
+
 Code Tools (PREFERRED for code navigation and editing):
 - glob: Fast pattern-based file search (e.g., "**/*.ts", "src/**/*.test.ts")
   Use this FIRST to find files by pattern - much faster than search_files.
@@ -521,7 +530,11 @@ Plan Control:
 - revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
 - switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
 - set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
-- set_agent_name: Set or change the assistant's name when the user wants to give you a name.`;
+- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, or none).
+- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
+- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
+- set_agent_name: Set or change the assistant's name when the user wants to give you a name.
+- set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
     // Add custom skills available for use_skill
     const skillLoader = getCustomSkillLoader();
@@ -557,6 +570,14 @@ ${skillDescriptions}`;
     if (name === 'create_presentation') return await this.skillTools.createPresentation(input);
     if (name === 'organize_folder') return await this.skillTools.organizeFolder(input);
     if (name === 'use_skill') return await this.executeUseSkill(input);
+
+    // Skill management tools
+    if (name === 'skill_list') return await this.executeSkillList(input);
+    if (name === 'skill_get') return await this.executeSkillGet(input);
+    if (name === 'skill_create') return await this.executeSkillCreate(input);
+    if (name === 'skill_duplicate') return await this.executeSkillDuplicate(input);
+    if (name === 'skill_update') return await this.executeSkillUpdate(input);
+    if (name === 'skill_delete') return await this.executeSkillDelete(input);
 
     // Code tools (glob, grep, edit)
     if (name === 'glob') return await this.globTools.glob(input);
@@ -648,6 +669,22 @@ ${skillDescriptions}`;
 
     if (name === 'set_agent_name') {
       return this.setAgentName(input);
+    }
+
+    if (name === 'set_user_name') {
+      return this.setUserName(input);
+    }
+
+    if (name === 'set_persona') {
+      return this.setPersona(input);
+    }
+
+    if (name === 'set_response_style') {
+      return this.setResponseStyle(input);
+    }
+
+    if (name === 'set_quirks') {
+      return this.setQuirks(input);
     }
 
     // MCP tools (prefixed with mcp_ by default)
@@ -893,6 +930,393 @@ ${skillDescriptions}`;
       expanded_prompt: expandedPrompt,
       instruction: 'Execute the task according to the expanded_prompt above. Follow its instructions to complete the user\'s request.',
     };
+  }
+
+  /**
+   * List all skills with metadata
+   */
+  private async executeSkillList(input: {
+    source?: 'all' | 'bundled' | 'managed' | 'workspace';
+    include_disabled?: boolean;
+  }): Promise<any> {
+    const { source = 'all', include_disabled = true } = input;
+    const skillLoader = getCustomSkillLoader();
+
+    let skills = skillLoader.listSkills();
+
+    // Filter by source if specified
+    if (source !== 'all') {
+      skills = skills.filter(s => s.source === source);
+    }
+
+    // Filter out disabled if requested
+    if (!include_disabled) {
+      skills = skills.filter(s => s.enabled !== false);
+    }
+
+    // Format for agent consumption
+    const formattedSkills = skills.map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      category: s.category || 'General',
+      icon: s.icon || '',
+      source: s.source,
+      filePath: s.filePath,
+      enabled: s.enabled !== false,
+      hasParameters: (s.parameters?.length || 0) > 0,
+      parameterCount: s.parameters?.length || 0,
+    }));
+
+    return {
+      success: true,
+      total: formattedSkills.length,
+      skills: formattedSkills,
+      directories: {
+        bundled: skillLoader.getBundledSkillsDir(),
+        managed: skillLoader.getManagedSkillsDir(),
+        workspace: skillLoader.getWorkspaceSkillsDir(),
+      },
+    };
+  }
+
+  /**
+   * Get full details of a specific skill
+   */
+  private async executeSkillGet(input: { skill_id: string }): Promise<any> {
+    const { skill_id } = input;
+    const skillLoader = getCustomSkillLoader();
+    const skill = skillLoader.getSkill(skill_id);
+
+    if (!skill) {
+      const availableSkills = skillLoader.listSkills().map(s => s.id);
+      return {
+        success: false,
+        error: `Skill '${skill_id}' not found`,
+        available_skills: availableSkills.slice(0, 30),
+        hint: 'Use skill_list to see all available skills',
+      };
+    }
+
+    // Return full skill definition (useful for duplication/modification)
+    return {
+      success: true,
+      skill: {
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        prompt: skill.prompt,
+        icon: skill.icon,
+        category: skill.category,
+        priority: skill.priority,
+        parameters: skill.parameters,
+        enabled: skill.enabled,
+        type: skill.type,
+        invocation: skill.invocation,
+        requirements: skill.requirements,
+        source: skill.source,
+        filePath: skill.filePath,
+      },
+    };
+  }
+
+  /**
+   * Create a new skill
+   */
+  private async executeSkillCreate(input: {
+    id: string;
+    name: string;
+    description: string;
+    prompt: string;
+    icon?: string;
+    category?: string;
+    parameters?: Array<{
+      name: string;
+      type: string;
+      description: string;
+      required?: boolean;
+      default?: string;
+      options?: string[];
+    }>;
+    enabled?: boolean;
+  }): Promise<any> {
+    const skillLoader = getCustomSkillLoader();
+
+    // Check if skill with this ID already exists
+    const existing = skillLoader.getSkill(input.id);
+    if (existing) {
+      return {
+        success: false,
+        error: `Skill with ID '${input.id}' already exists`,
+        existing_skill: {
+          id: existing.id,
+          name: existing.name,
+          source: existing.source,
+        },
+        hint: 'Use a different ID or use skill_update to modify the existing skill',
+      };
+    }
+
+    // Validate ID format
+    if (!/^[a-z0-9-]+$/.test(input.id)) {
+      return {
+        success: false,
+        error: 'Invalid skill ID format',
+        hint: 'Skill ID should be lowercase, using only letters, numbers, and hyphens (e.g., "my-custom-skill")',
+      };
+    }
+
+    try {
+      const newSkill = await skillLoader.createSkill({
+        id: input.id,
+        name: input.name,
+        description: input.description,
+        prompt: input.prompt,
+        icon: input.icon,
+        category: input.category || 'Custom',
+        parameters: input.parameters,
+        enabled: input.enabled !== false,
+      });
+
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Created new skill: ${newSkill.name}`,
+        skillId: newSkill.id,
+      });
+
+      return {
+        success: true,
+        message: `Skill '${newSkill.name}' created successfully`,
+        skill: {
+          id: newSkill.id,
+          name: newSkill.name,
+          source: newSkill.source,
+          filePath: newSkill.filePath,
+        },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to create skill: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * Duplicate an existing skill with modifications
+   */
+  private async executeSkillDuplicate(input: {
+    source_skill_id: string;
+    new_id: string;
+    modifications?: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      icon?: string;
+      category?: string;
+      parameters?: any[];
+    };
+  }): Promise<any> {
+    const { source_skill_id, new_id, modifications = {} } = input;
+    const skillLoader = getCustomSkillLoader();
+
+    // Get the source skill
+    const sourceSkill = skillLoader.getSkill(source_skill_id);
+    if (!sourceSkill) {
+      return {
+        success: false,
+        error: `Source skill '${source_skill_id}' not found`,
+        hint: 'Use skill_list to see available skills',
+      };
+    }
+
+    // Check if new ID already exists
+    const existing = skillLoader.getSkill(new_id);
+    if (existing) {
+      return {
+        success: false,
+        error: `Skill with ID '${new_id}' already exists`,
+        hint: 'Use a different ID for the duplicate',
+      };
+    }
+
+    // Validate new ID format
+    if (!/^[a-z0-9-]+$/.test(new_id)) {
+      return {
+        success: false,
+        error: 'Invalid skill ID format',
+        hint: 'Skill ID should be lowercase, using only letters, numbers, and hyphens',
+      };
+    }
+
+    try {
+      // Create the duplicated skill with modifications
+      const newSkill = await skillLoader.createSkill({
+        id: new_id,
+        name: modifications.name || `${sourceSkill.name} (Copy)`,
+        description: modifications.description || sourceSkill.description,
+        prompt: modifications.prompt || sourceSkill.prompt,
+        icon: modifications.icon || sourceSkill.icon,
+        category: modifications.category || sourceSkill.category,
+        parameters: modifications.parameters || sourceSkill.parameters,
+        priority: sourceSkill.priority,
+        enabled: true,
+      });
+
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Duplicated skill '${sourceSkill.name}' as '${newSkill.name}'`,
+        sourceSkillId: source_skill_id,
+        newSkillId: new_id,
+      });
+
+      return {
+        success: true,
+        message: `Skill duplicated successfully`,
+        source_skill: {
+          id: sourceSkill.id,
+          name: sourceSkill.name,
+        },
+        new_skill: {
+          id: newSkill.id,
+          name: newSkill.name,
+          source: newSkill.source,
+          filePath: newSkill.filePath,
+        },
+        modifications_applied: Object.keys(modifications),
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to duplicate skill: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * Update an existing skill
+   */
+  private async executeSkillUpdate(input: {
+    skill_id: string;
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      icon?: string;
+      category?: string;
+      parameters?: any[];
+      enabled?: boolean;
+    };
+  }): Promise<any> {
+    const { skill_id, updates } = input;
+    const skillLoader = getCustomSkillLoader();
+
+    const skill = skillLoader.getSkill(skill_id);
+    if (!skill) {
+      return {
+        success: false,
+        error: `Skill '${skill_id}' not found`,
+        hint: 'Use skill_list to see available skills',
+      };
+    }
+
+    // Check if skill can be updated
+    if (skill.source === 'bundled') {
+      return {
+        success: false,
+        error: `Cannot update bundled skill '${skill_id}'`,
+        hint: 'Bundled skills are read-only. Use skill_duplicate to create an editable copy.',
+        skill_source: skill.source,
+      };
+    }
+
+    try {
+      const updatedSkill = await skillLoader.updateSkill(skill_id, updates);
+      if (!updatedSkill) {
+        return {
+          success: false,
+          error: 'Failed to update skill',
+        };
+      }
+
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Updated skill: ${updatedSkill.name}`,
+        skillId: skill_id,
+        updatedFields: Object.keys(updates),
+      });
+
+      return {
+        success: true,
+        message: `Skill '${updatedSkill.name}' updated successfully`,
+        updated_fields: Object.keys(updates),
+        skill: {
+          id: updatedSkill.id,
+          name: updatedSkill.name,
+          source: updatedSkill.source,
+          filePath: updatedSkill.filePath,
+        },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to update skill: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * Delete a skill
+   */
+  private async executeSkillDelete(input: { skill_id: string }): Promise<any> {
+    const { skill_id } = input;
+    const skillLoader = getCustomSkillLoader();
+
+    const skill = skillLoader.getSkill(skill_id);
+    if (!skill) {
+      return {
+        success: false,
+        error: `Skill '${skill_id}' not found`,
+        hint: 'Use skill_list to see available skills',
+      };
+    }
+
+    // Check if skill can be deleted
+    if (skill.source === 'bundled') {
+      return {
+        success: false,
+        error: `Cannot delete bundled skill '${skill_id}'`,
+        hint: 'Bundled skills are read-only and cannot be deleted.',
+        skill_source: skill.source,
+      };
+    }
+
+    try {
+      const deleted = await skillLoader.deleteSkill(skill_id);
+      if (!deleted) {
+        return {
+          success: false,
+          error: 'Failed to delete skill',
+        };
+      }
+
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Deleted skill: ${skill.name}`,
+        skillId: skill_id,
+      });
+
+      return {
+        success: true,
+        message: `Skill '${skill.name}' deleted successfully`,
+        deleted_skill: {
+          id: skill.id,
+          name: skill.name,
+          source: skill.source,
+        },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to delete skill: ${error.message}`,
+      };
+    }
   }
 
   /**
@@ -1221,6 +1645,176 @@ ${skillDescriptions}`;
           required: ['skill_id'],
         },
       },
+      // Skill Management Tools
+      {
+        name: 'skill_list',
+        description:
+          'List all available skills with their metadata including source (bundled, managed, workspace), ' +
+          'file paths, and status. Use this to discover what skills exist and where they are stored.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            source: {
+              type: 'string',
+              enum: ['all', 'bundled', 'managed', 'workspace'],
+              description: 'Filter skills by source. Default is "all".',
+            },
+            include_disabled: {
+              type: 'boolean',
+              description: 'Include disabled skills in the list. Default is true.',
+            },
+          },
+        },
+      },
+      {
+        name: 'skill_get',
+        description:
+          'Get the full JSON content and metadata of a specific skill by ID. ' +
+          'Returns the complete skill definition including prompt, parameters, and configuration.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            skill_id: {
+              type: 'string',
+              description: 'The ID of the skill to retrieve',
+            },
+          },
+          required: ['skill_id'],
+        },
+      },
+      {
+        name: 'skill_create',
+        description:
+          'Create a new custom skill. The skill will be saved to the managed skills directory ' +
+          '(~/Library/Application Support/cowork-oss/skills/). Provide the full skill definition.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Unique identifier for the skill (lowercase, hyphens allowed, e.g., "my-custom-skill")',
+            },
+            name: {
+              type: 'string',
+              description: 'Human-readable name for the skill',
+            },
+            description: {
+              type: 'string',
+              description: 'Brief description of what the skill does',
+            },
+            prompt: {
+              type: 'string',
+              description: 'The prompt template. Use {{paramName}} for parameter placeholders.',
+            },
+            icon: {
+              type: 'string',
+              description: 'Emoji icon for the skill (optional)',
+            },
+            category: {
+              type: 'string',
+              description: 'Category for grouping (e.g., "Research", "Development", "Writing")',
+            },
+            parameters: {
+              type: 'array',
+              description: 'Array of parameter definitions',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Parameter name (used in {{name}} placeholders)' },
+                  type: { type: 'string', enum: ['string', 'number', 'boolean', 'select'], description: 'Parameter type' },
+                  description: { type: 'string', description: 'Parameter description' },
+                  required: { type: 'boolean', description: 'Whether the parameter is required' },
+                  default: { type: 'string', description: 'Default value' },
+                  options: { type: 'array', items: { type: 'string' }, description: 'Options for select type' },
+                },
+                required: ['name', 'type', 'description'],
+              },
+            },
+            enabled: {
+              type: 'boolean',
+              description: 'Whether the skill is enabled. Default is true.',
+            },
+          },
+          required: ['id', 'name', 'description', 'prompt'],
+        },
+      },
+      {
+        name: 'skill_duplicate',
+        description:
+          'Duplicate an existing skill with a new ID and optional modifications. ' +
+          'Great for creating variations of existing skills (e.g., changing time ranges, targets).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            source_skill_id: {
+              type: 'string',
+              description: 'The ID of the skill to duplicate',
+            },
+            new_id: {
+              type: 'string',
+              description: 'The ID for the new duplicated skill',
+            },
+            modifications: {
+              type: 'object',
+              description: 'Fields to modify in the duplicated skill (name, description, prompt, etc.)',
+              properties: {
+                name: { type: 'string', description: 'New name for the skill' },
+                description: { type: 'string', description: 'New description' },
+                prompt: { type: 'string', description: 'New prompt template' },
+                icon: { type: 'string', description: 'New icon' },
+                category: { type: 'string', description: 'New category' },
+                parameters: { type: 'array', description: 'New parameters array' },
+              },
+            },
+          },
+          required: ['source_skill_id', 'new_id'],
+        },
+      },
+      {
+        name: 'skill_update',
+        description:
+          'Update an existing skill. Only managed and workspace skills can be updated (not bundled). ' +
+          'Provide only the fields you want to change.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            skill_id: {
+              type: 'string',
+              description: 'The ID of the skill to update',
+            },
+            updates: {
+              type: 'object',
+              description: 'Fields to update',
+              properties: {
+                name: { type: 'string', description: 'New name' },
+                description: { type: 'string', description: 'New description' },
+                prompt: { type: 'string', description: 'New prompt template' },
+                icon: { type: 'string', description: 'New icon' },
+                category: { type: 'string', description: 'New category' },
+                parameters: { type: 'array', description: 'New parameters array' },
+                enabled: { type: 'boolean', description: 'Enable/disable the skill' },
+              },
+            },
+          },
+          required: ['skill_id', 'updates'],
+        },
+      },
+      {
+        name: 'skill_delete',
+        description:
+          'Delete a skill. Only managed and workspace skills can be deleted (not bundled). ' +
+          'This permanently removes the skill file.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            skill_id: {
+              type: 'string',
+              description: 'The ID of the skill to delete',
+            },
+          },
+          required: ['skill_id'],
+        },
+      },
     ];
   }
 
@@ -1374,6 +1968,214 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Set the agent's persona (character overlay)
+   */
+  private setPersona(input: { persona: string }): {
+    success: boolean;
+    persona: string;
+    name: string;
+    description: string;
+    message: string;
+  } {
+    const personaId = input.persona as PersonaId;
+    const validIds: PersonaId[] = ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir'];
+
+    if (!validIds.includes(personaId)) {
+      throw new Error(`Invalid persona: ${personaId}. Valid options are: ${validIds.join(', ')}`);
+    }
+
+    // Save the new persona
+    PersonalityManager.setActivePersona(personaId);
+
+    // Get the persona definition for the response
+    const persona = PERSONA_DEFINITIONS.find(p => p.id === personaId);
+    const description = persona?.description || '';
+    const name = persona?.name || personaId;
+
+    console.log(`[ToolRegistry] Persona changed to: ${personaId}`);
+
+    let message = '';
+    if (personaId === 'none') {
+      message = 'Persona cleared. I\'ll respond without any character overlay.';
+    } else {
+      message = `Persona changed to "${name}". ${description}. This character style will be applied in future responses.`;
+    }
+
+    return {
+      success: true,
+      persona: personaId,
+      name,
+      description,
+      message,
+    };
+  }
+
+  /**
+   * Set the user's name (for relationship tracking)
+   */
+  private setUserName(input: { name: string }): {
+    success: boolean;
+    name: string;
+    message: string;
+  } {
+    const userName = input.name?.trim();
+
+    if (!userName || userName.length === 0) {
+      throw new Error('Name cannot be empty');
+    }
+
+    if (userName.length > 100) {
+      throw new Error('Name is too long (max 100 characters)');
+    }
+
+    // Save the user's name
+    PersonalityManager.setUserName(userName);
+
+    console.log(`[ToolRegistry] User name set to: ${userName}`);
+
+    const agentName = PersonalityManager.getAgentName();
+
+    return {
+      success: true,
+      name: userName,
+      message: `Nice to meet you, ${userName}! I'm ${agentName}. I'll remember your name for our future conversations.`,
+    };
+  }
+
+  /**
+   * Set response style preferences
+   */
+  private setResponseStyle(input: {
+    emoji_usage?: string;
+    response_length?: string;
+    code_comments?: string;
+    explanation_depth?: string;
+  }): {
+    success: boolean;
+    changes: string[];
+    message: string;
+  } {
+    const changes: string[] = [];
+    const style: any = {};
+
+    // Validate and apply emoji usage
+    if (input.emoji_usage) {
+      const validEmoji = ['none', 'minimal', 'moderate', 'expressive'];
+      if (!validEmoji.includes(input.emoji_usage)) {
+        throw new Error(`Invalid emoji_usage: ${input.emoji_usage}. Valid options: ${validEmoji.join(', ')}`);
+      }
+      style.emojiUsage = input.emoji_usage;
+      changes.push(`emoji usage: ${input.emoji_usage}`);
+    }
+
+    // Validate and apply response length
+    if (input.response_length) {
+      const validLength = ['terse', 'balanced', 'detailed'];
+      if (!validLength.includes(input.response_length)) {
+        throw new Error(`Invalid response_length: ${input.response_length}. Valid options: ${validLength.join(', ')}`);
+      }
+      style.responseLength = input.response_length;
+      changes.push(`response length: ${input.response_length}`);
+    }
+
+    // Validate and apply code comment style
+    if (input.code_comments) {
+      const validComments = ['minimal', 'moderate', 'verbose'];
+      if (!validComments.includes(input.code_comments)) {
+        throw new Error(`Invalid code_comments: ${input.code_comments}. Valid options: ${validComments.join(', ')}`);
+      }
+      style.codeCommentStyle = input.code_comments;
+      changes.push(`code comments: ${input.code_comments}`);
+    }
+
+    // Validate and apply explanation depth
+    if (input.explanation_depth) {
+      const validDepth = ['expert', 'balanced', 'teaching'];
+      if (!validDepth.includes(input.explanation_depth)) {
+        throw new Error(`Invalid explanation_depth: ${input.explanation_depth}. Valid options: ${validDepth.join(', ')}`);
+      }
+      style.explanationDepth = input.explanation_depth;
+      changes.push(`explanation depth: ${input.explanation_depth}`);
+    }
+
+    if (changes.length === 0) {
+      throw new Error('No valid style options provided. Use emoji_usage, response_length, code_comments, or explanation_depth.');
+    }
+
+    PersonalityManager.setResponseStyle(style);
+    console.log(`[ToolRegistry] Response style updated:`, changes);
+
+    return {
+      success: true,
+      changes,
+      message: `Response style updated: ${changes.join(', ')}. Changes will apply to future responses.`,
+    };
+  }
+
+  /**
+   * Set personality quirks
+   */
+  private setQuirks(input: {
+    catchphrase?: string;
+    sign_off?: string;
+    analogy_domain?: string;
+  }): {
+    success: boolean;
+    changes: string[];
+    message: string;
+  } {
+    const changes: string[] = [];
+    const quirks: any = {};
+
+    // Apply catchphrase
+    if (input.catchphrase !== undefined) {
+      quirks.catchphrase = input.catchphrase || '';
+      if (input.catchphrase) {
+        changes.push(`catchphrase: "${input.catchphrase}"`);
+      } else {
+        changes.push('catchphrase cleared');
+      }
+    }
+
+    // Apply sign-off
+    if (input.sign_off !== undefined) {
+      quirks.signOff = input.sign_off || '';
+      if (input.sign_off) {
+        changes.push(`sign-off: "${input.sign_off}"`);
+      } else {
+        changes.push('sign-off cleared');
+      }
+    }
+
+    // Validate and apply analogy domain
+    if (input.analogy_domain !== undefined) {
+      const validDomains = ['none', 'cooking', 'sports', 'space', 'music', 'nature', 'gaming', 'movies', 'construction'];
+      if (!validDomains.includes(input.analogy_domain)) {
+        throw new Error(`Invalid analogy_domain: ${input.analogy_domain}. Valid options: ${validDomains.join(', ')}`);
+      }
+      quirks.analogyDomain = input.analogy_domain;
+      if (input.analogy_domain === 'none') {
+        changes.push('analogy domain cleared');
+      } else {
+        changes.push(`analogy domain: ${input.analogy_domain}`);
+      }
+    }
+
+    if (changes.length === 0) {
+      throw new Error('No quirk options provided. Use catchphrase, sign_off, or analogy_domain.');
+    }
+
+    PersonalityManager.setQuirks(quirks);
+    console.log(`[ToolRegistry] Quirks updated:`, changes);
+
+    return {
+      success: true,
+      changes,
+      message: `Personality quirks updated: ${changes.join(', ')}. Changes will apply to future responses.`,
+    };
+  }
+
+  /**
    * Define meta tools for execution control
    */
   private getMetaToolDefinitions(): LLMTool[] {
@@ -1453,6 +2255,26 @@ ${skillDescriptions}`;
         },
       },
       {
+        name: 'set_persona',
+        description:
+          'Change the assistant\'s character persona. Personas are character overlays inspired by famous AI assistants. ' +
+          'Use this when the user asks to change persona, act like a character, or wants a specific AI personality. ' +
+          'Available personas: jarvis (sophisticated butler), friday (friendly colleague), hal (calm/formal), ' +
+          'computer (Star Trek efficient), alfred (refined gentleman), intern (eager learner), sensei (wise teacher), ' +
+          'pirate (swashbuckling adventurer), noir (1940s detective). Use "none" to remove persona overlay.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            persona: {
+              type: 'string',
+              enum: ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir'],
+              description: 'The persona to adopt (or "none" to clear)',
+            },
+          },
+          required: ['persona'],
+        },
+      },
+      {
         name: 'set_agent_name',
         description:
           'Set or change the assistant\'s name. Use this when the user wants to give you a name, rename you, or asks ' +
@@ -1467,6 +2289,79 @@ ${skillDescriptions}`;
             },
           },
           required: ['name'],
+        },
+      },
+      {
+        name: 'set_user_name',
+        description:
+          'Store the user\'s name when they introduce themselves. Use this PROACTIVELY when the user tells you their name ' +
+          '(e.g., "I\'m Alice", "My name is Bob", "Call me Charlie"). This helps personalize future interactions. ' +
+          'The name will be remembered across sessions and used in greetings and context.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'The user\'s name as they introduced themselves',
+            },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'set_response_style',
+        description:
+          'Adjust how the assistant responds. Use when the user asks for different response styles like "use more emojis", ' +
+          '"be more brief", "explain things simply", or "add more code comments". All parameters are optional - only set what the user wants to change.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            emoji_usage: {
+              type: 'string',
+              enum: ['none', 'minimal', 'moderate', 'expressive'],
+              description: 'How much to use emojis: none (never), minimal (rarely), moderate (sometimes), expressive (frequently)',
+            },
+            response_length: {
+              type: 'string',
+              enum: ['terse', 'balanced', 'detailed'],
+              description: 'Response verbosity: terse (very brief), balanced (normal), detailed (comprehensive)',
+            },
+            code_comments: {
+              type: 'string',
+              enum: ['minimal', 'moderate', 'verbose'],
+              description: 'Code commenting style: minimal (essential only), moderate (helpful comments), verbose (detailed explanations)',
+            },
+            explanation_depth: {
+              type: 'string',
+              enum: ['expert', 'balanced', 'teaching'],
+              description: 'How deeply to explain: expert (assume knowledge), balanced (normal), teaching (thorough explanations)',
+            },
+          },
+        },
+      },
+      {
+        name: 'set_quirks',
+        description:
+          'Set personality quirks like catchphrases, sign-offs, or analogy themes. Use when the user wants the assistant ' +
+          'to have a signature phrase, end responses a certain way, or use analogies from a specific domain. ' +
+          'Pass empty string to clear a quirk.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            catchphrase: {
+              type: 'string',
+              description: 'A signature phrase to occasionally use (e.g., "At your service!", "Consider it done!")',
+            },
+            sign_off: {
+              type: 'string',
+              description: 'How to end longer responses (e.g., "Happy coding!", "May the force be with you!")',
+            },
+            analogy_domain: {
+              type: 'string',
+              enum: ['none', 'cooking', 'sports', 'space', 'music', 'nature', 'gaming', 'movies', 'construction'],
+              description: 'Theme for analogies and examples: none (no preference), or a specific domain',
+            },
+          },
         },
       },
     ];
