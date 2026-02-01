@@ -14,6 +14,7 @@ import { Workspace } from '../../../shared/types';
 import { MacOSSandbox } from './macos-sandbox';
 import { DockerSandbox } from './docker-sandbox';
 import { spawn } from 'child_process';
+import { createSecureTempFile } from './security-utils';
 
 /**
  * Sandbox type enumeration
@@ -181,29 +182,17 @@ export class NoSandbox implements ISandbox {
     code: string,
     language: 'python' | 'javascript'
   ): Promise<SandboxResult> {
-    const fs = await import('fs');
-    const path = await import('path');
-    const os = await import('os');
-
     const ext = language === 'python' ? '.py' : '.js';
-    const tempFile = path.join(
-      os.tmpdir(),
-      `cowork_script_${Date.now()}${ext}`
-    );
+    const { filePath, cleanup } = createSecureTempFile(ext, code);
 
     try {
-      fs.writeFileSync(tempFile, code, 'utf8');
       const interpreter = language === 'python' ? 'python3' : 'node';
-      return await this.execute(interpreter, [tempFile], {
+      return await this.execute(interpreter, [filePath], {
         timeout: 60 * 1000,
         allowNetwork: false,
       });
     } finally {
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-        // Ignore cleanup errors
-      }
+      cleanup();
     }
   }
 

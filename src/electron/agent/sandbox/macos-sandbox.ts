@@ -1,68 +1,24 @@
 /**
- * SandboxRunner - Secure execution environment for shell commands
+ * macOS Sandbox Implementation
  *
- * This file maintains backward compatibility by re-exporting the refactored sandbox system.
- *
- * The sandbox system now supports:
- * - macOS sandbox-exec profiles (native, preferred on macOS)
- * - Docker containers (cross-platform, Linux/Windows)
- * - No sandbox fallback (with timeout and output limits)
- *
- * Use createSandbox() from sandbox-factory.ts for new code.
+ * Uses macOS sandbox-exec with generated profiles for system call filtering.
+ * Provides:
+ * - Process isolation with limited environment
+ * - Filesystem access restrictions
+ * - Network access control
  */
-
-// Re-export the sandbox factory and types for backward compatibility
-export {
-  ISandbox,
-  SandboxType,
-  SandboxOptions,
-  SandboxResult,
-  createSandbox,
-  detectAvailableSandbox,
-  isDockerAvailable,
-  NoSandbox,
-} from './sandbox-factory';
-
-export { MacOSSandbox } from './macos-sandbox';
-export { DockerSandbox, DockerSandboxConfig } from './docker-sandbox';
 
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { Workspace } from '../../../shared/types';
-
-/**
- * Sandbox execution options
- */
-export interface SandboxOptions {
-  /** Working directory for command execution */
-  cwd?: string;
-  /** Command execution timeout in milliseconds */
-  timeout?: number;
-  /** Maximum output size in bytes */
-  maxOutputSize?: number;
-  /** Allow network access */
-  allowNetwork?: boolean;
-  /** Additional allowed paths for read access */
-  allowedReadPaths?: string[];
-  /** Additional allowed paths for write access */
-  allowedWritePaths?: string[];
-  /** Environment variables to pass through */
-  envPassthrough?: string[];
-}
-
-/**
- * Sandbox execution result
- */
-export interface SandboxResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  killed: boolean;
-  timedOut: boolean;
-  error?: string;
-}
+import { ISandbox, SandboxType, SandboxOptions, SandboxResult } from './sandbox-factory';
+import {
+  createSecureTempFile,
+  escapeSandboxProfileString,
+  validatePathForSandboxProfile,
+} from './security-utils';
 
 /**
  * Default sandbox options
@@ -78,9 +34,10 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
 };
 
 /**
- * SandboxRunner manages secure command execution
+ * macOS sandbox-exec based sandbox implementation
  */
-export class SandboxRunner {
+export class MacOSSandbox implements ISandbox {
+  readonly type: SandboxType = 'macos';
   private workspace: Workspace;
   private sandboxProfile?: string;
 
@@ -92,7 +49,9 @@ export class SandboxRunner {
    * Initialize sandbox environment
    */
   async initialize(): Promise<void> {
-    // Generate sandbox profile for this workspace
+    if (process.platform !== 'darwin') {
+      throw new Error('MacOSSandbox can only be used on macOS');
+    }
     this.sandboxProfile = this.generateSandboxProfile();
   }
 
@@ -105,8 +64,6 @@ export class SandboxRunner {
     options: SandboxOptions = {}
   ): Promise<SandboxResult> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
-
-    // Determine working directory
     const cwd = opts.cwd || this.workspace.path;
 
     // Validate working directory is within allowed paths
@@ -124,9 +81,6 @@ export class SandboxRunner {
     // Build minimal, safe environment
     const env = this.buildSafeEnvironment(opts.envPassthrough);
 
-    // Check if we can use macOS sandbox-exec
-    const useSandboxExec = process.platform === 'darwin' && this.sandboxProfile;
-
     let proc: ChildProcess;
     const spawnOptions: SpawnOptions = {
       cwd,
@@ -135,12 +89,16 @@ export class SandboxRunner {
       stdio: ['ignore', 'pipe', 'pipe'],
     };
 
-    if (useSandboxExec && this.sandboxProfile) {
+    if (this.sandboxProfile) {
       // Use sandbox-exec on macOS
       const profilePath = this.writeTempProfile();
-      proc = spawn('sandbox-exec', ['-f', profilePath, '/bin/sh', '-c', `${command} ${args.join(' ')}`], spawnOptions);
+      proc = spawn(
+        'sandbox-exec',
+        ['-f', profilePath, '/bin/sh', '-c', `${command} ${args.join(' ')}`],
+        spawnOptions
+      );
     } else {
-      // Fallback: execute without OS-level sandboxing (still has resource limits)
+      // Fallback without sandbox profile
       proc = spawn('/bin/sh', ['-c', `${command} ${args.join(' ')}`], spawnOptions);
     }
 
@@ -150,14 +108,12 @@ export class SandboxRunner {
       let killed = false;
       let timedOut = false;
 
-      // Timeout handler
       const timeoutHandle = setTimeout(() => {
         timedOut = true;
         killed = true;
         proc.kill('SIGKILL');
       }, opts.timeout);
 
-      // Collect stdout
       proc.stdout?.on('data', (data: Buffer) => {
         const chunk = data.toString();
         if (stdout.length + chunk.length <= opts.maxOutputSize) {
@@ -168,7 +124,6 @@ export class SandboxRunner {
         }
       });
 
-      // Collect stderr
       proc.stderr?.on('data', (data: Buffer) => {
         const chunk = data.toString();
         if (stderr.length + chunk.length <= opts.maxOutputSize) {
@@ -179,7 +134,6 @@ export class SandboxRunner {
         }
       });
 
-      // Process completion
       proc.on('close', (code) => {
         clearTimeout(timeoutHandle);
         resolve({
@@ -191,7 +145,6 @@ export class SandboxRunner {
         });
       });
 
-      // Process error
       proc.on('error', (err) => {
         clearTimeout(timeoutHandle);
         resolve({
@@ -207,28 +160,23 @@ export class SandboxRunner {
   }
 
   /**
-   * Execute code in sandbox (for future scripting support)
+   * Execute code in sandbox
    */
-  async executeCode(code: string, language: 'python' | 'javascript'): Promise<SandboxResult> {
-    // Create temp file with code
+  async executeCode(
+    code: string,
+    language: 'python' | 'javascript'
+  ): Promise<SandboxResult> {
     const ext = language === 'python' ? '.py' : '.js';
-    const tempFile = path.join(os.tmpdir(), `cowork_script_${Date.now()}${ext}`);
+    const { filePath, cleanup } = createSecureTempFile(ext, code);
 
     try {
-      fs.writeFileSync(tempFile, code, 'utf8');
-
       const interpreter = language === 'python' ? 'python3' : 'node';
-      return await this.execute(interpreter, [tempFile], {
-        timeout: 60 * 1000, // 1 minute for scripts
+      return await this.execute(interpreter, [filePath], {
+        timeout: 60 * 1000,
         allowNetwork: false,
       });
     } finally {
-      // Cleanup temp file
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-        // Ignore cleanup errors
-      }
+      cleanup();
     }
   }
 
@@ -236,19 +184,41 @@ export class SandboxRunner {
    * Cleanup sandbox resources
    */
   cleanup(): void {
-    // Clean up any temp files or resources
     this.sandboxProfile = undefined;
   }
 
   /**
    * Check if a path is allowed based on workspace permissions
+   * Resolves symlinks to prevent symlink-based path traversal attacks
    */
   private isPathAllowed(targetPath: string, mode: 'read' | 'write'): boolean {
-    const normalizedTarget = path.resolve(targetPath);
-    const normalizedWorkspace = path.resolve(this.workspace.path);
+    // Reject paths with null bytes
+    if (targetPath.includes('\0')) {
+      return false;
+    }
+
+    // Resolve symlinks to get real path (if it exists)
+    let realTarget: string;
+    try {
+      realTarget = fs.existsSync(targetPath)
+        ? fs.realpathSync(targetPath)
+        : path.resolve(targetPath);
+    } catch {
+      return false;
+    }
+
+    // Resolve workspace path (with symlinks resolved)
+    let realWorkspace: string;
+    try {
+      realWorkspace = fs.existsSync(this.workspace.path)
+        ? fs.realpathSync(this.workspace.path)
+        : path.resolve(this.workspace.path);
+    } catch {
+      realWorkspace = path.resolve(this.workspace.path);
+    }
 
     // Always allow paths within workspace
-    if (normalizedTarget.startsWith(normalizedWorkspace)) {
+    if (realTarget.startsWith(realWorkspace + path.sep) || realTarget === realWorkspace) {
       return true;
     }
 
@@ -257,12 +227,18 @@ export class SandboxRunner {
       return true;
     }
 
-    // Check allowed paths
+    // Check allowed paths (with symlink resolution)
     const allowedPaths = this.workspace.permissions.allowedPaths || [];
     for (const allowed of allowedPaths) {
-      const normalizedAllowed = path.resolve(allowed);
-      if (normalizedTarget.startsWith(normalizedAllowed)) {
-        return true;
+      try {
+        const realAllowed = fs.existsSync(allowed)
+          ? fs.realpathSync(allowed)
+          : path.resolve(allowed);
+        if (realTarget.startsWith(realAllowed + path.sep) || realTarget === realAllowed) {
+          return true;
+        }
+      } catch {
+        // Skip invalid allowed paths
       }
     }
 
@@ -277,7 +253,7 @@ export class SandboxRunner {
         os.tmpdir(),
       ];
       for (const sysPath of systemReadPaths) {
-        if (normalizedTarget.startsWith(sysPath)) {
+        if (realTarget.startsWith(sysPath + path.sep) || realTarget === sysPath) {
           return true;
         }
       }
@@ -289,17 +265,17 @@ export class SandboxRunner {
   /**
    * Build a minimal, safe environment for command execution
    */
-  private buildSafeEnvironment(passthrough: string[]): Record<string, string | undefined> {
+  private buildSafeEnvironment(
+    passthrough: string[]
+  ): Record<string, string | undefined> {
     const safeEnv: Record<string, string | undefined> = {};
 
-    // Only pass through allowed environment variables
     for (const key of passthrough) {
       if (process.env[key]) {
         safeEnv[key] = process.env[key];
       }
     }
 
-    // Set safe defaults
     safeEnv.HOME = process.env.HOME || os.homedir();
     safeEnv.USER = process.env.USER || os.userInfo().username;
     safeEnv.SHELL = process.env.SHELL || '/bin/bash';
@@ -307,8 +283,9 @@ export class SandboxRunner {
     safeEnv.LANG = process.env.LANG || 'en_US.UTF-8';
     safeEnv.TMPDIR = os.tmpdir();
 
-    // Minimal PATH with only standard locations
     safeEnv.PATH = [
+      '/opt/homebrew/bin',
+      '/opt/homebrew/sbin',
       '/usr/local/bin',
       '/usr/bin',
       '/bin',
@@ -316,22 +293,21 @@ export class SandboxRunner {
       '/sbin',
     ].join(':');
 
-    // Add homebrew paths on macOS
-    if (process.platform === 'darwin') {
-      safeEnv.PATH = `/opt/homebrew/bin:/opt/homebrew/sbin:${safeEnv.PATH}`;
-    }
-
     return safeEnv;
   }
 
   /**
    * Generate macOS sandbox-exec profile
+   * Paths are escaped to prevent sandbox profile injection attacks
    */
   private generateSandboxProfile(): string {
-    const workspacePath = this.workspace.path;
     const permissions = this.workspace.permissions;
     const tempDir = os.tmpdir();
-    const homeDir = os.homedir();
+
+    // Validate and escape workspace path
+    validatePathForSandboxProfile(this.workspace.path);
+    const escapedWorkspace = escapeSandboxProfileString(this.workspace.path);
+    const escapedTempDir = escapeSandboxProfileString(tempDir);
 
     let profile = `(version 1)
 (deny default)
@@ -358,21 +334,21 @@ export class SandboxRunner {
   (literal "/dev/urandom")
   (literal "/dev/random")
   (subpath "/private/tmp")
-  (subpath "${tempDir}")
+  (subpath "${escapedTempDir}")
 )
 
 ; Allow homebrew on macOS
 (allow file-read* (subpath "/opt/homebrew"))
 
 ; Allow reading workspace
-(allow file-read* (subpath "${workspacePath}"))
+(allow file-read* (subpath "${escapedWorkspace}"))
 `;
 
     // Allow writing to workspace if permitted
     if (permissions.write) {
       profile += `
 ; Allow writing to workspace
-(allow file-write* (subpath "${workspacePath}"))
+(allow file-write* (subpath "${escapedWorkspace}"))
 `;
     }
 
@@ -381,7 +357,7 @@ export class SandboxRunner {
 ; Allow writing to temp directories
 (allow file-write*
   (subpath "/private/tmp")
-  (subpath "${tempDir}")
+  (subpath "${escapedTempDir}")
   (subpath "/private/var/folders")
 )
 `;
@@ -400,16 +376,23 @@ export class SandboxRunner {
 `;
     }
 
-    // Allow additional read paths
+    // Allow additional read paths (with validation and escaping)
     const allowedPaths = permissions.allowedPaths || [];
     for (const allowedPath of allowedPaths) {
-      profile += `(allow file-read* (subpath "${allowedPath}"))\n`;
-      if (permissions.write) {
-        profile += `(allow file-write* (subpath "${allowedPath}"))\n`;
+      try {
+        validatePathForSandboxProfile(allowedPath);
+        const escapedPath = escapeSandboxProfileString(allowedPath);
+        profile += `(allow file-read* (subpath "${escapedPath}"))\n`;
+        if (permissions.write) {
+          profile += `(allow file-write* (subpath "${escapedPath}"))\n`;
+        }
+      } catch (err) {
+        // Skip paths that fail validation - log warning
+        console.warn(`[MacOSSandbox] Skipping unsafe allowed path: ${allowedPath}`, err);
       }
     }
 
-    // Allow mach services needed for basic operation
+    // Allow essential mach services
     profile += `
 ; Allow essential mach services
 (allow mach-lookup
@@ -426,29 +409,18 @@ export class SandboxRunner {
 
   /**
    * Write sandbox profile to temp file
+   * Uses secure temp file creation to prevent TOCTOU attacks
    */
   private writeTempProfile(): string {
-    const profilePath = path.join(os.tmpdir(), `cowork_sandbox_${Date.now()}.sb`);
-    fs.writeFileSync(profilePath, this.sandboxProfile!, 'utf8');
+    const { filePath, cleanup } = createSecureTempFile('.sb', this.sandboxProfile!);
 
-    // Schedule cleanup
+    // Store cleanup function for later use
+    // Schedule cleanup after a longer delay to ensure process completes
+    // Note: The profile is needed for the entire duration of the sandbox process
     setTimeout(() => {
-      try {
-        fs.unlinkSync(profilePath);
-      } catch {
-        // Ignore cleanup errors
-      }
-    }, 60 * 1000); // Clean up after 1 minute
+      cleanup();
+    }, 5 * 60 * 1000); // 5 minutes - longer than typical execution
 
-    return profilePath;
+    return filePath;
   }
-}
-
-/**
- * Create a sandboxed command executor for a workspace
- */
-export async function createSandboxRunner(workspace: Workspace): Promise<SandboxRunner> {
-  const runner = new SandboxRunner(workspace);
-  await runner.initialize();
-  return runner;
 }

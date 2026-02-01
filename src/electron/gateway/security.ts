@@ -20,12 +20,18 @@ import {
 } from '../database/repositories';
 import { IncomingMessage } from './channels/types';
 import { pairingMutex, IdempotencyManager } from '../security/concurrency';
+import { ContextPolicyManager } from './context-policy';
+import { ContextType, SecurityMode } from '../../shared/types';
 
 export interface AccessCheckResult {
   allowed: boolean;
   user?: ChannelUser;
   reason?: string;
   pairingRequired?: boolean;
+  /** The context type (dm or group) for this message */
+  contextType?: ContextType;
+  /** Tools denied in this context */
+  deniedTools?: string[];
 }
 
 export interface PairingResult {
@@ -37,18 +43,62 @@ export interface PairingResult {
 export class SecurityManager {
   private userRepo: ChannelUserRepository;
   private pairingIdempotency: IdempotencyManager;
+  private contextPolicyManager: ContextPolicyManager;
+
+  // Channels that don't support group chats - always use DM context
+  private static readonly DM_ONLY_CHANNELS = ['email', 'imessage', 'bluebubbles'];
 
   constructor(db: Database.Database) {
     this.userRepo = new ChannelUserRepository(db);
     this.pairingIdempotency = new IdempotencyManager(5 * 60 * 1000); // 5 min TTL
+    this.contextPolicyManager = new ContextPolicyManager(db);
+  }
+
+  /**
+   * Get the context policy manager for direct access to context policies
+   */
+  getContextPolicyManager(): ContextPolicyManager {
+    return this.contextPolicyManager;
   }
 
   /**
    * Check if a message sender is allowed to interact
+   * Supports per-context (DM vs group) security policies
    */
-  async checkAccess(channel: Channel, message: IncomingMessage): Promise<AccessCheckResult> {
+  async checkAccess(
+    channel: Channel,
+    message: IncomingMessage,
+    isGroup?: boolean
+  ): Promise<AccessCheckResult> {
     const securityConfig = channel.securityConfig;
-    const mode = securityConfig.mode;
+
+    // Determine context type
+    // Priority: 1) Explicit isGroup parameter, 2) Channel type check, 3) Inference from IDs
+    let contextType: ContextType;
+
+    if (isGroup !== undefined) {
+      // Explicit parameter takes precedence
+      contextType = isGroup ? 'group' : 'dm';
+    } else if (SecurityManager.DM_ONLY_CHANNELS.includes(channel.type)) {
+      // Channels that don't support groups always use DM context
+      contextType = 'dm';
+    } else {
+      // Infer from message - chatId different from userId typically means group
+      // This works for Telegram, Discord, Slack, etc.
+      contextType = message.chatId !== message.userId ? 'group' : 'dm';
+    }
+
+    // Get context-specific policy (creates default if doesn't exist)
+    const contextPolicy = this.contextPolicyManager.getPolicy(
+      channel.id,
+      contextType
+    );
+
+    // Use context policy's security mode, falling back to channel default
+    const mode: SecurityMode = contextPolicy.securityMode || securityConfig.mode;
+
+    // Get denied tools for this context
+    const deniedTools = contextPolicy.toolRestrictions || [];
 
     // Get or create user record
     let user = this.userRepo.findByChannelUserId(channel.id, message.userId);
@@ -72,37 +122,55 @@ export class SecurityManager {
     switch (mode) {
       case 'open':
         // Everyone is allowed
-        return { allowed: true, user };
+        return { allowed: true, user, contextType, deniedTools };
 
       case 'allowlist': {
         // Check if user is in allowlist
         if (user.allowed) {
-          return { allowed: true, user };
+          return { allowed: true, user, contextType, deniedTools };
         }
         // Check if user ID is in config allowlist
         const allowedUsers = securityConfig.allowedUsers || [];
         if (allowedUsers.includes(message.userId)) {
           // Add to allowed users
           this.userRepo.update(user.id, { allowed: true });
-          return { allowed: true, user: { ...user, allowed: true } };
+          return {
+            allowed: true,
+            user: { ...user, allowed: true },
+            contextType,
+            deniedTools,
+          };
         }
-        return { allowed: false, user, reason: 'User not in allowlist' };
+        return {
+          allowed: false,
+          user,
+          reason: 'User not in allowlist',
+          contextType,
+          deniedTools,
+        };
       }
 
       case 'pairing':
         // Check if user has been paired
         if (user.allowed) {
-          return { allowed: true, user };
+          return { allowed: true, user, contextType, deniedTools };
         }
         return {
           allowed: false,
           user,
           reason: 'Pairing required',
           pairingRequired: true,
+          contextType,
+          deniedTools,
         };
 
       default:
-        return { allowed: false, reason: `Unknown security mode: ${mode}` };
+        return {
+          allowed: false,
+          reason: `Unknown security mode: ${mode}`,
+          contextType,
+          deniedTools,
+        };
     }
   }
 
@@ -205,8 +273,8 @@ export class SecurityManager {
 
     // Brute-force protection: Check if user is locked out due to too many failed attempts
     if (existingUser && existingUser.pairingAttempts >= SecurityManager.MAX_PAIRING_ATTEMPTS) {
-      // Check if lockout period has passed (use pairingExpiresAt as lockout timestamp)
-      const lockoutUntil = existingUser.pairingExpiresAt;
+      // Check if lockout period has passed (use dedicated lockoutUntil field)
+      const lockoutUntil = existingUser.lockoutUntil;
       if (lockoutUntil && Date.now() < lockoutUntil) {
         const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000);
         return {
@@ -214,10 +282,10 @@ export class SecurityManager {
           error: `Too many failed attempts. Please wait ${remainingMinutes} minute(s) before trying again.`,
         };
       }
-      // Lockout expired - reset attempts
+      // Lockout expired - reset attempts (keep pairingExpiresAt unchanged)
       this.userRepo.update(existingUser.id, {
         pairingAttempts: 0,
-        pairingExpiresAt: undefined,
+        lockoutUntil: undefined,
       });
     }
 
@@ -228,12 +296,12 @@ export class SecurityManager {
       // Code not found - increment attempts on the requesting user if they exist
       if (existingUser) {
         const newAttempts = existingUser.pairingAttempts + 1;
-        const updates: { pairingAttempts: number; pairingExpiresAt?: number } = {
+        const updates: { pairingAttempts: number; lockoutUntil?: number } = {
           pairingAttempts: newAttempts,
         };
-        // Set lockout timestamp if max attempts reached
+        // Set lockout timestamp if max attempts reached (uses dedicated lockoutUntil field)
         if (newAttempts >= SecurityManager.MAX_PAIRING_ATTEMPTS) {
-          updates.pairingExpiresAt = Date.now() + SecurityManager.PAIRING_LOCKOUT_MS;
+          updates.lockoutUntil = Date.now() + SecurityManager.PAIRING_LOCKOUT_MS;
         }
         this.userRepo.update(existingUser.id, updates);
 
@@ -266,6 +334,7 @@ export class SecurityManager {
         pairingCode: undefined,
         pairingExpiresAt: undefined,
         pairingAttempts: 0,
+        lockoutUntil: undefined,
       });
       // Clear the code from wherever it was stored
       if (codeOwner.id !== existingUser.id) {

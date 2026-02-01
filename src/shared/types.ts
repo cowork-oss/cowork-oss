@@ -407,6 +407,25 @@ export interface Workspace {
 export const TEMP_WORKSPACE_ID = '__temp_workspace__';
 export const TEMP_WORKSPACE_NAME = 'Temporary Workspace';
 
+/**
+ * Sandbox type for command execution isolation
+ */
+export type SandboxType = 'auto' | 'macos' | 'docker' | 'none';
+
+/**
+ * Docker sandbox configuration
+ */
+export interface DockerSandboxConfig {
+  /** Docker image to use (default: node:20-alpine) */
+  image?: string;
+  /** CPU limit in cores (e.g., 0.5 = half a core) */
+  cpuLimit?: number;
+  /** Memory limit (e.g., "512m", "1g") */
+  memoryLimit?: string;
+  /** Network mode: 'none' for isolation, 'bridge' for network access */
+  networkMode?: 'none' | 'bridge';
+}
+
 export interface WorkspacePermissions {
   read: boolean;
   write: boolean;
@@ -417,6 +436,9 @@ export interface WorkspacePermissions {
   // Broader filesystem access (like Claude Code)
   unrestrictedFileAccess?: boolean;  // Allow reading/writing files outside workspace
   allowedPaths?: string[];           // Specific paths outside workspace to allow (if not fully unrestricted)
+  // Sandbox configuration
+  sandboxType?: SandboxType;         // Which sandbox to use (auto-detect if not specified)
+  dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
 }
 
 export interface PlanStep {
@@ -932,6 +954,15 @@ export const IPC_CHANNELS = {
   WORKING_STATE_DELETE: 'workingState:delete',
   WORKING_STATE_LIST_FOR_TASK: 'workingState:listForTask',
 
+  // Context Policy (per-context security DM vs group)
+  CONTEXT_POLICY_GET: 'contextPolicy:get',
+  CONTEXT_POLICY_GET_FOR_CHAT: 'contextPolicy:getForChat',
+  CONTEXT_POLICY_LIST: 'contextPolicy:list',
+  CONTEXT_POLICY_UPDATE: 'contextPolicy:update',
+  CONTEXT_POLICY_DELETE: 'contextPolicy:delete',
+  CONTEXT_POLICY_CREATE_DEFAULTS: 'contextPolicy:createDefaults',
+  CONTEXT_POLICY_IS_TOOL_ALLOWED: 'contextPolicy:isToolAllowed',
+
   // Task events (streaming and history)
   TASK_EVENT: 'task:event',
   TASK_EVENTS: 'task:events',
@@ -1294,6 +1325,47 @@ export interface LLMConfigStatus {
 export type ChannelType = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type SecurityMode = 'open' | 'allowlist' | 'pairing';
+
+/**
+ * Context type for channel messages (DM vs group chat)
+ */
+export type ContextType = 'dm' | 'group';
+
+/**
+ * Per-context security policy
+ * Allows different security modes for DMs vs group chats
+ */
+export interface ContextPolicy {
+  id: string;
+  channelId: string;
+  contextType: ContextType;
+  securityMode: SecurityMode;
+  /** Tool groups to deny in this context (e.g., 'group:memory') */
+  toolRestrictions?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Channel security configuration with per-context policies
+ */
+export interface ChannelSecurityConfig {
+  /** Default security mode (applies if no context policy exists) */
+  mode: SecurityMode;
+  /** Allowed users for allowlist mode */
+  allowedUsers?: string[];
+  /** Pairing code TTL in seconds */
+  pairingCodeTTL?: number;
+  /** Max pairing attempts before lockout */
+  maxPairingAttempts?: number;
+  /** Rate limit for messages per minute */
+  rateLimitPerMinute?: number;
+  /** Per-context security policies */
+  contextPolicies?: {
+    dm?: Partial<ContextPolicy>;
+    group?: Partial<ContextPolicy>;
+  };
+}
 
 export interface ChannelData {
   id: string;

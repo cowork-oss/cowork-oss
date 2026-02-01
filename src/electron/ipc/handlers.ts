@@ -27,6 +27,7 @@ import { ActivityRepository } from '../activity/ActivityRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { TaskLabelRepository } from '../database/TaskLabelRepository';
 import { WorkingStateRepository } from '../agents/WorkingStateRepository';
+import { ContextPolicyManager } from '../gateway/context-policy';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
@@ -136,6 +137,7 @@ export async function setupIpcHandlers(
   const mentionRepo = new MentionRepository(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
+  const contextPolicyManager = new ContextPolicyManager(db);
 
   // Seed default agent roles if none exist
   agentRoleRepo.seedDefaults();
@@ -1897,6 +1899,46 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, async (_, taskId: string) => {
     const validated = validateInput(UUIDSchema, taskId, 'task ID');
     return workingStateRepo.listForTask(validated);
+  });
+
+  // Context Policy handlers (per-context security DM vs group)
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_GET, async (_, channelId: string, contextType: string) => {
+    return contextPolicyManager.getPolicy(channelId, contextType as 'dm' | 'group');
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_GET_FOR_CHAT, async (_, channelId: string, chatId: string, isGroup: boolean) => {
+    return contextPolicyManager.getPolicyForChat(channelId, chatId, isGroup);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_LIST, async (_, channelId: string) => {
+    return contextPolicyManager.getPoliciesForChannel(channelId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_UPDATE, async (_, channelId: string, contextType: string, options: { securityMode?: string; toolRestrictions?: string[] }) => {
+    checkRateLimit(IPC_CHANNELS.CONTEXT_POLICY_UPDATE);
+    return contextPolicyManager.updateByContext(
+      channelId,
+      contextType as 'dm' | 'group',
+      {
+        securityMode: options.securityMode as 'open' | 'allowlist' | 'pairing' | undefined,
+        toolRestrictions: options.toolRestrictions,
+      }
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_DELETE, async (_, channelId: string) => {
+    checkRateLimit(IPC_CHANNELS.CONTEXT_POLICY_DELETE);
+    return { count: contextPolicyManager.deleteByChannel(channelId) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS, async (_, channelId: string) => {
+    checkRateLimit(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS);
+    contextPolicyManager.createDefaultPolicies(channelId);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_IS_TOOL_ALLOWED, async (_, channelId: string, contextType: string, toolName: string, toolGroups: string[]) => {
+    return { allowed: contextPolicyManager.isToolAllowed(channelId, contextType as 'dm' | 'group', toolName, toolGroups) };
   });
 
   // Queue handlers

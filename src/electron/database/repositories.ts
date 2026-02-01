@@ -761,6 +761,8 @@ export interface ChannelUser {
   pairingCode?: string;
   pairingAttempts: number;
   pairingExpiresAt?: number;
+  /** Separate field for brute-force lockout timestamp (distinct from pairing code expiration) */
+  lockoutUntil?: number;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -974,6 +976,10 @@ export class ChannelUserRepository {
       fields.push('pairing_expires_at = ?');
       values.push(updates.pairingExpiresAt);
     }
+    if (updates.lockoutUntil !== undefined) {
+      fields.push('lockout_until = ?');
+      values.push(updates.lockoutUntil);
+    }
     if (updates.lastSeenAt !== undefined) {
       fields.push('last_seen_at = ?');
       values.push(updates.lastSeenAt);
@@ -1056,6 +1062,7 @@ export class ChannelUserRepository {
       pairingCode: (row.pairing_code as string) || undefined,
       pairingAttempts: row.pairing_attempts as number,
       pairingExpiresAt: (row.pairing_expires_at as number) || undefined,
+      lockoutUntil: (row.lockout_until as number) || undefined,
       createdAt: row.created_at as number,
       lastSeenAt: row.last_seen_at as number,
     };

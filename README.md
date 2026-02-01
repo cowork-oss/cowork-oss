@@ -85,7 +85,9 @@ CoWork OS is designed with security as a core principle, not an afterthought.
 | Layer | Protection |
 |-------|------------|
 | **Channel Access** | Pairing codes, allowlists, brute-force lockout (5 attempts, 15 min cooldown) |
+| **Context Policies** | Per-context security modes (DM vs group), tool restrictions per context |
 | **Tool Execution** | Risk-level categorization, context-aware isolation |
+| **Sandbox Isolation** | Docker containers (cross-platform) or macOS sandbox-exec |
 | **File Operations** | Workspace boundaries, path traversal protection |
 | **Shell Commands** | Dangerous command blocking, explicit approval required |
 | **Browser Automation** | Domain allowlist, configurable restrictions |
@@ -97,6 +99,35 @@ CoWork OS is designed with security as a core principle, not an afterthought.
 - **259 WebSocket protocol tests** for API security
 - Monotonic policy precedence (deny-wins across security layers)
 - Context-aware tool isolation for shared gateway environments
+
+### Sandbox Isolation
+
+Shell commands run in isolated sandboxes:
+
+| Platform | Sandbox Type | Features |
+|----------|--------------|----------|
+| **macOS** | `sandbox-exec` | Native Apple sandbox profiles, no setup required |
+| **Linux/Windows** | Docker | Container isolation, resource limits, network isolation |
+| **Fallback** | Process isolation | Timeouts, resource limits (when Docker unavailable) |
+
+Docker sandbox features:
+- CPU and memory limits (`--cpus`, `--memory`)
+- Network isolation (`--network none` by default)
+- Read-only workspace mounting option
+- Automatic cleanup of containers
+
+### Per-Context Security Policies
+
+Different security settings for direct messages vs group chats:
+
+| Context | Default Mode | Default Restrictions |
+|---------|--------------|---------------------|
+| **DM** | Pairing | No restrictions |
+| **Group** | Pairing | Memory tools blocked (clipboard) |
+
+Configure per-context policies in **Settings > Channels > [Channel] > Context Policies**.
+
+> **See also:** [docs/security/](docs/security/) for comprehensive security documentation.
 
 ---
 
@@ -1227,12 +1258,15 @@ Users must comply with their model provider's terms:
 - [x] Personality system
 - [x] 75+ bundled skills
 - [x] 1800+ unit tests
+- [x] Docker-based sandboxing (cross-platform)
+- [x] Per-context security policies (DM vs group)
+- [x] Enhanced pairing code UI with countdown
 
 ### Planned
 
 - [ ] VM sandbox using macOS Virtualization.framework
 - [ ] Network egress controls with proxy
-- [ ] Cross-platform support (Windows, Linux)
+- [ ] Cross-platform UI support (Windows, Linux)
 
 ---
 
@@ -1246,7 +1280,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
-For end-user security guidance, see [SECURITY_GUIDE.md](SECURITY_GUIDE.md).
+For end-user security guidance, see:
+- [SECURITY_GUIDE.md](SECURITY_GUIDE.md) - Quick reference
+- [docs/security/](docs/security/) - Comprehensive security documentation
+  - [Security Model](docs/security/security-model.md) - Architecture overview
+  - [Trust Boundaries](docs/security/trust-boundaries.md) - Isolation layers
+  - [Configuration Guide](docs/security/configuration-guide.md) - Setup instructions
+  - [Best Practices](docs/security/best-practices.md) - Recommended settings
 
 ---
 

@@ -807,6 +807,47 @@ export class DatabaseManager {
     } catch {
       // Table already exists, ignore
     }
+
+    // Migration: Create context_policies table for per-context security (DM vs group)
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS context_policies (
+          id TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL,
+          context_type TEXT NOT NULL CHECK(context_type IN ('dm', 'group')),
+          security_mode TEXT NOT NULL DEFAULT 'pairing' CHECK(security_mode IN ('open', 'allowlist', 'pairing')),
+          tool_restrictions TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+          UNIQUE(channel_id, context_type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_context_policies_channel ON context_policies(channel_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Add shell_enabled and debug_mode columns to channel_sessions
+    try {
+      this.db.exec('ALTER TABLE channel_sessions ADD COLUMN shell_enabled INTEGER DEFAULT 0');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE channel_sessions ADD COLUMN debug_mode INTEGER DEFAULT 0');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: Add lockout_until column to channel_users
+    // Separates brute-force lockout timestamp from pairing code expiration
+    try {
+      this.db.exec('ALTER TABLE channel_users ADD COLUMN lockout_until INTEGER');
+    } catch {
+      // Column already exists, ignore
+    }
   }
 
   private seedDefaultModels() {

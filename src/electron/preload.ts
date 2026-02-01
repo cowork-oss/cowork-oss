@@ -302,6 +302,14 @@ const IPC_CHANNELS = {
   WORKING_STATE_RESTORE: 'workingState:restore',
   WORKING_STATE_DELETE: 'workingState:delete',
   WORKING_STATE_LIST_FOR_TASK: 'workingState:listForTask',
+  // Context Policy (per-context security DM vs group)
+  CONTEXT_POLICY_GET: 'contextPolicy:get',
+  CONTEXT_POLICY_GET_FOR_CHAT: 'contextPolicy:getForChat',
+  CONTEXT_POLICY_LIST: 'contextPolicy:list',
+  CONTEXT_POLICY_UPDATE: 'contextPolicy:update',
+  CONTEXT_POLICY_DELETE: 'contextPolicy:delete',
+  CONTEXT_POLICY_CREATE_DEFAULTS: 'contextPolicy:createDefaults',
+  CONTEXT_POLICY_IS_TOOL_ALLOWED: 'contextPolicy:isToolAllowed',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1245,6 +1253,25 @@ interface WorkingStateHistoryQuery {
   offset?: number;
 }
 
+// Context Policy types (inlined for sandboxed preload)
+type SecurityModeType = 'open' | 'allowlist' | 'pairing';
+type ContextTypeValue = 'dm' | 'group';
+
+interface ContextPolicyData {
+  id: string;
+  channelId: string;
+  contextType: ContextTypeValue;
+  securityMode: SecurityModeType;
+  toolRestrictions: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface UpdateContextPolicyOptions {
+  securityMode?: SecurityModeType;
+  toolRestrictions?: string[];
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -1830,6 +1857,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_DELETE, id),
   listWorkingStatesForTask: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, taskId),
+
+  // Context Policy APIs (per-context security DM vs group)
+  getContextPolicy: (channelId: string, contextType: ContextTypeValue) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_GET, channelId, contextType),
+  getContextPolicyForChat: (channelId: string, chatId: string, isGroup: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_GET_FOR_CHAT, channelId, chatId, isGroup),
+  listContextPolicies: (channelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_LIST, channelId),
+  updateContextPolicy: (channelId: string, contextType: ContextTypeValue, options: UpdateContextPolicyOptions) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_UPDATE, channelId, contextType, options),
+  deleteContextPolicies: (channelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_DELETE, channelId),
+  createDefaultContextPolicies: (channelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS, channelId),
+  isToolAllowedInContext: (channelId: string, contextType: ContextTypeValue, toolName: string, toolGroups: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_POLICY_IS_TOOL_ALLOWED, channelId, contextType, toolName, toolGroups),
 });
 
 // Type declarations for TypeScript
@@ -1893,6 +1936,14 @@ export type {
   UpdateWorkingStateRequest,
   WorkingStateQuery,
   WorkingStateHistoryQuery,
+};
+
+// Export Context Policy types
+export type {
+  SecurityModeType,
+  ContextTypeValue,
+  ContextPolicyData,
+  UpdateContextPolicyOptions,
 };
 
 export interface ElectronAPI {
@@ -2388,6 +2439,14 @@ export interface ElectronAPI {
   restoreWorkingState: (id: string) => Promise<AgentWorkingStateData | undefined>;
   deleteWorkingState: (id: string) => Promise<{ success: boolean }>;
   listWorkingStatesForTask: (taskId: string) => Promise<AgentWorkingStateData[]>;
+  // Context Policy APIs
+  getContextPolicy: (channelId: string, contextType: ContextTypeValue) => Promise<ContextPolicyData>;
+  getContextPolicyForChat: (channelId: string, chatId: string, isGroup: boolean) => Promise<ContextPolicyData>;
+  listContextPolicies: (channelId: string) => Promise<ContextPolicyData[]>;
+  updateContextPolicy: (channelId: string, contextType: ContextTypeValue, options: UpdateContextPolicyOptions) => Promise<ContextPolicyData>;
+  deleteContextPolicies: (channelId: string) => Promise<{ count: number }>;
+  createDefaultContextPolicies: (channelId: string) => Promise<{ success: boolean }>;
+  isToolAllowedInContext: (channelId: string, contextType: ContextTypeValue, toolName: string, toolGroups: string[]) => Promise<{ allowed: boolean }>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)
