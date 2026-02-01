@@ -2201,14 +2201,21 @@ SKILL USAGE (IMPORTANT):
 - Examples: git-commit for commits, code-review for reviews, translate for translations.
 - If a skill matches, use it early in the plan to leverage its specialized instructions.
 
-WEB ACCESS & CONTENT EXTRACTION (IMPORTANT):
-- For web access: browser_navigate THEN browser_get_content (both required).
-- ALWAYS plan to extract content after navigating - never just navigate and stop.
-- If browser_get_content returns insufficient info, plan to use browser_screenshot.
-- If browser tools are unavailable, use web_search as an alternative.
+WEB RESEARCH & CONTENT EXTRACTION (IMPORTANT):
+- For GENERAL web research (news, trends, discussions, information gathering): USE web_search as the PRIMARY tool.
+  web_search is faster, more efficient, and aggregates results from multiple sources.
+- For SPECIFIC URL content (when you have an exact URL to read): USE web_fetch - it's lightweight and fast.
+- For INTERACTIVE tasks (clicking, filling forms, JavaScript-heavy pages): USE browser_navigate + browser_get_content.
+- For SCREENSHOTS: USE browser_navigate + browser_screenshot.
 - NEVER use run_command with curl, wget, or other network commands for web access.
 - NEVER create a plan that says "cannot be done" if alternative tools are available.
 - NEVER plan to ask the user for content you can extract yourself.
+
+TOOL SELECTION GUIDE (web tools):
+- web_search: Best for research, news, finding information, exploring topics (PREFERRED for most research)
+- web_fetch: Best for reading a specific known URL without interaction
+- browser_navigate + browser_get_content: Only for interactive pages or when web_fetch fails
+- browser_screenshot: When you need visual capture of a page
 
 COMMON WORKFLOWS (follow these patterns):
 
@@ -2223,20 +2230,20 @@ COMMON WORKFLOWS (follow these patterns):
    Step 2: Create the document with create_document tool
 
 3. WEB RESEARCH (MANDATORY PATTERN when needing current information):
-   FOR EACH SOURCE - process completely before moving to next:
-   Step 1: browser_navigate to URL
-   Step 2: browser_get_content IMMEDIATELY after navigate (these are ONE ATOMIC operation)
-   Step 3: Process and store the relevant information
-   Step 4: Repeat steps 1-3 for additional sources
-   Step 5: Compile all findings into your response
+   PRIMARY APPROACH - Use web_search:
+   Step 1: Use web_search with targeted queries to find relevant information
+   Step 2: Review search results and extract key findings
+   Step 3: If needed, use additional web_search queries with different keywords
+   Step 4: Compile all findings into your response
 
-   If content is insufficient: use browser_screenshot to see visual layout
-   If browser tools unavailable: use web_search as alternative
+   FALLBACK - Only if web_search is insufficient and you have specific URLs:
+   Step 1: Use web_fetch to read specific URLs from search results
+   Step 2: If web_fetch fails (requires JS), use browser_navigate + browser_get_content
 
    CRITICAL:
-   - NEVER navigate to multiple pages first and then try to extract. Process each page fully.
-   - NEVER ask the user for content you can extract with browser_get_content.
-   - NEVER say "I opened the pages but need access to the content" - you HAVE access via browser_get_content.
+   - START with web_search for research tasks - it's more efficient than browsing.
+   - Use browser tools only when you need interaction or JavaScript rendering.
+   - Many sites (X/Twitter, LinkedIn, etc.) require login - web_search can still find public discussions about them.
 
 4. FILE ORGANIZATION:
    Step 1: List directory contents to see current structure
@@ -2643,28 +2650,37 @@ CRITICAL - FINAL ANSWER REQUIREMENT:
 - If you couldn't find the information, SAY SO explicitly (e.g., "I couldn't find lap times for today's testing").
 - After 2-3 tool calls, you MUST provide a text answer summarizing what you found or didn't find.
 
-WEB ACCESS & CONTENT EXTRACTION (CRITICAL):
-- Treat browser_navigate + browser_get_content as ONE ATOMIC OPERATION. Never navigate without immediately extracting.
-- For EACH page you visit: navigate -> browser_get_content -> process the result. Then move to next page.
-- If browser_get_content returns insufficient info, use browser_screenshot to see the visual layout.
-- For dynamic content (JavaScript-heavy pages), wait with browser_wait then try browser_get_content again.
-- If browser tools are unavailable, use web_search as an alternative.
+WEB RESEARCH & TOOL SELECTION (CRITICAL):
+- For GENERAL research (news, trends, discussions): USE web_search FIRST - it's faster and aggregates results.
+- For reading SPECIFIC URLs: USE web_fetch - lightweight, doesn't require browser.
+- For INTERACTIVE pages or JavaScript content: USE browser_navigate + browser_get_content.
+- For SCREENSHOTS: USE browser_navigate + browser_screenshot.
 - NEVER use run_command with curl, wget, or other network commands.
 
-MULTI-PAGE RESEARCH PATTERN:
-- When researching from multiple sources, process each source COMPLETELY before moving to the next:
-  1. browser_navigate to source 1 -> browser_get_content -> extract relevant info
-  2. browser_navigate to source 2 -> browser_get_content -> extract relevant info
-  3. browser_navigate to source 3 -> browser_get_content -> extract relevant info
-  4. Compile findings from all sources into your response
-- Do NOT navigate to all sources first and then try to extract. Process each one fully.
+TOOL PRIORITY FOR RESEARCH:
+1. web_search - PREFERRED for most research tasks (news, trends, finding information)
+2. web_fetch - For reading specific URLs without interaction
+3. browser_navigate + browser_get_content - Only for interactive pages or when simpler tools fail
+4. browser_screenshot - When visual capture is needed
+
+RESEARCH WORKFLOW:
+- START with web_search queries to find relevant information
+- Use multiple targeted queries to cover different aspects of the topic
+- If you need content from a specific URL found in search results, use web_fetch first
+- Only fall back to browser_navigate if web_fetch fails (e.g., JavaScript-required content)
+- Many sites (X/Twitter, Reddit logged-in content, LinkedIn) require authentication - web_search can still find public discussions
+
+BROWSER TOOLS (when needed):
+- Treat browser_navigate + browser_get_content as ONE ATOMIC OPERATION
+- For dynamic content, use browser_wait then browser_get_content
+- If content is insufficient, use browser_screenshot to see visual layout
 
 ANTI-PATTERNS (NEVER DO THESE):
-- DO NOT: Navigate to multiple pages without extracting content from each
-- DO NOT: Navigate to page then ask user for URLs or content
-- DO NOT: Open multiple sources then claim you can't access them
-- DO NOT: Say "I need access to the articles" when you already navigated there
-- DO: Navigate -> browser_get_content -> process -> repeat for each source -> summarize all findings
+- DO NOT: Use browser tools for simple research when web_search works
+- DO NOT: Navigate to login-required pages and expect to extract content
+- DO NOT: Ask user for content you can find with web_search
+- DO NOT: Open multiple browser pages then claim you can't access them
+- DO: Start with web_search, use web_fetch for specific URLs, fall back to browser only when needed
 
 CRITICAL TOOL PARAMETER REQUIREMENTS:
 - canvas_push: MUST provide BOTH 'session_id' AND 'content' parameters. The 'content' MUST be a complete HTML string.
