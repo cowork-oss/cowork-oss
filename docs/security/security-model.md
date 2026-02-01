@@ -43,7 +43,7 @@ Different security settings can apply to DMs vs group chats:
 - **DM (Direct Messages)**: Full capability by default
 - **Group Chats**: Memory tools (clipboard) restricted by default
 
-This mirrors the approach used by similar tools like OpenClaw, treating group messages as higher risk than direct messages.
+This treats group messages as higher risk than direct messages, where shared context could expose sensitive data.
 
 ## Policy Manager
 

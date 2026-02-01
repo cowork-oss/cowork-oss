@@ -2,8 +2,7 @@
  * Context Policy Manager
  *
  * Manages per-context (DM vs group) security policies for channels.
- * Allows different security modes for direct messages vs group chats,
- * similar to OpenClaw's approach.
+ * Allows different security modes for direct messages vs group chats.
  *
  * Default policies:
  * - DM: pairing mode, no tool restrictions
@@ -56,7 +55,7 @@ export interface ContextAccessResult {
 
 /**
  * Default tool restrictions for group contexts
- * Prevents clipboard access in shared contexts (like OpenClaw's approach)
+ * Prevents clipboard access in shared contexts for security
  */
 export const DEFAULT_GROUP_TOOL_RESTRICTIONS = ['group:memory'];
 
@@ -261,6 +260,12 @@ export class ContextPolicyManager {
   ): boolean {
     const policy = this.getPolicy(channelId, contextType);
     const restrictions = policy.toolRestrictions || [];
+
+    // SECURITY: Check for deny-all marker (set when JSON parsing fails)
+    // This ensures corrupted data defaults to most restrictive behavior
+    if (restrictions.includes('*')) {
+      return false;
+    }
 
     // Check if tool is directly restricted
     if (restrictions.includes(toolName)) {
