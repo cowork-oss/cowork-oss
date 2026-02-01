@@ -24,6 +24,12 @@ import {
   SignalConfig,
   TeamsConfig,
   GoogleChatConfig,
+  MattermostConfig,
+  MatrixConfig,
+  TwitchConfig,
+  LineConfig,
+  BlueBubblesConfig,
+  EmailConfig,
 } from './channels/types';
 import { createTelegramAdapter } from './channels/telegram';
 import { createDiscordAdapter } from './channels/discord';
@@ -33,6 +39,12 @@ import { createImessageAdapter } from './channels/imessage';
 import { createSignalAdapter } from './channels/signal';
 import { createTeamsAdapter } from './channels/teams';
 import { createGoogleChatAdapter } from './channels/google-chat';
+import { createMattermostAdapter } from './channels/mattermost';
+import { createMatrixAdapter } from './channels/matrix';
+import { createTwitchAdapter } from './channels/twitch';
+import { createLineAdapter } from './channels/line';
+import { createBlueBubblesAdapter } from './channels/bluebubbles';
+import { createEmailAdapter } from './channels/email';
 
 /**
  * Channel metadata for registration
@@ -631,6 +643,404 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createGoogleChatAdapter(config as GoogleChatConfig),
+    });
+
+    // Mattermost
+    this.register({
+      metadata: {
+        type: 'mattermost',
+        displayName: 'Mattermost',
+        description: 'Mattermost integration using WebSocket and REST API',
+        icon: '🔵',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: true,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: true,
+          deleteMessage: true,
+          typing: true,
+          readReceipts: false,
+          groups: true,
+          threads: true,
+          webhooks: true,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            serverUrl: {
+              type: 'string',
+              description: 'Mattermost server URL (e.g., https://mattermost.example.com)',
+              required: true,
+            },
+            token: {
+              type: 'string',
+              description: 'Personal access token',
+              required: true,
+              secret: true,
+            },
+            teamId: {
+              type: 'string',
+              description: 'Team ID to operate in (optional)',
+            },
+            responsePrefix: {
+              type: 'string',
+              description: 'Prefix for bot responses',
+            },
+          },
+          required: ['serverUrl', 'token'],
+        },
+      },
+      factory: (config) => createMattermostAdapter(config as MattermostConfig),
+    });
+
+    // Matrix
+    this.register({
+      metadata: {
+        type: 'matrix',
+        displayName: 'Matrix',
+        description: 'Matrix federated messaging integration',
+        icon: '🟢',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: true,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: true,
+          deleteMessage: true,
+          typing: true,
+          readReceipts: true,
+          groups: true,
+          threads: true,
+          webhooks: false,
+          e2eEncryption: true,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            homeserver: {
+              type: 'string',
+              description: 'Matrix homeserver URL (e.g., https://matrix.org)',
+              required: true,
+            },
+            userId: {
+              type: 'string',
+              description: 'User ID (e.g., @user:matrix.org)',
+              required: true,
+            },
+            accessToken: {
+              type: 'string',
+              description: 'Access token',
+              required: true,
+              secret: true,
+            },
+            deviceId: {
+              type: 'string',
+              description: 'Device ID (optional)',
+            },
+            roomIds: {
+              type: 'array',
+              description: 'Room IDs to listen to (optional)',
+            },
+          },
+          required: ['homeserver', 'userId', 'accessToken'],
+        },
+      },
+      factory: (config) => createMatrixAdapter(config as MatrixConfig),
+    });
+
+    // Twitch
+    this.register({
+      metadata: {
+        type: 'twitch',
+        displayName: 'Twitch',
+        description: 'Twitch IRC chat integration',
+        icon: '🟣',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: false,
+          reactions: false,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: false,
+          deleteMessage: true,
+          typing: false,
+          readReceipts: false,
+          groups: true,
+          threads: false,
+          webhooks: false,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            username: {
+              type: 'string',
+              description: 'Twitch username (login name)',
+              required: true,
+            },
+            oauthToken: {
+              type: 'string',
+              description: 'OAuth token',
+              required: true,
+              secret: true,
+            },
+            channels: {
+              type: 'array',
+              description: 'Channels to join (without # prefix)',
+              required: true,
+            },
+            allowWhispers: {
+              type: 'boolean',
+              description: 'Whether to respond to whispers (DMs)',
+              default: false,
+            },
+          },
+          required: ['username', 'oauthToken', 'channels'],
+        },
+      },
+      factory: (config) => createTwitchAdapter(config as TwitchConfig),
+    });
+
+    // LINE
+    this.register({
+      metadata: {
+        type: 'line',
+        displayName: 'LINE',
+        description: 'LINE Messaging API integration with webhooks',
+        icon: '💚',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: false,
+          inlineKeyboards: true,
+          replyKeyboards: true,
+          polls: false,
+          voice: false,
+          video: false,
+          location: true,
+          editMessage: false,
+          deleteMessage: false,
+          typing: false,
+          readReceipts: true,
+          groups: true,
+          threads: false,
+          webhooks: true,
+          e2eEncryption: true,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            channelAccessToken: {
+              type: 'string',
+              description: 'LINE Channel Access Token',
+              required: true,
+              secret: true,
+            },
+            channelSecret: {
+              type: 'string',
+              description: 'LINE Channel Secret',
+              required: true,
+              secret: true,
+            },
+            webhookPort: {
+              type: 'number',
+              description: 'Webhook port (default: 3100)',
+              default: 3100,
+            },
+            webhookPath: {
+              type: 'string',
+              description: 'Webhook path (default: /line/webhook)',
+              default: '/line/webhook',
+            },
+            useReplyTokens: {
+              type: 'boolean',
+              description: 'Use reply tokens for faster responses',
+              default: true,
+            },
+          },
+          required: ['channelAccessToken', 'channelSecret'],
+        },
+      },
+      factory: (config) => createLineAdapter(config as LineConfig),
+    });
+
+    // BlueBubbles
+    this.register({
+      metadata: {
+        type: 'bluebubbles',
+        displayName: 'BlueBubbles',
+        description: 'iMessage integration via BlueBubbles server',
+        icon: '💙',
+        builtin: true,
+        platforms: ['darwin'],
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: true,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: false,
+          deleteMessage: false,
+          typing: true,
+          readReceipts: true,
+          groups: true,
+          threads: false,
+          webhooks: true,
+          e2eEncryption: true,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            serverUrl: {
+              type: 'string',
+              description: 'BlueBubbles server URL (e.g., http://192.168.1.100:1234)',
+              required: true,
+            },
+            password: {
+              type: 'string',
+              description: 'BlueBubbles server password',
+              required: true,
+              secret: true,
+            },
+            webhookPort: {
+              type: 'number',
+              description: 'Webhook port (default: 3101)',
+              default: 3101,
+            },
+            webhookPath: {
+              type: 'string',
+              description: 'Webhook path (default: /bluebubbles/webhook)',
+              default: '/bluebubbles/webhook',
+            },
+            pollInterval: {
+              type: 'number',
+              description: 'Poll interval in ms if webhooks unavailable',
+              default: 5000,
+            },
+            allowedContacts: {
+              type: 'array',
+              description: 'Allowed contacts (phone numbers or emails)',
+            },
+          },
+          required: ['serverUrl', 'password'],
+        },
+      },
+      factory: (config) => createBlueBubblesAdapter(config as BlueBubblesConfig),
+    });
+
+    // Email
+    this.register({
+      metadata: {
+        type: 'email',
+        displayName: 'Email',
+        description: 'Email integration using IMAP/SMTP',
+        icon: '📧',
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: false,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: false,
+          deleteMessage: true,
+          typing: false,
+          readReceipts: false,
+          groups: false,
+          threads: true,
+          webhooks: false,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: 'object',
+          properties: {
+            imapHost: {
+              type: 'string',
+              description: 'IMAP server host',
+              required: true,
+            },
+            imapPort: {
+              type: 'number',
+              description: 'IMAP port (default: 993)',
+              default: 993,
+            },
+            smtpHost: {
+              type: 'string',
+              description: 'SMTP server host',
+              required: true,
+            },
+            smtpPort: {
+              type: 'number',
+              description: 'SMTP port (default: 587)',
+              default: 587,
+            },
+            email: {
+              type: 'string',
+              description: 'Email address',
+              required: true,
+            },
+            password: {
+              type: 'string',
+              description: 'Password or app password',
+              required: true,
+              secret: true,
+            },
+            displayName: {
+              type: 'string',
+              description: 'Display name for outgoing emails',
+            },
+            mailbox: {
+              type: 'string',
+              description: 'IMAP mailbox to monitor (default: INBOX)',
+              default: 'INBOX',
+            },
+            subjectFilter: {
+              type: 'string',
+              description: 'Subject line filter pattern',
+            },
+            allowedSenders: {
+              type: 'array',
+              description: 'Allowed sender email addresses',
+            },
+          },
+          required: ['imapHost', 'smtpHost', 'email', 'password'],
+        },
+      },
+      factory: (config) => createEmailAdapter(config as EmailConfig),
     });
   }
 
