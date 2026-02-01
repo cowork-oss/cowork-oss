@@ -2,7 +2,7 @@
   <img src="screenshots/cowork-os-logo.png" alt="CoWork OS Logo" width="120">
 </p>
 
-<p align="center">
+<div align="center">
 <pre>
   ██████╗ ██████╗ ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗      ██████╗ ███████╗
  ██╔════╝██╔═══██╗██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝     ██╔═══██╗██╔════╝
@@ -11,12 +11,14 @@
  ╚██████╗╚██████╔╝╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗     ╚██████╔╝███████║
   ╚═════╝ ╚═════╝  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝      ╚═════╝ ╚══════╝
 </pre>
-</p>
+</div>
 
-[![CI](https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg)](https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![macOS](https://img.shields.io/badge/platform-macOS-blue.svg)](https://www.apple.com/macos/)
-[![Electron](https://img.shields.io/badge/electron-40.0.0-47848F.svg)](https://www.electronjs.org/)
+<p align="center">
+  <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
+  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/electron-40.0.0-47848F.svg" alt="Electron"></a>
+</p>
 
 **The operating system for personal AI assistants**
 
