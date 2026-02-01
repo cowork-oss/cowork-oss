@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ChannelData, ChannelUserData, SecurityMode } from '../../shared/types';
+import { ChannelData, ChannelUserData, SecurityMode, ContextType, ContextPolicy } from '../../shared/types';
+import { PairingCodeDisplay } from './PairingCodeDisplay';
+import { ContextPolicySettings } from './ContextPolicySettings';
 
 interface MatrixSettingsProps {
   onStatusChange?: (connected: boolean) => void;
@@ -11,7 +13,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; error?: string; botUsername?: string } | null>(null);
 
   // Form state
   const [channelName, setChannelName] = useState('Matrix');
@@ -24,6 +26,12 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<number>(0);
+  const [generatingCode, setGeneratingCode] = useState(false);
+
+  // Context policy state
+  const [contextPolicies, setContextPolicies] = useState<Record<ContextType, ContextPolicy>>({} as Record<ContextType, ContextPolicy>);
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   useEffect(() => {
     loadChannel();
@@ -54,6 +62,14 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
         // Load users for this channel
         const channelUsers = await window.electronAPI.getGatewayUsers(matrixChannel.id);
         setUsers(channelUsers);
+
+        // Load context policies
+        const policies = await window.electronAPI.listContextPolicies(matrixChannel.id);
+        const policyMap: Record<ContextType, ContextPolicy> = {} as Record<ContextType, ContextPolicy>;
+        for (const policy of policies) {
+          policyMap[policy.contextType as ContextType] = policy;
+        }
+        setContextPolicies(policyMap);
       }
     } catch (error) {
       console.error('Failed to load Matrix channel:', error);
@@ -169,10 +185,35 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
     if (!channel) return;
 
     try {
+      setGeneratingCode(true);
       const code = await window.electronAPI.generateGatewayPairing(channel.id, '');
       setPairingCode(code);
+      // Default TTL is 5 minutes (300 seconds)
+      setPairingExpiresAt(Date.now() + 5 * 60 * 1000);
     } catch (error: any) {
       console.error('Failed to generate pairing code:', error);
+    } finally {
+      setGeneratingCode(false);
+    }
+  };
+
+  const handlePolicyChange = async (contextType: ContextType, updates: Partial<ContextPolicy>) => {
+    if (!channel) return;
+
+    try {
+      setSavingPolicy(true);
+      const updated = await window.electronAPI.updateContextPolicy(channel.id, contextType, {
+        securityMode: updates.securityMode,
+        toolRestrictions: updates.toolRestrictions,
+      });
+      setContextPolicies(prev => ({
+        ...prev,
+        [contextType]: updated,
+      }));
+    } catch (error: any) {
+      console.error('Failed to update context policy:', error);
+    } finally {
+      setSavingPolicy(false);
     }
   };
 
@@ -201,30 +242,6 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
             Connect to a Matrix homeserver to receive and send messages. Matrix is a decentralized, open-source communication protocol.
           </p>
 
-          <div className="settings-callout info">
-            <strong>Setup Instructions:</strong>
-            <ol style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-              <li style={{ marginBottom: '8px' }}>
-                <strong>Get your Access Token:</strong><br />
-                <span style={{ fontSize: '13px' }}>
-                  In Element: Settings &gt; Help &amp; About &gt; Advanced &gt; Access Token
-                </span>
-              </li>
-              <li style={{ marginBottom: '8px' }}>
-                <strong>Find your User ID:</strong><br />
-                <span style={{ fontSize: '13px' }}>
-                  Format: @username:homeserver.org (shown in your profile)
-                </span>
-              </li>
-              <li style={{ marginBottom: '8px' }}>
-                <strong>Homeserver URL:</strong><br />
-                <span style={{ fontSize: '13px' }}>
-                  e.g., https://matrix.org or your self-hosted server
-                </span>
-              </li>
-            </ol>
-          </div>
-
           <div className="settings-field">
             <label>Channel Name</label>
             <input
@@ -237,7 +254,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>Homeserver URL *</label>
+            <label>Homeserver URL</label>
             <input
               type="text"
               className="settings-input"
@@ -251,7 +268,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>User ID *</label>
+            <label>User ID</label>
             <input
               type="text"
               className="settings-input"
@@ -265,7 +282,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>Access Token *</label>
+            <label>Access Token</label>
             <input
               type="password"
               className="settings-input"
@@ -279,7 +296,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>Device ID (optional)</label>
+            <label>Device ID (Optional)</label>
             <input
               type="text"
               className="settings-input"
@@ -290,7 +307,7 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>Room IDs (optional)</label>
+            <label>Room IDs (Optional)</label>
             <input
               type="text"
               className="settings-input"
@@ -310,151 +327,184 @@ export function MatrixSettings({ onStatusChange }: MatrixSettingsProps) {
               value={securityMode}
               onChange={(e) => setSecurityMode(e.target.value as SecurityMode)}
             >
-              <option value="open">Open (anyone can message)</option>
-              <option value="allowlist">Allowlist (specific users only)</option>
-              <option value="pairing">Pairing (require code to connect)</option>
+              <option value="pairing">Pairing Code (Recommended)</option>
+              <option value="allowlist">Allowlist Only</option>
+              <option value="open">Open (Anyone can use)</option>
             </select>
             <p className="settings-hint">
-              Controls who can interact with your bot via Matrix
+              {securityMode === 'pairing' && 'Users must enter a code generated in this app to use the bot'}
+              {securityMode === 'allowlist' && 'Only pre-approved Matrix user IDs can use the bot'}
+              {securityMode === 'open' && 'Anyone who messages the bot can use it (not recommended)'}
             </p>
           </div>
 
           {testResult && (
-            <div className={`settings-callout ${testResult.success ? 'success' : 'error'}`}>
-              {testResult.success ? 'Connection successful!' : testResult.error}
+            <div className={`test-result ${testResult.success ? 'success' : 'error'}`}>
+              {testResult.success ? (
+                <>✓ Connected as {testResult.botUsername}</>
+              ) : (
+                <>✗ {testResult.error}</>
+              )}
             </div>
           )}
 
           <button
-            className="settings-button primary"
+            className="button-primary"
             onClick={handleAddChannel}
-            disabled={saving || !channelName.trim() || !homeserver.trim() || !userId.trim() || !accessToken.trim()}
+            disabled={saving || !homeserver.trim() || !userId.trim() || !accessToken.trim()}
           >
-            {saving ? 'Connecting...' : 'Connect Matrix'}
+            {saving ? 'Adding...' : 'Add Matrix'}
           </button>
+        </div>
+
+        <div className="settings-section">
+          <h4>Setup Instructions</h4>
+          <ol className="setup-instructions">
+            <li>Open Element or your Matrix client</li>
+            <li>Go to Settings &gt; Help & About &gt; Advanced</li>
+            <li>Copy your Access Token</li>
+            <li>Find your User ID in your profile settings</li>
+            <li>Enter the homeserver URL and credentials above</li>
+          </ol>
         </div>
       </div>
     );
   }
 
-  // Channel exists - show management UI
+  // Channel is configured
   return (
     <div className="matrix-settings">
       <div className="settings-section">
-        <h3>Matrix</h3>
-        <p className="settings-description">
-          Manage your Matrix connection and access settings.
-        </p>
-
-        <div className="settings-status">
-          <div className="status-row">
-            <span className="status-label">Status:</span>
-            <span className={`status-value status-${channel.status}`}>
-              {channel.status === 'connected' ? 'Connected' :
-               channel.status === 'connecting' ? 'Connecting...' :
-               channel.status === 'error' ? 'Error' : 'Disconnected'}
-            </span>
-          </div>
-          {channel.botUsername && (
-            <div className="status-row">
-              <span className="status-label">User:</span>
-              <span className="status-value">{channel.botUsername}</span>
+        <div className="channel-header">
+          <div className="channel-info">
+            <h3>
+              {channel.name}
+              {channel.botUsername && <span className="bot-username">{channel.botUsername}</span>}
+            </h3>
+            <div className={`channel-status ${channel.status}`}>
+              {channel.status === 'connected' && '● Connected'}
+              {channel.status === 'connecting' && '○ Connecting...'}
+              {channel.status === 'disconnected' && '○ Disconnected'}
+              {channel.status === 'error' && '● Error'}
             </div>
-          )}
-        </div>
-
-        <div className="settings-actions">
-          <button
-            className={`settings-button ${channel.enabled ? 'danger' : 'primary'}`}
-            onClick={handleToggleEnabled}
-            disabled={saving}
-          >
-            {saving ? 'Updating...' : channel.enabled ? 'Disable' : 'Enable'}
-          </button>
-
-          <button
-            className="settings-button"
-            onClick={handleTestConnection}
-            disabled={testing || !channel.enabled}
-          >
-            {testing ? 'Testing...' : 'Test Connection'}
-          </button>
-
-          <button
-            className="settings-button danger"
-            onClick={handleRemoveChannel}
-            disabled={saving}
-          >
-            Remove Channel
-          </button>
+          </div>
+          <div className="channel-actions">
+            <button
+              className={channel.enabled ? 'button-secondary' : 'button-primary'}
+              onClick={handleToggleEnabled}
+              disabled={saving}
+            >
+              {channel.enabled ? 'Disable' : 'Enable'}
+            </button>
+            <button
+              className="button-secondary"
+              onClick={handleTestConnection}
+              disabled={testing || !channel.enabled}
+            >
+              {testing ? 'Testing...' : 'Test'}
+            </button>
+            <button
+              className="button-danger"
+              onClick={handleRemoveChannel}
+              disabled={saving}
+            >
+              Remove
+            </button>
+          </div>
         </div>
 
         {testResult && (
-          <div className={`settings-callout ${testResult.success ? 'success' : 'error'}`}>
-            {testResult.success ? 'Connection test successful!' : testResult.error}
-          </div>
-        )}
-      </div>
-
-      <div className="settings-section">
-        <h4>Security Settings</h4>
-
-        <div className="settings-field">
-          <label>Security Mode</label>
-          <select
-            className="settings-select"
-            value={securityMode}
-            onChange={(e) => handleUpdateSecurityMode(e.target.value as SecurityMode)}
-          >
-            <option value="open">Open (anyone can message)</option>
-            <option value="allowlist">Allowlist (specific users only)</option>
-            <option value="pairing">Pairing (require code to connect)</option>
-          </select>
-        </div>
-
-        {securityMode === 'pairing' && (
-          <div className="settings-field">
-            <label>Pairing Code</label>
-            {pairingCode ? (
-              <div className="pairing-code">
-                <code>{pairingCode}</code>
-                <p className="settings-hint">
-                  Share this code with users who want to connect. It expires in 5 minutes.
-                </p>
-              </div>
+          <div className={`test-result ${testResult.success ? 'success' : 'error'}`}>
+            {testResult.success ? (
+              <>✓ Connection successful</>
             ) : (
-              <button
-                className="settings-button"
-                onClick={handleGeneratePairingCode}
-              >
-                Generate Pairing Code
-              </button>
+              <>✗ {testResult.error}</>
             )}
           </div>
         )}
       </div>
 
-      {users.length > 0 && (
+      <div className="settings-section">
+        <h4>Security Mode</h4>
+        <select
+          className="settings-select"
+          value={securityMode}
+          onChange={(e) => handleUpdateSecurityMode(e.target.value as SecurityMode)}
+        >
+          <option value="pairing">Pairing Code</option>
+          <option value="allowlist">Allowlist Only</option>
+          <option value="open">Open</option>
+        </select>
+      </div>
+
+      {securityMode === 'pairing' && (
         <div className="settings-section">
-          <h4>Authorized Users</h4>
+          <h4>Generate Pairing Code</h4>
+          <p className="settings-description">
+            Generate a one-time code for a user to enter in Matrix to gain access.
+          </p>
+          {pairingCode && pairingExpiresAt > 0 ? (
+            <PairingCodeDisplay
+              code={pairingCode}
+              expiresAt={pairingExpiresAt}
+              onRegenerate={handleGeneratePairingCode}
+              isRegenerating={generatingCode}
+            />
+          ) : (
+            <button
+              className="button-secondary"
+              onClick={handleGeneratePairingCode}
+              disabled={generatingCode}
+            >
+              {generatingCode ? 'Generating...' : 'Generate Code'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Per-Context Security Policies (DM vs Group) */}
+      <div className="settings-section">
+        <h4>Context Policies</h4>
+        <p className="settings-description">
+          Configure different security settings for direct messages vs group chats.
+        </p>
+        <ContextPolicySettings
+          channelId={channel.id}
+          channelType="matrix"
+          policies={contextPolicies}
+          onPolicyChange={handlePolicyChange}
+          isSaving={savingPolicy}
+        />
+      </div>
+
+      <div className="settings-section">
+        <h4>Authorized Users</h4>
+        {users.length === 0 ? (
+          <p className="settings-description">No users have connected yet.</p>
+        ) : (
           <div className="users-list">
             {users.map((user) => (
               <div key={user.id} className="user-item">
                 <div className="user-info">
                   <span className="user-name">{user.displayName}</span>
-                  <span className="user-id">{user.channelUserId}</span>
+                  {user.username && <span className="user-username">{user.username}</span>}
+                  <span className={`user-status ${user.allowed ? 'allowed' : 'pending'}`}>
+                    {user.allowed ? '✓ Allowed' : '○ Pending'}
+                  </span>
                 </div>
-                <button
-                  className="settings-button small danger"
-                  onClick={() => handleRevokeAccess(user.channelUserId)}
-                >
-                  Revoke
-                </button>
+                {user.allowed && (
+                  <button
+                    className="button-small button-danger"
+                    onClick={() => handleRevokeAccess(user.channelUserId)}
+                  >
+                    Revoke
+                  </button>
+                )}
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

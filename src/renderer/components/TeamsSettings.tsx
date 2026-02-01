@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ChannelData, ChannelUserData, SecurityMode } from '../../shared/types';
+import { ChannelData, ChannelUserData, SecurityMode, ContextType, ContextPolicy } from '../../shared/types';
+import { PairingCodeDisplay } from './PairingCodeDisplay';
+import { ContextPolicySettings } from './ContextPolicySettings';
 
 interface TeamsSettingsProps {
   onStatusChange?: (connected: boolean) => void;
@@ -23,6 +25,12 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<number>(0);
+  const [generatingCode, setGeneratingCode] = useState(false);
+
+  // Context policy state
+  const [contextPolicies, setContextPolicies] = useState<Record<ContextType, ContextPolicy>>({} as Record<ContextType, ContextPolicy>);
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   useEffect(() => {
     loadChannel();
@@ -43,6 +51,14 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
         // Load users for this channel
         const channelUsers = await window.electronAPI.getGatewayUsers(teamsChannel.id);
         setUsers(channelUsers);
+
+        // Load context policies
+        const policies = await window.electronAPI.listContextPolicies(teamsChannel.id);
+        const policyMap: Record<ContextType, ContextPolicy> = {} as Record<ContextType, ContextPolicy>;
+        for (const policy of policies) {
+          policyMap[policy.contextType as ContextType] = policy;
+        }
+        setContextPolicies(policyMap);
       }
     } catch (error) {
       console.error('Failed to load Teams channel:', error);
@@ -152,10 +168,35 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
     if (!channel) return;
 
     try {
+      setGeneratingCode(true);
       const code = await window.electronAPI.generateGatewayPairing(channel.id, '');
       setPairingCode(code);
+      // Default TTL is 5 minutes (300 seconds)
+      setPairingExpiresAt(Date.now() + 5 * 60 * 1000);
     } catch (error: any) {
       console.error('Failed to generate pairing code:', error);
+    } finally {
+      setGeneratingCode(false);
+    }
+  };
+
+  const handlePolicyChange = async (contextType: ContextType, updates: Partial<ContextPolicy>) => {
+    if (!channel) return;
+
+    try {
+      setSavingPolicy(true);
+      const updated = await window.electronAPI.updateContextPolicy(channel.id, contextType, {
+        securityMode: updates.securityMode,
+        toolRestrictions: updates.toolRestrictions,
+      });
+      setContextPolicies(prev => ({
+        ...prev,
+        [contextType]: updated,
+      }));
+    } catch (error: any) {
+      console.error('Failed to update context policy:', error);
+    } finally {
+      setSavingPolicy(false);
     }
   };
 
@@ -272,9 +313,9 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
           {testResult && (
             <div className={`test-result ${testResult.success ? 'success' : 'error'}`}>
               {testResult.success ? (
-                <>Connected as {testResult.botUsername}</>
+                <>✓ Connected as {testResult.botUsername}</>
               ) : (
-                <>{testResult.error}</>
+                <>✗ {testResult.error}</>
               )}
             </div>
           )}
@@ -332,10 +373,10 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
               {channel.botUsername && <span className="bot-username">@{channel.botUsername}</span>}
             </h3>
             <div className={`channel-status ${channel.status}`}>
-              {channel.status === 'connected' && 'Connected'}
-              {channel.status === 'connecting' && 'Connecting...'}
-              {channel.status === 'disconnected' && 'Disconnected'}
-              {channel.status === 'error' && 'Error'}
+              {channel.status === 'connected' && '● Connected'}
+              {channel.status === 'connecting' && '○ Connecting...'}
+              {channel.status === 'disconnected' && '○ Disconnected'}
+              {channel.status === 'error' && '● Error'}
             </div>
           </div>
           <div className="channel-actions">
@@ -366,9 +407,9 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
         {testResult && (
           <div className={`test-result ${testResult.success ? 'success' : 'error'}`}>
             {testResult.success ? (
-              <>Connection successful</>
+              <>✓ Connection successful</>
             ) : (
-              <>{testResult.error}</>
+              <>✗ {testResult.error}</>
             )}
           </div>
         )}
@@ -393,22 +434,39 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
           <p className="settings-description">
             Generate a one-time code for a user to enter in Teams to gain access.
           </p>
-          <button
-            className="button-secondary"
-            onClick={handleGeneratePairingCode}
-          >
-            Generate Code
-          </button>
-          {pairingCode && (
-            <div className="pairing-code-display">
-              <span className="pairing-code">{pairingCode}</span>
-              <p className="settings-hint">
-                User should send /pair with this code within 5 minutes
-              </p>
-            </div>
+          {pairingCode && pairingExpiresAt > 0 ? (
+            <PairingCodeDisplay
+              code={pairingCode}
+              expiresAt={pairingExpiresAt}
+              onRegenerate={handleGeneratePairingCode}
+              isRegenerating={generatingCode}
+            />
+          ) : (
+            <button
+              className="button-secondary"
+              onClick={handleGeneratePairingCode}
+              disabled={generatingCode}
+            >
+              {generatingCode ? 'Generating...' : 'Generate Code'}
+            </button>
           )}
         </div>
       )}
+
+      {/* Per-Context Security Policies (DM vs Group) */}
+      <div className="settings-section">
+        <h4>Context Policies</h4>
+        <p className="settings-description">
+          Configure different security settings for direct messages vs group chats.
+        </p>
+        <ContextPolicySettings
+          channelId={channel.id}
+          channelType="teams"
+          policies={contextPolicies}
+          onPolicyChange={handlePolicyChange}
+          isSaving={savingPolicy}
+        />
+      </div>
 
       <div className="settings-section">
         <h4>Authorized Users</h4>
@@ -422,7 +480,7 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
                   <span className="user-name">{user.displayName}</span>
                   {user.username && <span className="user-username">@{user.username}</span>}
                   <span className={`user-status ${user.allowed ? 'allowed' : 'pending'}`}>
-                    {user.allowed ? 'Allowed' : 'Pending'}
+                    {user.allowed ? '✓ Allowed' : '○ Pending'}
                   </span>
                 </div>
                 {user.allowed && (
