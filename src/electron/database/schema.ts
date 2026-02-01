@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { app } from 'electron';
 
 export class DatabaseManager {
@@ -7,9 +8,131 @@ export class DatabaseManager {
 
   constructor() {
     const userDataPath = app.getPath('userData');
+
+    // Run migration from old cowork-oss directory before opening database
+    this.migrateFromLegacyDirectory(userDataPath);
+
     const dbPath = path.join(userDataPath, 'cowork-os.db');
     this.db = new Database(dbPath);
     this.initializeSchema();
+  }
+
+  /**
+   * Migrate data from the old cowork-oss directory to the new cowork-os directory.
+   * This ensures users don't lose their data when upgrading.
+   */
+  private migrateFromLegacyDirectory(newDataPath: string): void {
+    // Determine the old directory path
+    // If new path ends with 'cowork-os', old path would be 'cowork-oss'
+    const oldDataPath = newDataPath.replace(/cowork-os$/, 'cowork-oss');
+
+    // Check if old directory exists
+    if (!fs.existsSync(oldDataPath)) {
+      return; // No legacy data to migrate
+    }
+
+    // Check if migration is needed (new database doesn't exist or is empty)
+    const newDbPath = path.join(newDataPath, 'cowork-os.db');
+    const oldDbPath = path.join(oldDataPath, 'cowork-oss.db');
+
+    // Skip if already migrated (check for migration marker file)
+    const migrationMarker = path.join(newDataPath, '.migrated-from-cowork-oss');
+    if (fs.existsSync(migrationMarker)) {
+      return; // Already migrated
+    }
+
+    console.log('[DatabaseManager] Migrating data from cowork-oss to cowork-os...');
+
+    try {
+      // Ensure new directory exists
+      if (!fs.existsSync(newDataPath)) {
+        fs.mkdirSync(newDataPath, { recursive: true });
+      }
+
+      // 1. Migrate database if old exists and new doesn't (or new is smaller/empty)
+      if (fs.existsSync(oldDbPath)) {
+        const shouldMigrateDb = !fs.existsSync(newDbPath) ||
+          (fs.statSync(oldDbPath).size > fs.statSync(newDbPath).size);
+
+        if (shouldMigrateDb) {
+          console.log('[DatabaseManager] Copying database from legacy directory...');
+          fs.copyFileSync(oldDbPath, newDbPath);
+        }
+      }
+
+      // 2. Migrate settings files
+      const settingsFiles = [
+        'appearance-settings.json',
+        'builtin-tools-settings.json',
+        'claude-auth.enc',
+        'control-plane-settings.json',
+        'guardrail-settings.json',
+        'hooks-settings.json',
+        'llm-settings.json',
+        'mcp-settings.json',
+        'personality-settings.json',
+        'search-settings.json',
+      ];
+
+      for (const file of settingsFiles) {
+        const oldFile = path.join(oldDataPath, file);
+        const newFile = path.join(newDataPath, file);
+
+        if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) {
+          console.log(`[DatabaseManager] Migrating ${file}...`);
+          fs.copyFileSync(oldFile, newFile);
+        }
+      }
+
+      // 3. Migrate directories (skills, whatsapp-auth, cron)
+      const directories = ['skills', 'whatsapp-auth', 'cron', 'canvas', 'notifications'];
+
+      for (const dir of directories) {
+        const oldDir = path.join(oldDataPath, dir);
+        const newDir = path.join(newDataPath, dir);
+
+        if (fs.existsSync(oldDir) && fs.statSync(oldDir).isDirectory()) {
+          // Only copy if new directory doesn't exist or is empty
+          const newDirEmpty = !fs.existsSync(newDir) ||
+            (fs.readdirSync(newDir).length === 0);
+
+          if (newDirEmpty) {
+            console.log(`[DatabaseManager] Migrating ${dir}/ directory...`);
+            this.copyDirectoryRecursive(oldDir, newDir);
+          }
+        }
+      }
+
+      // Create migration marker to prevent re-migration
+      fs.writeFileSync(migrationMarker, new Date().toISOString());
+
+      console.log('[DatabaseManager] Migration from cowork-oss completed successfully.');
+    } catch (error) {
+      console.error('[DatabaseManager] Migration failed:', error);
+      // Don't throw - allow app to continue with fresh data
+    }
+  }
+
+  /**
+   * Recursively copy a directory
+   */
+  private copyDirectoryRecursive(src: string, dest: string): void {
+    if (!fs.existsSync(dest)) {
+      fs.mkdirSync(dest, { recursive: true });
+    }
+
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+
+      if (entry.isDirectory()) {
+        this.copyDirectoryRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
   }
 
   private initializeSchema() {
