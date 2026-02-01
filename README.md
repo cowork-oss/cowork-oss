@@ -63,6 +63,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 ### Connect from Anywhere
 
 - Message your AI from WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, or Email
+- **Mobile Companions**: iOS and Android apps for on-the-go access via local network
 - Schedule recurring tasks with cron expressions
 - Secure remote access via Tailscale or SSH tunnels
 - WebSocket API for custom integrations
@@ -1104,6 +1105,59 @@ Press **⌘⇧Space** from anywhere to open a floating input window:
 
 ---
 
+## Mobile Companions (iOS/Android)
+
+Access CoWork OS from your iPhone, iPad, or Android device via the local network.
+
+### Prerequisites
+
+- CoWork OS running on your Mac
+- Mobile device on the same local network (WiFi)
+- Control Plane enabled with LAN access
+
+### Setting Up Mobile Access
+
+1. **Enable Control Plane**:
+   - Open **Settings** > **Control Plane**
+   - Check **Enable Control Plane**
+   - Check **Allow LAN Connections (Mobile Companions)**
+
+2. **Get Connection Details**:
+   - Note your Mac's local IP address (shown in Control Plane settings or run `ipconfig getifaddr en0`)
+   - Copy the authentication token (click **Show** then **Copy**)
+
+3. **Connect from Mobile App**:
+   - Enter server URL: `ws://<your-mac-ip>:18789` (e.g., `ws://192.168.1.100:18789`)
+   - Enter authentication token
+   - Tap **Connect**
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Task Creation** | Create and run tasks from your mobile device |
+| **Real-time Updates** | See task progress and results in real-time |
+| **Workspace Selection** | Switch between workspaces |
+| **Secure Authentication** | Token-based authentication protects access |
+
+### Security Considerations
+
+- **LAN Only**: Mobile companions connect via local network only (not exposed to internet)
+- **Token Required**: Each connection requires the authentication token
+- **Firewall**: Ensure your Mac's firewall allows connections on port 18789
+- **Same Network**: Mobile device must be on the same WiFi network as your Mac
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Cannot connect | Verify "Allow LAN Connections" is enabled and restart the server |
+| Connection refused | Check firewall settings, ensure port 18789 is accessible |
+| Authentication failed | Regenerate and re-enter the authentication token |
+| Server not found | Verify Mac's IP address, ensure both devices are on same network |
+
+---
+
 ## Web Search Integration
 
 Multi-provider web search for research tasks.
@@ -1283,7 +1337,7 @@ Browse and install servers from a catalog with one-click installation.
 
 ## WebSocket Control Plane
 
-Programmatic API for external automation.
+Programmatic API for external automation and mobile companion apps.
 
 ### Features
 
@@ -1292,6 +1346,16 @@ Programmatic API for external automation.
 - Rate limiting for auth attempts
 - Full task API (create, list, get, cancel)
 - Real-time event streaming
+- **LAN Access**: Enable "Allow LAN Connections" for mobile companion support
+
+### Connection Modes
+
+| Mode | Binding | Use Case |
+|------|---------|----------|
+| **Local Only** | `127.0.0.1:18789` | Desktop automation, localhost only |
+| **LAN Access** | `0.0.0.0:18789` | Mobile companions, local network access |
+
+Configure in **Settings** > **Control Plane**.
 
 ---
 
@@ -1345,6 +1409,7 @@ Users must comply with their model provider's terms:
 - [x] Per-context security policies (DM vs group)
 - [x] Enhanced pairing code UI with countdown
 - [x] Persistent memory system with privacy protection
+- [x] Mobile Companions with LAN access support
 
 ### Planned
 
