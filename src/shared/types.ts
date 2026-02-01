@@ -8,6 +8,7 @@ export interface AppearanceSettings {
   themeMode: ThemeMode;
   accentColor: AccentColor;
   disclaimerAccepted?: boolean;
+  onboardingCompleted?: boolean;
 }
 
 // Tray (Menu Bar) Settings

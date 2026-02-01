@@ -4,6 +4,7 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { Settings } from './components/Settings';
 import { DisclaimerModal } from './components/DisclaimerModal';
+import { OnboardingModal } from './components/OnboardingModal';
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
@@ -55,11 +56,21 @@ export function App() {
 
   // Disclaimer state (null = loading)
   const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
+  // Onboarding state (null = loading)
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
 
   const handleDisclaimerAccept = (dontShowAgain: boolean) => {
     // Save to main process for persistence
     window.electronAPI.saveAppearanceSettings({ disclaimerAccepted: dontShowAgain });
     setDisclaimerAccepted(true);
+  };
+
+  const handleOnboardingComplete = () => {
+    // Save to main process for persistence
+    window.electronAPI.saveAppearanceSettings({ onboardingCompleted: true });
+    setOnboardingCompleted(true);
+    // Refresh LLM config after onboarding (user may have configured a provider)
+    loadLLMConfig();
   };
 
   // Load LLM config status
@@ -87,9 +98,11 @@ export function App() {
         setThemeMode(settings.themeMode);
         setAccentColor(settings.accentColor);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
+        setOnboardingCompleted(settings.onboardingCompleted ?? false);
       } catch (error) {
         console.error('Failed to load appearance settings:', error);
         setDisclaimerAccepted(false);
+        setOnboardingCompleted(false);
       }
     };
     loadAppearanceSettings();
@@ -484,8 +497,8 @@ export function App() {
     window.electronAPI.saveAppearanceSettings({ themeMode, accentColor: accent });
   };
 
-  // Show loading state while checking disclaimer status
-  if (disclaimerAccepted === null) {
+  // Show loading state while checking disclaimer/onboarding status
+  if (disclaimerAccepted === null || onboardingCompleted === null) {
     return (
       <div className="app">
         <div className="title-bar" />
@@ -499,6 +512,22 @@ export function App() {
       <div className="app">
         <div className="title-bar" />
         <DisclaimerModal onAccept={handleDisclaimerAccept} />
+      </div>
+    );
+  }
+
+  // Show onboarding modal after disclaimer is accepted but before main app
+  if (!onboardingCompleted) {
+    return (
+      <div className="app">
+        <div className="title-bar" />
+        <OnboardingModal
+          onComplete={handleOnboardingComplete}
+          themeMode={themeMode}
+          accentColor={accentColor}
+          onThemeChange={handleThemeChange}
+          onAccentChange={handleAccentChange}
+        />
       </div>
     );
   }
