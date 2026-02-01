@@ -1859,8 +1859,9 @@ ${skillDescriptions}`;
       {
         name: 'web_search',
         description:
-          `Search the web for information using search engines. Use this to FIND relevant URLs/pages on a topic. ` +
-          `NOTE: If you already have a specific URL to read, use web_fetch instead - it directly fetches the content. ` +
+          `Search the web for information. This is the PRIMARY tool for research tasks - finding news, trends, discussions, and information on any topic. ` +
+          `Use this FIRST for research, then use web_fetch if you need to read specific URLs from the results. ` +
+          `Do NOT use browser_navigate for research - web_search is faster and more efficient. ` +
           `Configured providers: ${configuredProviders.map((p) => p.name).join(', ')}`,
         input_schema: {
           type: 'object',

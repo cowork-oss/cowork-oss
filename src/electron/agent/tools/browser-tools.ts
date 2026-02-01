@@ -42,8 +42,9 @@ export class BrowserTools {
         name: 'browser_navigate',
         description:
           'Navigate the browser to a URL. Opens the browser if not already open. ' +
-          'NOTE: For simply reading web content, prefer using web_fetch instead - it is faster and lighter. ' +
-          'Use browser_navigate only when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.',
+          'NOTE: For RESEARCH tasks (finding news, trends, discussions), use web_search instead - it aggregates results from multiple sources. ' +
+          'For simply reading a specific URL, use web_fetch - it is faster and lighter. ' +
+          'Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.',
         input_schema: {
           type: 'object' as const,
           properties: {
@@ -81,8 +82,9 @@ export class BrowserTools {
         name: 'browser_get_content',
         description:
           'Get the text content, links, and forms from the current page. ' +
-          'NOTE: If you just need to read a URL, use web_fetch instead - it is faster and does not require opening a browser. ' +
-          'Use this only after browser_navigate when you need rendered page content or to inspect forms/links for interaction.',
+          'NOTE: For RESEARCH tasks, use web_search first - it is more efficient for finding information across multiple sources. ' +
+          'If you just need to read a specific URL, use web_fetch - it is faster and does not require opening a browser. ' +
+          'Use this only after browser_navigate when you need JavaScript-rendered content or to inspect forms/links for interaction.',
         input_schema: {
           type: 'object' as const,
           properties: {}
