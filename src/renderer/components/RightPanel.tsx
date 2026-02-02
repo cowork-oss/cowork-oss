@@ -251,7 +251,7 @@ export function RightPanel({ task, workspace, events, tasks = [], queueStatus, o
               <div className="cli-empty-state">
                 <div className="cli-ascii-box">
                   ┌─────────────────────┐
-                  │   {task?.status === 'executing' ? '◉ WORKING...' : task?.status === 'completed' ? '✓ ALL DONE' : '○ READY'}{'     '}│
+                  │   {task?.status === 'executing' ? '◉ WORKING...' : task?.status === 'paused' ? '⏸ PAUSED' : task?.status === 'blocked' ? '! BLOCKED' : task?.status === 'completed' ? '✓ ALL DONE' : '○ READY'}{'     '}│
                   └─────────────────────┘
                 </div>
                 <p className="cli-hint"># standing by...</p>

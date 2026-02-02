@@ -73,6 +73,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
       case 'pdf': return '📕';
       case 'image': return '🖼️';
       case 'pptx': return '📊';
+      case 'html': return '🌐';
       default: return '📁';
     }
   };
@@ -104,6 +105,16 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
           <div
             className="file-viewer-docx"
             dangerouslySetInnerHTML={{ __html: fileData.htmlContent || '' }}
+          />
+        );
+
+      case 'html':
+        return (
+          <iframe
+            className="file-viewer-html"
+            srcDoc={fileData.htmlContent || ''}
+            sandbox="allow-same-origin"
+            title={fileData.fileName}
           />
         );
 

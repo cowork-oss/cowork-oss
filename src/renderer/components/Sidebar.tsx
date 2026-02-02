@@ -141,6 +141,10 @@ export function Sidebar({
     switch (status) {
       case 'completed':
         return '[✓]';
+      case 'paused':
+        return '[P]';
+      case 'blocked':
+        return '[!]';
       case 'failed':
       case 'cancelled':
         return '[✗]';
@@ -156,6 +160,10 @@ export function Sidebar({
     switch (status) {
       case 'completed':
         return 'completed';
+      case 'paused':
+        return 'paused';
+      case 'blocked':
+        return 'blocked';
       case 'failed':
       case 'cancelled':
         return 'failed';

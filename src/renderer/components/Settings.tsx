@@ -30,10 +30,13 @@ import { ControlPlaneSettings } from './ControlPlaneSettings';
 import { PersonalitySettings } from './PersonalitySettings';
 import { NodesSettings } from './NodesSettings';
 import { ExtensionsSettings } from './ExtensionsSettings';
-import { AgentSquadSettings } from './AgentSquadSettings';
 import { VoiceSettings } from './VoiceSettings';
+import { MissionControlPanel } from './MissionControlPanel';
 
-type SettingsTab = 'appearance' | 'personality' | 'squad' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams' | 'googlechat' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions';
+type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'morechannels' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions';
+
+// Secondary channels shown inside "More Channels" tab
+type SecondaryChannel = 'discord' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'googlechat';
 
 interface SettingsProps {
   onBack: () => void;
@@ -233,25 +236,16 @@ function SearchableSelect({ options, value, onChange, placeholder = 'Select...',
 const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: React.ReactNode; macOnly?: boolean }> = [
   { tab: 'appearance', label: 'Appearance', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg> },
   { tab: 'personality', label: 'Personality', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" /></svg> },
-  { tab: 'squad', label: 'Agent Squad', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="7" r="4" /><path d="M17 7a4 4 0 0 1 0 8" /><path d="M9 15a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z" /></svg> },
+  { tab: 'missioncontrol', label: 'Mission Control', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="7" r="4" /><path d="M17 7a4 4 0 0 1 0 8" /><path d="M9 15a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z" /><rect x="14" y="14" width="8" height="8" rx="1" /></svg> },
   { tab: 'tray', label: 'Menu Bar', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="4" rx="1" /><path d="M12 7v4M8 11h8" /><rect x="4" y="14" width="16" height="7" rx="1" /></svg>, macOnly: true },
   { tab: 'voice', label: 'Voice Mode', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg> },
   { tab: 'llm', label: 'LLM Provider', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg> },
   { tab: 'search', label: 'Web Search', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg> },
   { tab: 'whatsapp', label: 'WhatsApp', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg> },
   { tab: 'telegram', label: 'Telegram', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg> },
-  { tab: 'discord', label: 'Discord', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> },
   { tab: 'slack', label: 'Slack', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z" /><path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" /><path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z" /><path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z" /><path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z" /><path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z" /><path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z" /><path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z" /></svg> },
-  { tab: 'imessage', label: 'iMessage', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><circle cx="9" cy="10" r="1" fill="currentColor" /><circle cx="15" cy="10" r="1" fill="currentColor" /></svg> },
-  { tab: 'signal', label: 'Signal', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg> },
-  { tab: 'mattermost', label: 'Mattermost', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 9h6v6H9z" /></svg> },
-  { tab: 'matrix', label: 'Matrix', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 7h10M7 12h10M7 17h10" /></svg> },
-  { tab: 'twitch', label: 'Twitch', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2H3v16h5v4l4-4h5l4-4V2zM11 11V7M16 11V7" /></svg> },
-  { tab: 'line', label: 'LINE', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C6.48 2 2 5.92 2 10.73c0 3.21 2.11 6.01 5.24 7.52-.06.5-.32 1.83-.37 2.11 0 0-.08.29.15.4.23.11.49.01.49.01 3.1-2.05 3.59-2.32 4.49-2.32 5.52 0 10-3.92 10-8.72C22 5.92 17.52 2 12 2z" /></svg> },
-  { tab: 'bluebubbles', label: 'BlueBubbles', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg> },
-  { tab: 'email', label: 'Email', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 6l-10 7L2 6" /></svg> },
   { tab: 'teams', label: 'Teams', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg> },
-  { tab: 'googlechat', label: 'Google Chat', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><circle cx="8" cy="10" r="1" fill="currentColor" /><circle cx="12" cy="10" r="1" fill="currentColor" /><circle cx="16" cy="10" r="1" fill="currentColor" /></svg> },
+  { tab: 'morechannels', label: 'More Channels', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg> },
   { tab: 'guardrails', label: 'Guardrails', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg> },
   { tab: 'queue', label: 'Task Queue', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="4" rx="1" /><rect x="3" y="10" width="18" height="4" rx="1" /><rect x="3" y="16" width="18" height="4" rx="1" /></svg> },
   { tab: 'skills', label: 'Custom Skills', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg> },
@@ -266,8 +260,23 @@ const sidebarItems: Array<{ tab: SettingsTab; label: string; icon: React.ReactNo
   { tab: 'updates', label: 'Updates', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 11-6.219-8.56" /><polyline points="21 3 21 9 15 9" /></svg> },
 ];
 
+// Secondary channel configuration for "More Channels" tab
+const secondaryChannelItems: Array<{ key: SecondaryChannel; label: string; icon: React.ReactNode }> = [
+  { key: 'discord', label: 'Discord', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> },
+  { key: 'imessage', label: 'iMessage', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><circle cx="9" cy="10" r="1" fill="currentColor" /><circle cx="15" cy="10" r="1" fill="currentColor" /></svg> },
+  { key: 'signal', label: 'Signal', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg> },
+  { key: 'line', label: 'LINE', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C6.48 2 2 5.92 2 10.73c0 3.21 2.11 6.01 5.24 7.52-.06.5-.32 1.83-.37 2.11 0 0-.08.29.15.4.23.11.49.01.49.01 3.1-2.05 3.59-2.32 4.49-2.32 5.52 0 10-3.92 10-8.72C22 5.92 17.52 2 12 2z" /></svg> },
+  { key: 'email', label: 'Email', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 6l-10 7L2 6" /></svg> },
+  { key: 'googlechat', label: 'Google Chat', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><circle cx="8" cy="10" r="1" fill="currentColor" /><circle cx="12" cy="10" r="1" fill="currentColor" /><circle cx="16" cy="10" r="1" fill="currentColor" /></svg> },
+  { key: 'mattermost', label: 'Mattermost', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 9h6v6H9z" /></svg> },
+  { key: 'matrix', label: 'Matrix', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 7h10M7 12h10M7 17h10" /></svg> },
+  { key: 'twitch', label: 'Twitch', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2H3v16h5v4l4-4h5l4-4V2zM11 11V7M16 11V7" /></svg> },
+  { key: 'bluebubbles', label: 'BlueBubbles', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg> },
+];
+
 export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, onThemeChange, onAccentChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>('discord');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [settings, setSettings] = useState<LLMSettingsData>({
     providerType: 'anthropic',
@@ -789,40 +798,51 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
             />
           ) : activeTab === 'personality' ? (
             <PersonalitySettings onSettingsChanged={onSettingsChanged} />
-          ) : activeTab === 'squad' ? (
-            <AgentSquadSettings onSettingsChanged={onSettingsChanged} />
+          ) : activeTab === 'missioncontrol' ? (
+            <MissionControlPanel />
           ) : activeTab === 'tray' ? (
             <TraySettings />
           ) : activeTab === 'voice' ? (
             <VoiceSettings />
           ) : activeTab === 'telegram' ? (
             <TelegramSettings />
-          ) : activeTab === 'discord' ? (
-            <DiscordSettings />
           ) : activeTab === 'slack' ? (
             <SlackSettings />
           ) : activeTab === 'whatsapp' ? (
             <WhatsAppSettings />
-          ) : activeTab === 'imessage' ? (
-            <ImessageSettings />
-          ) : activeTab === 'signal' ? (
-            <SignalSettings />
-          ) : activeTab === 'mattermost' ? (
-            <MattermostSettings />
-          ) : activeTab === 'matrix' ? (
-            <MatrixSettings />
-          ) : activeTab === 'twitch' ? (
-            <TwitchSettings />
-          ) : activeTab === 'line' ? (
-            <LineSettings />
-          ) : activeTab === 'bluebubbles' ? (
-            <BlueBubblesSettings />
-          ) : activeTab === 'email' ? (
-            <EmailSettings />
           ) : activeTab === 'teams' ? (
             <TeamsSettings />
-          ) : activeTab === 'googlechat' ? (
-            <GoogleChatSettings />
+          ) : activeTab === 'morechannels' ? (
+            <div className="more-channels-panel">
+              <div className="more-channels-header">
+                <h2>More Channels</h2>
+                <p className="settings-description">Configure additional messaging platforms and integrations</p>
+              </div>
+              <div className="more-channels-tabs">
+                {secondaryChannelItems.map(item => (
+                  <button
+                    key={item.key}
+                    className={`more-channels-tab ${activeSecondaryChannel === item.key ? 'active' : ''}`}
+                    onClick={() => setActiveSecondaryChannel(item.key)}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="more-channels-content">
+                {activeSecondaryChannel === 'discord' && <DiscordSettings />}
+                {activeSecondaryChannel === 'imessage' && <ImessageSettings />}
+                {activeSecondaryChannel === 'signal' && <SignalSettings />}
+                {activeSecondaryChannel === 'mattermost' && <MattermostSettings />}
+                {activeSecondaryChannel === 'matrix' && <MatrixSettings />}
+                {activeSecondaryChannel === 'twitch' && <TwitchSettings />}
+                {activeSecondaryChannel === 'line' && <LineSettings />}
+                {activeSecondaryChannel === 'bluebubbles' && <BlueBubblesSettings />}
+                {activeSecondaryChannel === 'email' && <EmailSettings />}
+                {activeSecondaryChannel === 'googlechat' && <GoogleChatSettings />}
+              </div>
+            </div>
           ) : activeTab === 'search' ? (
             <SearchSettings />
           ) : activeTab === 'updates' ? (

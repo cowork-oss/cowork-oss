@@ -47,6 +47,14 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return '🛑';
       case 'approval_requested':
         return '⚠️';
+      case 'approval_granted':
+        return '✅';
+      case 'approval_denied':
+        return '⛔';
+      case 'task_paused':
+        return '⏸️';
+      case 'task_resumed':
+        return '▶️';
       case 'executing':
         return '⚡';
       case 'task_completed':
@@ -84,6 +92,14 @@ export function TaskTimeline({ events }: TaskTimelineProps) {
         return 'Session stopped';
       case 'approval_requested':
         return `Need your input: ${event.payload.approval?.description}`;
+      case 'approval_granted':
+        return 'Approval granted';
+      case 'approval_denied':
+        return 'Approval denied';
+      case 'task_paused':
+        return event.payload.message || 'Paused - waiting for input';
+      case 'task_resumed':
+        return 'Resumed';
       case 'executing':
         return event.payload.message || 'Working on it';
       case 'task_completed':

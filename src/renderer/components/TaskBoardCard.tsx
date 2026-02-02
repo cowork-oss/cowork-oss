@@ -309,6 +309,16 @@ export function TaskBoardCard({
           color: #22c55e;
         }
 
+        .card-status.status-paused {
+          background: #f59e0b20;
+          color: #f59e0b;
+        }
+
+        .card-status.status-blocked {
+          background: #f59e0b20;
+          color: #f59e0b;
+        }
+
         .card-status.status-failed {
           background: #ef444420;
           color: #ef4444;

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS } from '../../shared/types';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
@@ -291,6 +292,8 @@ function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled
 const markdownComponents = {
   code: CodeBlock,
 };
+
+const userMarkdownPlugins = [remarkGfm, remarkBreaks];
 
 // Searchable Model Dropdown Component
 interface ModelDropdownProps {
@@ -1595,7 +1598,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
           {/* User Prompt - Right aligned like chat */}
           <div className="chat-message user-message">
             <div className="chat-bubble user-bubble markdown-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
                 {task.prompt}
               </ReactMarkdown>
             </div>
@@ -1653,7 +1656,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                     <Fragment key={event.id || `event-${index}`}>
                       <div className="chat-message user-message">
                         <div className="chat-bubble user-bubble markdown-content">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                          <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
                             {messageText}
                           </ReactMarkdown>
                         </div>
