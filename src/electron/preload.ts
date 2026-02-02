@@ -267,6 +267,7 @@ const IPC_CHANNELS = {
   AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
   AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
   AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
+  AGENT_ROLE_SYNC_DEFAULTS: 'agentRole:syncDefaults',
   // Activity Feed
   ACTIVITY_LIST: 'activity:list',
   ACTIVITY_CREATE: 'activity:create',
@@ -323,6 +324,25 @@ const IPC_CHANNELS = {
   VOICE_TEST_OPENAI: 'voice:testOpenAI',
   VOICE_TEST_AZURE: 'voice:testAzure',
   VOICE_EVENT: 'voice:event',
+  // Mission Control - Heartbeat
+  HEARTBEAT_GET_CONFIG: 'heartbeat:getConfig',
+  HEARTBEAT_UPDATE_CONFIG: 'heartbeat:updateConfig',
+  HEARTBEAT_TRIGGER: 'heartbeat:trigger',
+  HEARTBEAT_GET_STATUS: 'heartbeat:getStatus',
+  HEARTBEAT_GET_ALL_STATUS: 'heartbeat:getAllStatus',
+  HEARTBEAT_EVENT: 'heartbeat:event',
+  // Mission Control - Task Subscriptions
+  SUBSCRIPTION_LIST: 'subscription:list',
+  SUBSCRIPTION_ADD: 'subscription:add',
+  SUBSCRIPTION_REMOVE: 'subscription:remove',
+  SUBSCRIPTION_GET_SUBSCRIBERS: 'subscription:getSubscribers',
+  SUBSCRIPTION_GET_FOR_AGENT: 'subscription:getForAgent',
+  SUBSCRIPTION_EVENT: 'subscription:event',
+  // Mission Control - Standup Reports
+  STANDUP_GENERATE: 'standup:generate',
+  STANDUP_GET_LATEST: 'standup:getLatest',
+  STANDUP_LIST: 'standup:list',
+  STANDUP_DELIVER: 'standup:deliver',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1033,6 +1053,8 @@ interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
+type AgentAutonomyLevel = 'intern' | 'specialist' | 'lead';
+
 interface AgentRoleData {
   id: string;
   name: string;
@@ -1051,6 +1073,14 @@ interface AgentRoleData {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;
+  soul?: string;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
+  lastHeartbeatAt?: number;
+  heartbeatStatus?: HeartbeatStatus;
 }
 
 interface CreateAgentRoleRequest {
@@ -1065,6 +1095,12 @@ interface CreateAgentRoleRequest {
   systemPrompt?: string;
   capabilities: AgentCapability[];
   toolRestrictions?: AgentToolRestrictions;
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;
+  soul?: string;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
 }
 
 interface UpdateAgentRoleRequest {
@@ -1081,6 +1117,12 @@ interface UpdateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   isActive?: boolean;
   sortOrder?: number;
+  // Mission Control fields
+  autonomyLevel?: AgentAutonomyLevel;
+  soul?: string;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMinutes?: number;
+  heartbeatStaggerOffset?: number;
 }
 
 // Activity Feed types (inlined for sandboxed preload)
@@ -1189,6 +1231,57 @@ interface MentionEvent {
   mention?: MentionData;
 }
 
+// Mission Control types (inlined for sandboxed preload)
+type HeartbeatStatus = 'idle' | 'running' | 'sleeping' | 'error';
+
+interface HeartbeatResult {
+  agentRoleId: string;
+  status: 'ok' | 'work_done' | 'error';
+  pendingMentions: number;
+  assignedTasks: number;
+  relevantActivities: number;
+  taskCreated?: string;
+  error?: string;
+}
+
+interface HeartbeatEvent {
+  type: 'started' | 'completed' | 'work_found' | 'no_work' | 'error';
+  agentRoleId: string;
+  agentName: string;
+  timestamp: number;
+  result?: HeartbeatResult;
+  error?: string;
+}
+
+type SubscriptionReason = 'assigned' | 'mentioned' | 'commented' | 'manual';
+
+interface TaskSubscription {
+  id: string;
+  taskId: string;
+  agentRoleId: string;
+  subscriptionReason: SubscriptionReason;
+  subscribedAt: number;
+}
+
+interface SubscriptionEvent {
+  type: 'subscribed' | 'unsubscribed';
+  taskId: string;
+  agentRoleId: string;
+  subscription?: TaskSubscription;
+}
+
+interface StandupReport {
+  id: string;
+  workspaceId: string;
+  reportDate: string;
+  completedTaskIds: string[];
+  inProgressTaskIds: string[];
+  blockedTaskIds: string[];
+  summary: string;
+  deliveredToChannel?: string;
+  createdAt: number;
+}
+
 // Task Board types (inlined for sandboxed preload)
 type TaskBoardColumn = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
 
@@ -1293,7 +1386,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File APIs
   openFile: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:open', filePath, workspacePath),
   showInFinder: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:showInFinder', filePath, workspacePath),
-  readFileForViewer: (filePath: string, workspacePath: string) => ipcRenderer.invoke('file:readForViewer', { filePath, workspacePath }),
+  readFileForViewer: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:readForViewer', { filePath, workspacePath }),
 
   // Shell APIs
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
@@ -1790,6 +1883,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS),
   seedDefaultAgentRoles: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
+  syncDefaultAgentRoles: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS),
 
   // Activity Feed APIs
   listActivities: (query: ActivityListQuery) =>
@@ -1826,6 +1921,55 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.MENTION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENTION_EVENT, subscription);
   },
+
+  // ============ Mission Control APIs ============
+
+  // Heartbeat System
+  getHeartbeatConfig: (agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_CONFIG, agentRoleId),
+  updateHeartbeatConfig: (agentRoleId: string, config: {
+    heartbeatEnabled?: boolean;
+    heartbeatIntervalMinutes?: number;
+    heartbeatStaggerOffset?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_UPDATE_CONFIG, agentRoleId, config),
+  triggerHeartbeat: (agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_TRIGGER, agentRoleId),
+  getHeartbeatStatus: (agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_STATUS, agentRoleId),
+  getAllHeartbeatStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.HEARTBEAT_GET_ALL_STATUS),
+  onHeartbeatEvent: (callback: (event: HeartbeatEvent) => void) => {
+    const subscription = (_: any, data: HeartbeatEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
+  },
+
+  // Task Subscriptions
+  listSubscriptions: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_LIST, taskId),
+  addSubscription: (taskId: string, agentRoleId: string, reason: SubscriptionReason) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_ADD, taskId, agentRoleId, reason),
+  removeSubscription: (taskId: string, agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_REMOVE, taskId, agentRoleId),
+  getTaskSubscribers: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_GET_SUBSCRIBERS, taskId),
+  getAgentSubscriptions: (agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_GET_FOR_AGENT, agentRoleId),
+  onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => {
+    const subscription = (_: any, data: SubscriptionEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
+  },
+
+  // Standup Reports
+  generateStandupReport: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_GENERATE, workspaceId),
+  getLatestStandupReport: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_GET_LATEST, workspaceId),
+  listStandupReports: (workspaceId: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_LIST, workspaceId, limit),
+  deliverStandupReport: (reportId: string, channelType: string, channelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_DELIVER, reportId, channelType, channelId),
 
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
@@ -1979,11 +2123,23 @@ export type {
   UpdateContextPolicyOptions,
 };
 
+// Export Mission Control types
+export type {
+  HeartbeatStatus,
+  HeartbeatResult,
+  HeartbeatEvent,
+  SubscriptionReason,
+  TaskSubscription,
+  SubscriptionEvent,
+  StandupReport,
+  AgentAutonomyLevel,
+};
+
 export interface ElectronAPI {
   selectFolder: () => Promise<string | null>;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
   showInFinder: (filePath: string, workspacePath?: string) => Promise<void>;
-  readFileForViewer: (filePath: string, workspacePath: string) => Promise<FileViewerResult>;
+  readFileForViewer: (filePath: string, workspacePath?: string) => Promise<FileViewerResult>;
   openExternal: (url: string) => Promise<void>;
   createTask: (data: any) => Promise<any>;
   getTask: (id: string) => Promise<any>;
@@ -2131,17 +2287,19 @@ export interface ElectronAPI {
   // Appearance Settings
   getAppearanceSettings: () => Promise<{
     themeMode: 'light' | 'dark' | 'system';
-    accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+    accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
+    assistantName?: string;
   }>;
   saveAppearanceSettings: (settings: {
     themeMode?: 'light' | 'dark' | 'system';
-    accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+    accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
+    assistantName?: string;
   }) => Promise<{ success: boolean }>;
   // Personality Settings
   getPersonalitySettings: () => Promise<{
@@ -2168,6 +2326,7 @@ export interface ElectronAPI {
       lastMilestoneCelebrated: number;
       projectsWorkedOn: string[];
     };
+    workStyle?: 'planner' | 'flexible';
   }>;
   savePersonalitySettings: (settings: {
     activePersonality?: 'professional' | 'friendly' | 'concise' | 'creative' | 'technical' | 'casual' | 'custom';
@@ -2193,6 +2352,7 @@ export interface ElectronAPI {
       lastMilestoneCelebrated?: number;
       projectsWorkedOn?: string[];
     };
+    workStyle?: 'planner' | 'flexible';
   }) => Promise<{ success: boolean }>;
   getPersonalityDefinitions: () => Promise<Array<{
     id: 'professional' | 'friendly' | 'concise' | 'creative' | 'technical' | 'casual' | 'custom';
@@ -2456,6 +2616,48 @@ export interface ElectronAPI {
   completeMention: (id: string) => Promise<MentionData | undefined>;
   dismissMention: (id: string) => Promise<MentionData | undefined>;
   onMentionEvent: (callback: (event: MentionEvent) => void) => () => void;
+  // Mission Control - Heartbeat APIs
+  getHeartbeatConfig: (agentRoleId: string) => Promise<{
+    heartbeatEnabled: boolean;
+    heartbeatIntervalMinutes: number;
+    heartbeatStaggerOffset: number;
+    heartbeatStatus: HeartbeatStatus;
+    lastHeartbeatAt?: number;
+  } | undefined>;
+  updateHeartbeatConfig: (agentRoleId: string, config: {
+    heartbeatEnabled?: boolean;
+    heartbeatIntervalMinutes?: number;
+    heartbeatStaggerOffset?: number;
+  }) => Promise<any>;
+  triggerHeartbeat: (agentRoleId: string) => Promise<HeartbeatResult>;
+  getHeartbeatStatus: (agentRoleId: string) => Promise<{
+    heartbeatEnabled: boolean;
+    heartbeatStatus: HeartbeatStatus;
+    lastHeartbeatAt?: number;
+    nextHeartbeatAt?: number;
+    isRunning: boolean;
+  } | undefined>;
+  getAllHeartbeatStatus: () => Promise<Array<{
+    agentRoleId: string;
+    agentName: string;
+    heartbeatEnabled: boolean;
+    heartbeatStatus: HeartbeatStatus;
+    lastHeartbeatAt?: number;
+    nextHeartbeatAt?: number;
+  }>>;
+  onHeartbeatEvent: (callback: (event: HeartbeatEvent) => void) => () => void;
+  // Mission Control - Task Subscription APIs
+  listSubscriptions: (taskId: string) => Promise<TaskSubscription[]>;
+  addSubscription: (taskId: string, agentRoleId: string, reason: SubscriptionReason) => Promise<TaskSubscription>;
+  removeSubscription: (taskId: string, agentRoleId: string) => Promise<boolean>;
+  getTaskSubscribers: (taskId: string) => Promise<TaskSubscription[]>;
+  getAgentSubscriptions: (agentRoleId: string) => Promise<TaskSubscription[]>;
+  onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => () => void;
+  // Mission Control - Standup Report APIs
+  generateStandupReport: (workspaceId: string) => Promise<StandupReport>;
+  getLatestStandupReport: (workspaceId: string) => Promise<StandupReport | undefined>;
+  listStandupReports: (workspaceId: string, limit?: number) => Promise<StandupReport[]>;
+  deliverStandupReport: (reportId: string, channelType: string, channelId: string) => Promise<void>;
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<any>;
   setTaskPriority: (taskId: string, priority: number) => Promise<any>;

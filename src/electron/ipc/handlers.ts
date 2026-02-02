@@ -166,10 +166,24 @@ export async function setupIpcHandlers(
     // Check if temp workspace already exists in database
     const existing = workspaceRepo.findById(TEMP_WORKSPACE_ID);
     if (existing) {
+      const updatedPermissions = {
+        ...existing.permissions,
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: existing.permissions.shell ?? false,
+        unrestrictedFileAccess: true,
+      };
+
+      if (!existing.permissions.unrestrictedFileAccess) {
+        workspaceRepo.updatePermissions(existing.id, updatedPermissions);
+      }
+
       // Verify the temp directory still exists, recreate if not
       try {
         await fs.access(existing.path);
-        return { ...existing, isTemp: true };
+        return { ...existing, permissions: updatedPermissions, isTemp: true };
       } catch {
         // Directory was deleted, delete the workspace record and recreate
         workspaceRepo.delete(TEMP_WORKSPACE_ID);
@@ -192,6 +206,7 @@ export async function setupIpcHandlers(
         delete: true,
         network: true,
         shell: false,
+        unrestrictedFileAccess: true,
       },
       isTemp: true,
     };
@@ -266,23 +281,17 @@ export async function setupIpcHandlers(
   });
 
   // File viewer handler - read file content for in-app preview
-  ipcMain.handle('file:readForViewer', async (_, data: { filePath: string; workspacePath: string }) => {
+  // Note: This handler allows viewing any file on the system for convenience.
+  // File operations like open/showInFinder remain workspace-restricted.
+  ipcMain.handle('file:readForViewer', async (_, data: { filePath: string; workspacePath?: string }) => {
     const { filePath, workspacePath } = data;
 
-    // Security: require workspacePath and validate path is within it
-    if (!workspacePath) {
-      return { success: false, error: 'Workspace path is required for file operations' };
-    }
-
-    // Resolve the path relative to workspace
+    // Resolve the path - if absolute use directly, otherwise resolve relative to workspace or cwd
     const resolvedPath = path.isAbsolute(filePath)
       ? filePath
-      : path.resolve(workspacePath, filePath);
-
-    // Validate path is within workspace (prevent path traversal)
-    if (!isPathWithinWorkspace(resolvedPath, workspacePath)) {
-      return { success: false, error: 'Access denied: file path is outside the workspace' };
-    }
+      : workspacePath
+        ? path.resolve(workspacePath, filePath)
+        : path.resolve(filePath);
 
     // Check if file exists
     try {
@@ -1683,6 +1692,11 @@ export async function setupIpcHandlers(
     return agentRoleRepo.seedDefaults();
   });
 
+  ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS, async () => {
+    checkRateLimit(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS);
+    return agentRoleRepo.syncNewDefaults();
+  });
+
   // Activity Feed handlers
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_LIST, async (_, query: any) => {
     const validated = validateInput(UUIDSchema, query.workspaceId, 'workspace ID');
@@ -3068,8 +3082,9 @@ function setupMemoryHandlers(): void {
 
   // === Voice Mode Handlers ===
 
-  // Initialize voice settings manager
-  VoiceSettingsManager.initialize();
+  // Initialize voice settings manager with secure database storage
+  const voiceDb = DatabaseManager.getInstance().getDatabase();
+  VoiceSettingsManager.initialize(voiceDb);
 
   // Get voice settings
   ipcMain.handle(IPC_CHANNELS.VOICE_GET_SETTINGS, async () => {
