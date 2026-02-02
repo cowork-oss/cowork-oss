@@ -14,7 +14,7 @@ describe('GoogleChatAdapter', () => {
     enabled: true,
     serviceAccountKey: {
       client_email: 'test@test-project.iam.gserviceaccount.com',
-      private_key: '-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBALRiMLAHudeSA2B9BZRLVuSPm96tGI6Oe2NG36BAmVKGHHvM8xmG\nMIIBOgIBAAJBALRiMLAHudeSA2B9BZRLVuSPm96tGI6Oe2NG36BAmVKGHHvM8xmG\n-----END RSA PRIVATE KEY-----',
+      private_key: 'FAKE_TEST_KEY_NOT_REAL',
       project_id: 'test-project',
     },
     webhookPort: 13979, // Use high port to avoid conflicts
@@ -79,7 +79,7 @@ describe('GoogleChatAdapter', () => {
         enabled: true,
         serviceAccountKey: {
           client_email: 'test@test.iam.gserviceaccount.com',
-          private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+          private_key: 'FAKE_TEST_KEY_NOT_REAL',
           project_id: 'test-project',
         },
       });
@@ -95,7 +95,7 @@ describe('GoogleChatAdapter', () => {
         enabled: true,
         serviceAccountKey: {
           client_email: 'test@test.iam.gserviceaccount.com',
-          private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+          private_key: 'FAKE_TEST_KEY_NOT_REAL',
           project_id: 'test-project',
         },
       });
@@ -244,7 +244,7 @@ describe('GoogleChatConfig', () => {
       enabled: true,
       serviceAccountKey: {
         client_email: 'test@test.iam.gserviceaccount.com',
-        private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+        private_key: 'FAKE_TEST_KEY_NOT_REAL',
         project_id: 'test-project',
       },
     };
@@ -294,7 +294,7 @@ describe('GoogleChatAdapter edge cases', () => {
     enabled: true,
     serviceAccountKey: {
       client_email: 'test@test-project.iam.gserviceaccount.com',
-      private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
+      private_key: 'FAKE_TEST_KEY_NOT_REAL',
       project_id: 'test-project',
     },
   };
@@ -387,7 +387,7 @@ describe('GoogleChatAdapter edge cases', () => {
         serviceAccountKeyPath: '/path/to/key.json',
         serviceAccountKey: {
           client_email: 'inline@test.iam.gserviceaccount.com',
-          private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+          private_key: 'FAKE_TEST_KEY_NOT_REAL',
           project_id: 'inline-project',
         },
       });
@@ -407,7 +407,7 @@ describe('MessageDeduplicationCache', () => {
       enabled: true,
       serviceAccountKey: {
         client_email: 'test@test.iam.gserviceaccount.com',
-        private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+        private_key: 'FAKE_TEST_KEY_NOT_REAL',
         project_id: 'test-project',
       },
     });
@@ -461,7 +461,7 @@ describe('Channel Registry integration', () => {
       enabled: true,
       serviceAccountKey: {
         client_email: 'test@test.iam.gserviceaccount.com',
-        private_key: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+        private_key: 'FAKE_TEST_KEY_NOT_REAL',
         project_id: 'test-project',
       },
     });
