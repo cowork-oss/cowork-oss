@@ -1,5 +1,5 @@
 import { spawn, ChildProcess, execSync } from 'child_process';
-import { Workspace } from '../../../shared/types';
+import { Workspace, CommandTerminationReason } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
 
@@ -158,6 +158,8 @@ export class ShellTools {
   private killInProgress = false;
   // Unique identifier for the current process session (prevents PID reuse issues)
   private processSessionId = 0;
+  // Track user-initiated kills to signal termination reason to agent
+  private userKillRequested = false;
 
   constructor(
     private workspace: Workspace,
@@ -235,6 +237,9 @@ export class ShellTools {
 
     // Capture session ID to verify we're killing the right process in escalation timeouts
     const currentSessionId = this.processSessionId;
+
+    // Mark this as a user-initiated kill so the close handler can signal the agent
+    this.userKillRequested = true;
 
     if (force) {
       // Force kill - immediate SIGKILL to entire process tree
@@ -490,23 +495,37 @@ export class ShellTools {
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
 
-        const success = code === 0 && !killed;
+        // Determine termination reason to signal the agent
+        let terminationReason: CommandTerminationReason = 'normal';
+        if (this.userKillRequested) {
+          terminationReason = 'user_stopped';
+        } else if (killed) {
+          terminationReason = 'timeout';
+        }
+
+        // Reset for next command
+        this.userKillRequested = false;
+
+        const success = code === 0 && terminationReason === 'normal';
         const truncatedStdout = this.truncateOutput(stdout);
         const truncatedStderr = this.truncateOutput(stderr);
 
-        // Emit command completion
+        // Emit command completion with termination reason
         this.daemon.logEvent(this.taskId, 'command_output', {
           command,
           type: 'end',
           exitCode: code,
           success,
+          terminationReason,
         });
 
         this.daemon.logEvent(this.taskId, 'tool_result', {
           tool: 'run_command',
           success,
           exitCode: code,
-          error: killed ? 'Command timed out' : undefined,
+          terminationReason,
+          error: terminationReason === 'timeout' ? 'Command timed out' :
+                 terminationReason === 'user_stopped' ? 'Command stopped by user' : undefined,
         });
 
         resolve({
@@ -515,6 +534,7 @@ export class ShellTools {
           stderr: truncatedStderr,
           exitCode: code,
           truncated: stdout.length > MAX_OUTPUT_SIZE || stderr.length > MAX_OUTPUT_SIZE,
+          terminationReason,
         });
       });
 
@@ -523,17 +543,23 @@ export class ShellTools {
         this.activeProcess = null;  // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
+        // Reset user kill flag
+        this.userKillRequested = false;
+
+        const terminationReason: CommandTerminationReason = 'error';
 
         this.daemon.logEvent(this.taskId, 'command_output', {
           command,
           type: 'error',
           output: `\n[Error: ${error.message}]\n`,
+          terminationReason,
         });
 
         this.daemon.logEvent(this.taskId, 'tool_result', {
           tool: 'run_command',
           success: false,
           error: error.message,
+          terminationReason,
         });
 
         resolve({
@@ -541,6 +567,7 @@ export class ShellTools {
           stdout: this.truncateOutput(stdout),
           stderr: error.message,
           exitCode: null,
+          terminationReason,
         });
       });
     });

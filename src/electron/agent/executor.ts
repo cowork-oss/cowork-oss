@@ -2750,6 +2750,9 @@ SCHEDULING & REMINDERS:
       let emptyResponseCount = 0;
       let stepFailed = false;  // Track if step failed due to all tools being disabled/erroring
       let lastFailureReason = '';  // Track the reason for failure
+      let hadToolError = false;
+      let hadToolSuccessAfterError = false;
+      let lastToolErrorReason = '';
       const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
       const maxEmptyResponses = 3;
 
@@ -2985,16 +2988,24 @@ SCHEDULING & REMINDERS:
               this.recordFileOperation(content.name, content.input, result);
 
               // Check if the result indicates an error (some tools return error in result)
-              if (result && result.success === false && result.error) {
+              if (result && result.success === false) {
+                const reason = result.error
+                  || (result.terminationReason ? `termination: ${result.terminationReason}` : undefined)
+                  || (typeof result.exitCode === 'number' ? `exit code ${result.exitCode}` : undefined)
+                  || 'unknown error';
+                hadToolError = true;
+                lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
                 // Check if this is a non-retryable error
-                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
+                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error || reason);
                 if (shouldDisable) {
                   this.daemon.logEvent(this.task.id, 'tool_error', {
                     tool: content.name,
-                    error: result.error,
+                    error: result.error || reason,
                     disabled: true,
                   });
                 }
+              } else if (hadToolError) {
+                hadToolSuccessAfterError = true;
               }
 
               // Truncate large tool results to avoid context overflow
@@ -3036,6 +3047,9 @@ SCHEDULING & REMINDERS:
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
+
+              hadToolError = true;
+              lastToolErrorReason = `Tool ${content.name} failed: ${error.message}`;
 
               // Track the failure
               const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
@@ -3091,6 +3105,13 @@ SCHEDULING & REMINDERS:
         }
       }
 
+      if (hadToolError && !hadToolSuccessAfterError) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = lastToolErrorReason || 'One or more tools failed without recovery.';
+        }
+      }
+
       // Step completed or failed
 
       // Save conversation history for follow-up messages
@@ -3128,6 +3149,7 @@ SCHEDULING & REMINDERS:
    * Send a follow-up message to continue the conversation
    */
   async sendMessage(message: string): Promise<void> {
+    const previousStatus = this.daemon.getTask(this.task.id)?.status || this.task.status;
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });
@@ -3640,11 +3662,10 @@ SCHEDULING & REMINDERS:
       this.conversationHistory = messages;
       // Save conversation snapshot for future follow-ups and persistence
       this.saveConversationSnapshot();
-      this.daemon.updateTaskStatus(this.task.id, 'completed');
-      // Log visible task_completed event for UI
-      this.daemon.logEvent(this.task.id, 'task_completed', {
-        message: 'Task completed',
-      });
+      // Restore previous task status (follow-ups should not complete or fail tasks)
+      if (previousStatus) {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      }
       // Emit internal follow_up_completed event for gateway (to send artifacts, etc.)
       this.daemon.logEvent(this.task.id, 'follow_up_completed', {
         message: 'Follow-up message processed',
@@ -3664,10 +3685,11 @@ SCHEDULING & REMINDERS:
       console.error('sendMessage failed:', error);
       // Save conversation snapshot even on failure for potential recovery
       this.saveConversationSnapshot();
-      this.daemon.updateTaskStatus(this.task.id, 'failed');
-      // Emit single 'error' event for UI notification (don't emit twice!)
-      this.daemon.logEvent(this.task.id, 'error', {
-        message: error.message,
+      if (previousStatus) {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus);
+      }
+      this.daemon.logEvent(this.task.id, 'log', {
+        message: `Follow-up failed: ${error.message}`,
       });
       // Emit follow_up_failed event for the gateway (this doesn't trigger toast)
       this.daemon.logEvent(this.task.id, 'follow_up_failed', {

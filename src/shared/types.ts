@@ -2,7 +2,7 @@
 
 // Theme and Appearance types
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal';
+export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
 
 export interface AppearanceSettings {
   themeMode: ThemeMode;
@@ -10,6 +10,7 @@ export interface AppearanceSettings {
   disclaimerAccepted?: boolean;
   onboardingCompleted?: boolean;
   onboardingCompletedAt?: string; // ISO timestamp of when onboarding was completed
+  assistantName?: string; // User-chosen name for the assistant (default: "CoWork")
 }
 
 // Tray (Menu Bar) Settings
@@ -30,9 +31,19 @@ export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'orange', label: 'Orange' },
   { id: 'green', label: 'Green' },
   { id: 'teal', label: 'Teal' },
+  { id: 'coral', label: 'Coral' },
 ];
 
 export type TaskStatus = 'pending' | 'queued' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * Reason for command termination - used to signal the agent why a command ended
+ */
+export type CommandTerminationReason =
+  | 'normal'        // Command completed naturally
+  | 'user_stopped'  // User explicitly killed the process
+  | 'timeout'       // Command exceeded timeout limit
+  | 'error';        // Spawn/execution error
 
 export type EventType =
   | 'task_created'
@@ -1156,6 +1167,7 @@ export const IPC_CHANNELS = {
   AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
   AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
   AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
+  AGENT_ROLE_SYNC_DEFAULTS: 'agentRole:syncDefaults',
 
   // Activity Feed
   ACTIVITY_LIST: 'activity:list',

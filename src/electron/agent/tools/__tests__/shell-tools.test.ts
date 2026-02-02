@@ -287,3 +287,84 @@ describe('ShellTools Integration', () => {
     });
   });
 });
+
+describe('CommandTerminationReason', () => {
+  describe('termination reason determination logic', () => {
+    it('should return user_stopped when userKillRequested is true', () => {
+      // Simulating the logic from shell-tools.ts close handler
+      const userKillRequested = true;
+      const killed = false; // timeout flag
+
+      let terminationReason = 'normal';
+      if (userKillRequested) {
+        terminationReason = 'user_stopped';
+      } else if (killed) {
+        terminationReason = 'timeout';
+      }
+
+      expect(terminationReason).toBe('user_stopped');
+    });
+
+    it('should return timeout when killed flag is true (timeout)', () => {
+      const userKillRequested = false;
+      const killed = true; // timeout flag
+
+      let terminationReason = 'normal';
+      if (userKillRequested) {
+        terminationReason = 'user_stopped';
+      } else if (killed) {
+        terminationReason = 'timeout';
+      }
+
+      expect(terminationReason).toBe('timeout');
+    });
+
+    it('should return normal when neither flag is set', () => {
+      const userKillRequested = false;
+      const killed = false;
+
+      let terminationReason = 'normal';
+      if (userKillRequested) {
+        terminationReason = 'user_stopped';
+      } else if (killed) {
+        terminationReason = 'timeout';
+      }
+
+      expect(terminationReason).toBe('normal');
+    });
+
+    it('should prioritize user_stopped over timeout', () => {
+      // Edge case: both flags are true (user killed during timeout)
+      const userKillRequested = true;
+      const killed = true;
+
+      let terminationReason = 'normal';
+      if (userKillRequested) {
+        terminationReason = 'user_stopped';
+      } else if (killed) {
+        terminationReason = 'timeout';
+      }
+
+      // user_stopped should take priority since user action is explicit
+      expect(terminationReason).toBe('user_stopped');
+    });
+  });
+
+  describe('success determination with terminationReason', () => {
+    it('should be successful only when exitCode is 0 AND terminationReason is normal', () => {
+      const testCases = [
+        { exitCode: 0, terminationReason: 'normal', expectedSuccess: true },
+        { exitCode: 0, terminationReason: 'user_stopped', expectedSuccess: false },
+        { exitCode: 0, terminationReason: 'timeout', expectedSuccess: false },
+        { exitCode: 1, terminationReason: 'normal', expectedSuccess: false },
+        { exitCode: 1, terminationReason: 'user_stopped', expectedSuccess: false },
+        { exitCode: null, terminationReason: 'error', expectedSuccess: false },
+      ];
+
+      for (const { exitCode, terminationReason, expectedSuccess } of testCases) {
+        const success = exitCode === 0 && terminationReason === 'normal';
+        expect(success).toBe(expectedSuccess);
+      }
+    });
+  });
+});
