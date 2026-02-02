@@ -120,7 +120,6 @@ export class PersonalityManager {
 
       // Check if already migrated to database
       if (repository.exists('personality')) {
-        console.log('[PersonalityManager] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

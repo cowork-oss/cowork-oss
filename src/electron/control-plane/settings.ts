@@ -172,7 +172,6 @@ export class ControlPlaneSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('controlplane')) {
-        console.log('[ControlPlane Settings] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

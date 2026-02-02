@@ -84,7 +84,6 @@ export class TailscaleSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('tailscale')) {
-        console.log('[Tailscale Settings] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

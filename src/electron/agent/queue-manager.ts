@@ -62,7 +62,6 @@ export class TaskQueueManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('queue')) {
-        console.log('[TaskQueueManager] Settings already in database, skipping migration');
         TaskQueueManager.migrationCompleted = true;
         return;
       }

@@ -80,7 +80,6 @@ export class SearchProviderFactory {
 
       // Check if already migrated to database
       if (repository.exists('search')) {
-        console.log('[SearchProviderFactory] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

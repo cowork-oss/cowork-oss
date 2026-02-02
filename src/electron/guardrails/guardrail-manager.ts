@@ -74,7 +74,6 @@ export class GuardrailManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('guardrails')) {
-        console.log('[GuardrailManager] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

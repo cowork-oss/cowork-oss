@@ -167,7 +167,6 @@ export class MCPSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('mcp')) {
-        console.log('[MCP Settings] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

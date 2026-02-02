@@ -226,7 +226,6 @@ export class VoiceSettingsManager {
 
     // Check if we already have settings in the database
     if (this.repository.exists('voice')) {
-      console.log('[VoiceSettingsManager] Settings already in database, skipping migration');
       // Clean up legacy files
       this.cleanupLegacyFiles();
       this.migrationComplete = true;

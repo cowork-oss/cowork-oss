@@ -55,7 +55,6 @@ export class AppearanceManager {
 
       // Check if already migrated to database
       if (repository.exists('appearance')) {
-        console.log('[AppearanceManager] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

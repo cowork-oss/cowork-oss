@@ -263,7 +263,6 @@ export class LLMProviderFactory {
 
       // Check if already migrated to database
       if (repository.exists('llm')) {
-        console.log('[LLMProviderFactory] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

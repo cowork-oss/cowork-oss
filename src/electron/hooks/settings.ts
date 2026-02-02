@@ -155,7 +155,6 @@ export class HooksSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('hooks')) {
-        console.log('[Hooks Settings] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }
