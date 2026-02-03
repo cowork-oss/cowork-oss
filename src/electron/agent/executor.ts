@@ -146,22 +146,63 @@ function getCurrentDateTimeContext(): string {
  * Check if the assistant's response is asking a question and waiting for user input
  */
 function isAskingQuestion(text: string): boolean {
-  const questionPatterns = [
-    /would you like me to/i,
-    /would you prefer/i,
-    /should I/i,
-    /do you want me to/i,
-    /please (let me know|confirm|specify|choose)/i,
-    /which (option|approach|method)/i,
-    /options.*:/i,
-    /\?\s*$/,  // Ends with question mark
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  // Keep this lightweight and conservative: only pause on questions that
+  // clearly request input/decisions needed to proceed.
+  const blockingQuestionPatterns = [
+    // Direct requests for info or confirmation
+    /(?:^|\n)\s*(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select)\b/i,
+    /(?:can|could|would)\s+you\s+(?:please\s+)?(?:provide|share|send|upload|enter|paste|specify|clarify|confirm|choose|pick|select)\b/i,
+
+    // Decision/approval questions
+    /would\s+you\s+like\s+me\s+to\b/i,
+    /would\s+you\s+prefer\b/i,
+    /should\s+i\b/i,
+    /do\s+you\s+want\s+me\s+to\b/i,
+    /do\s+you\s+prefer\b/i,
+    /is\s+it\s+(?:ok|okay|alright)\s+if\s+i\b/i,
+
+    // Clarifying questions about specifics
+    /\bwhat\s+(?:is|are|was|were|should|would|can|could|do|does|did)\s+(?:the|your|this|that)\b/i,
+    /\bwhat\s+should\s+i\b/i,
+    /\bwhich\s+(?:one|option|approach|method|file|version|environment|format|branch|repo|path)\b/i,
+    /\bwhere\s+(?:is|are|should|can|could)\b/i,
+    /\bwhen\s+(?:is|are|should|can|could)\b/i,
+    /\bhow\s+should\s+i\b/i,
   ];
 
-  // Check if text contains question patterns AND doesn't also contain tool calls
-  const hasQuestion = questionPatterns.some(pattern => pattern.test(text));
-  const isShort = text.length < 1000; // Questions are usually concise
+  const nonBlockingQuestionPatterns = [
+    // Conversational/offboarding prompts that shouldn't pause execution
+    /\bwhat\s+(?:else\s+)?can\s+i\s+help\b/i,
+    /\bhow\s+can\s+i\s+help\b/i,
+    /\bis\s+there\s+anything\s+else\s+(?:i\s+can\s+help|you\s+need|you'd\s+like)\b/i,
+    /\banything\s+else\s+(?:i\s+can\s+help|you\s+need|you'd\s+like|to\s+work\s+on)\b/i,
+    /\bwhat\s+would\s+you\s+like\s+to\s+(?:do|work\s+on|try|build)\b/i,
+    /\bwhat\s+should\s+we\s+do\s+next\b/i,
+    /\bcan\s+i\s+help\s+with\s+anything\s+else\b/i,
+    /\bdoes\s+that\s+(?:help|make\s+sense)\b/i,
+  ];
 
-  return hasQuestion && isShort;
+  const isShort = trimmed.length < 1000;
+  if (!isShort) return false;
+
+  // If we see explicit blocking cues, pause.
+  if (blockingQuestionPatterns.some(pattern => pattern.test(trimmed))) {
+    return true;
+  }
+
+  // If it's a non-blocking conversational prompt, don't pause.
+  const lastLine = trimmed.split('\n').filter(Boolean).pop() ?? trimmed;
+  const sentenceMatch = lastLine.match(/[^.!?]+[.!?]*$/);
+  const lastSentence = sentenceMatch ? sentenceMatch[0].trim() : lastLine;
+  if (nonBlockingQuestionPatterns.some(pattern => pattern.test(lastSentence))) {
+    return false;
+  }
+
+  // Default to not pausing on generic questions.
+  return false;
 }
 
 /**
@@ -309,13 +350,15 @@ class ToolCallDeduplicator {
     // 0. Exclude stateful browser tools from duplicate detection
     // These tools depend on current page state, not just parameters
     // browser_get_content, browser_screenshot have no/minimal params but return different results per page
-    const statefulBrowserTools = [
+    const statefulTools = [
       'browser_get_content',
       'browser_screenshot',
       'browser_get_text',
       'browser_evaluate',
+      // Canvas push can be stateful even with identical params (content may be inferred)
+      'canvas_push',
     ];
-    if (statefulBrowserTools.includes(toolName)) {
+    if (statefulTools.includes(toolName)) {
       return { isDuplicate: false };
     }
 
@@ -3346,9 +3389,11 @@ SCHEDULING & REMINDERS:
   async sendMessage(message: string): Promise<void> {
     const previousStatus = this.daemon.getTask(this.task.id)?.status || this.task.status;
     const shouldResumeAfterFollowup = previousStatus === 'paused' || this.waitingForUserInput;
+    const shouldStartNewCanvasSession = ['completed', 'failed', 'cancelled'].includes(previousStatus);
     let resumeAttempted = false;
     this.waitingForUserInput = false;
     this.paused = false;
+    this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });

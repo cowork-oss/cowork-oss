@@ -17,6 +17,7 @@ import { SystemTools } from './system-tools';
 import { CronTools } from './cron-tools';
 import { CanvasTools } from './canvas-tools';
 import { MentionTools } from './mention-tools';
+import { XTools } from './x-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -46,6 +47,7 @@ export class ToolRegistry {
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
   private mentionTools: MentionTools;
+  private xTools: XTools;
   private gatewayContext?: GatewayContextType;
   private shadowedToolsLogged = false;
 
@@ -69,6 +71,7 @@ export class ToolRegistry {
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
+    this.xTools = new XTools(workspace, daemon, taskId);
     this.gatewayContext = gatewayContext;
   }
 
@@ -98,6 +101,15 @@ export class ToolRegistry {
     this.systemTools.setWorkspace(workspace);
     this.cronTools.setWorkspace(workspace);
     this.canvasTools.setWorkspace(workspace);
+    this.xTools.setWorkspace(workspace);
+  }
+
+  /**
+   * Enforce new canvas sessions for follow-up messages by setting a cutoff timestamp.
+   * Sessions created before the cutoff will be rejected for canvas_push/open_url.
+   */
+  setCanvasSessionCutoff(cutoff: number | null): void {
+    this.canvasTools.setSessionCutoff(cutoff);
   }
 
   /**
@@ -156,6 +168,11 @@ export class ToolRegistry {
     // Only add search tool if a provider is configured
     if (SearchProviderFactory.isAnyProviderConfigured()) {
       allTools.push(...this.getSearchToolDefinitions());
+    }
+
+    // Only add X/Twitter tool if integration is enabled
+    if (XTools.isEnabled()) {
+      allTools.push(...this.getXToolDefinitions());
     }
 
     // Only add shell tool if workspace has shell permission
@@ -524,6 +541,7 @@ Live Canvas (Visual Workspace):
 - canvas_create: Create a new canvas session for displaying interactive content
 - canvas_push: Push HTML/CSS/JS content to the canvas. REQUIRED parameters: session_id and content (the HTML string).
   Example: canvas_push({ session_id: "abc-123", content: "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>" })
+- canvas_open_url: Open a remote web page inside the canvas window for full in-app browsing (use for sites that block embedding)
 - canvas_show: OPTIONAL - Only use if user needs full interactivity (clicking buttons, forms)
 - canvas_hide: Hide the canvas window
 - canvas_close: Close a canvas session
@@ -604,6 +622,9 @@ ${skillDescriptions}`;
     // Search tools
     if (name === 'web_search') return await this.searchTools.webSearch(input);
 
+    // X/Twitter tools
+    if (name === 'x_action') return await this.xTools.executeAction(input);
+
     // Shell tools
     if (name === 'run_command') return await this.shellTools.runCommand(input.command, input);
 
@@ -634,6 +655,7 @@ ${skillDescriptions}`;
       console.log(`[ToolRegistry] canvas_push content present:`, 'content' in (input || {}), `content length:`, input?.content?.length ?? 'N/A');
       return await this.canvasTools.pushContent(input.session_id, input.content, input.filename);
     }
+    if (name === 'canvas_open_url') return await this.canvasTools.openUrl(input.session_id, input.url, input.show);
     if (name === 'canvas_show') return await this.canvasTools.showCanvas(input.session_id);
     if (name === 'canvas_hide') return this.canvasTools.hideCanvas(input.session_id);
     if (name === 'canvas_close') return await this.canvasTools.closeCanvas(input.session_id);
@@ -1936,6 +1958,78 @@ ${skillDescriptions}`;
             },
           },
           required: ['query'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define X/Twitter tools (bird CLI)
+   */
+  private getXToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'x_action',
+        description:
+          'Use the connected X/Twitter account to read, search, and post. ' +
+          'Posting actions (tweet/reply/follow/unfollow) require user approval.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'whoami',
+                'read',
+                'thread',
+                'replies',
+                'search',
+                'user_tweets',
+                'mentions',
+                'home',
+                'tweet',
+                'reply',
+                'follow',
+                'unfollow',
+              ],
+              description: 'Action to perform',
+            },
+            id_or_url: {
+              type: 'string',
+              description: 'Tweet URL or ID (for read/thread/replies/reply)',
+            },
+            query: {
+              type: 'string',
+              description: 'Search query (for search)',
+            },
+            user: {
+              type: 'string',
+              description: 'User handle (with or without @) for user_tweets/mentions/follow/unfollow',
+            },
+            text: {
+              type: 'string',
+              description: 'Text for tweet/reply',
+            },
+            timeline: {
+              type: 'string',
+              enum: ['for_you', 'following'],
+              description: 'Timeline for home (default: for_you)',
+            },
+            count: {
+              type: 'number',
+              description: 'Max results (1-50) for search/mentions/home/user_tweets',
+            },
+            media: {
+              type: 'array',
+              description: 'Media file paths (workspace-relative). Up to 4 images or 1 video.',
+              items: { type: 'string' },
+            },
+            alt: {
+              type: 'string',
+              description: 'Alt text for media (single string)',
+            },
+          },
+          required: ['action'],
         },
       },
     ];

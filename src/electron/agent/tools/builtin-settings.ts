@@ -164,6 +164,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   organize_folder: 'skill',
   // Shell tools
   run_command: 'shell',
+  x_action: 'shell',
   // Image tools
   generate_image: 'image',
 };

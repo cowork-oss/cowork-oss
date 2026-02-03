@@ -11,7 +11,8 @@ import {
   ArtifactRepository,
   MemoryType,
 } from '../database/repositories';
-import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType } from '../../shared/types';
+import { ActivityRepository } from '../activity/ActivityRepository';
+import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -20,6 +21,10 @@ import { MemoryService } from '../memory/MemoryService';
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
 const EXECUTOR_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes - time before completed executors are cleaned up
+
+// Activity throttling constants
+const ACTIVITY_THROTTLE_WINDOW_MS = 2000; // 2 seconds - window for deduping similar activities
+const THROTTLED_ACTIVITY_TYPES = new Set(['tool_call', 'file_created', 'file_modified', 'file_deleted']);
 
 interface CachedExecutor {
   executor: TaskExecutor;
@@ -37,10 +42,13 @@ export class AgentDaemon extends EventEmitter {
   private workspaceRepo: WorkspaceRepository;
   private approvalRepo: ApprovalRepository;
   private artifactRepo: ArtifactRepository;
+  private activityRepo: ActivityRepository;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private queueManager: TaskQueueManager;
+  // Activity throttle: Map<taskId:eventType, lastTimestamp>
+  private activityThrottle: Map<string, number> = new Map();
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -50,6 +58,7 @@ export class AgentDaemon extends EventEmitter {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.approvalRepo = new ApprovalRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
+    this.activityRepo = new ActivityRepository(db);
 
     // Initialize queue manager with callbacks
     this.queueManager = new TaskQueueManager({
@@ -168,7 +177,7 @@ export class AgentDaemon extends EventEmitter {
         error: error.message || 'Failed to initialize task executor',
         completedAt: Date.now(),
       });
-      this.emitTaskEvent(task.id, 'error', { error: error.message });
+      this.logEvent(task.id, 'error', { error: error.message });
       // Notify queue manager so it can start next task
       this.queueManager.onTaskFinished(task.id);
       return;
@@ -182,7 +191,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Update task status
     this.taskRepo.update(task.id, { status: 'planning' });
-    this.emitTaskEvent(task.id, 'task_created', { task });
+    this.logEvent(task.id, 'task_created', { task });
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
     // Start execution (non-blocking)
@@ -193,7 +202,7 @@ export class AgentDaemon extends EventEmitter {
         error: error.message,
         completedAt: Date.now(),
       });
-      this.emitTaskEvent(task.id, 'error', { error: error.message });
+      this.logEvent(task.id, 'error', { error: error.message });
       this.activeTasks.delete(task.id);
       // Notify queue manager so it can start next task
       this.queueManager.onTaskFinished(task.id);
@@ -280,7 +289,7 @@ export class AgentDaemon extends EventEmitter {
     // Check if task is queued (not yet started)
     if (this.queueManager.cancelQueuedTask(taskId)) {
       this.taskRepo.update(taskId, { status: 'cancelled', completedAt: Date.now() });
-      this.emitTaskEvent(taskId, 'task_cancelled', {
+      this.logEvent(taskId, 'task_cancelled', {
         message: 'Task removed from queue',
       });
       return;
@@ -298,7 +307,7 @@ export class AgentDaemon extends EventEmitter {
     this.queueManager.onTaskFinished(taskId);
 
     // Always emit cancelled event so UI updates
-    this.emitTaskEvent(taskId, 'task_cancelled', {
+    this.logEvent(taskId, 'task_cancelled', {
       message: 'Task was stopped by user',
     });
   }
@@ -323,7 +332,7 @@ export class AgentDaemon extends EventEmitter {
       cached.lastAccessed = Date.now();
       cached.status = 'active';
       this.updateTaskStatus(taskId, 'executing');
-      this.emitTaskEvent(taskId, 'task_resumed', { message: 'Task resumed' });
+      this.logEvent(taskId, 'task_resumed', { message: 'Task resumed' });
       await cached.executor.resume();
     }
   }
@@ -371,7 +380,7 @@ export class AgentDaemon extends EventEmitter {
     });
 
     // Emit event to UI
-    this.emitTaskEvent(taskId, 'approval_requested', { approval });
+    this.logEvent(taskId, 'approval_requested', { approval });
 
     // Wait for user response
     return new Promise((resolve, reject) => {
@@ -457,6 +466,7 @@ export class AgentDaemon extends EventEmitter {
       type: type as any,
       payload,
     });
+    this.logActivityForEvent(taskId, type, payload);
     this.emitTaskEvent(taskId, type, payload);
 
     // Capture to memory system (async, don't block)
@@ -528,6 +538,220 @@ export class AgentDaemon extends EventEmitter {
     }
 
     await MemoryService.capture(task.workspaceId, taskId, memoryType, content);
+  }
+
+  /**
+   * Log notable task events to the Activity feed
+   */
+  private logActivityForEvent(taskId: string, type: string, payload: any): void {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) return;
+
+    // Throttle high-frequency activity types to reduce database writes
+    if (THROTTLED_ACTIVITY_TYPES.has(type)) {
+      const throttleKey = `${taskId}:${type}`;
+      const now = Date.now();
+      const lastTime = this.activityThrottle.get(throttleKey);
+
+      if (lastTime && (now - lastTime) < ACTIVITY_THROTTLE_WINDOW_MS) {
+        // Skip this activity - too soon after the last one of the same type
+        return;
+      }
+
+      this.activityThrottle.set(throttleKey, now);
+
+      // Clean up old throttle entries periodically (keep map from growing unbounded)
+      if (this.activityThrottle.size > 1000) {
+        const cutoff = now - ACTIVITY_THROTTLE_WINDOW_MS * 10;
+        for (const [key, time] of this.activityThrottle) {
+          if (time < cutoff) {
+            this.activityThrottle.delete(key);
+          }
+        }
+      }
+    }
+
+    const activity = this.buildActivityFromEvent(task, type, payload);
+    if (!activity) return;
+
+    const created = this.activityRepo.create(activity);
+    this.emitActivityEvent(created);
+  }
+
+  private buildActivityFromEvent(task: Task, type: string, payload: any): CreateActivityRequest | undefined {
+    const actorType: ActivityActorType = task.assignedAgentRoleId ? 'agent' : 'system';
+    const agentRoleId = task.assignedAgentRoleId;
+    const activityType = type as ActivityType;
+
+    switch (type) {
+      case 'task_created':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'Task created',
+          description: task.title,
+        };
+      case 'task_completed':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'Task completed',
+          description: task.title,
+        };
+      case 'executing':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'task_started',
+          title: 'Task started',
+          description: task.title,
+        };
+      case 'task_cancelled':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'info',
+          title: 'Task cancelled',
+          description: task.title,
+        };
+      case 'task_paused':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'Task paused',
+          description: task.title,
+        };
+      case 'task_resumed':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'Task resumed',
+          description: task.title,
+        };
+      case 'approval_requested':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'info',
+          title: 'Approval requested',
+          description: payload?.approval?.description || task.title,
+        };
+      case 'approval_granted':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'info',
+          title: 'Approval granted',
+          description: task.title,
+        };
+      case 'approval_denied':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'info',
+          title: 'Approval denied',
+          description: payload?.reason || task.title,
+        };
+      case 'error':
+      case 'step_failed':
+      case 'verification_failed':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'error',
+          title: type === 'error' ? 'Task error' : 'Execution issue',
+          description: payload?.error || payload?.message || payload?.step?.description || task.title,
+        };
+      case 'verification_passed':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'info',
+          title: 'Verification passed',
+          description: payload?.message || task.title,
+        };
+      case 'file_created':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'File created',
+          description: payload?.path || task.title,
+        };
+      case 'file_modified':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'File modified',
+          description: payload?.path || task.title,
+        };
+      case 'file_deleted':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType,
+          title: 'File deleted',
+          description: payload?.path || task.title,
+        };
+      case 'tool_call':
+        return {
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType,
+          activityType: 'tool_used',
+          title: 'Tool used',
+          description: payload?.tool || payload?.name || task.title,
+        };
+      default:
+        return undefined;
+    }
+  }
+
+  private emitActivityEvent(activity: any): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(window => {
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+        }
+      } catch (error) {
+        console.error('[AgentDaemon] Error sending activity IPC:', error);
+      }
+    });
   }
 
   /**
@@ -662,7 +886,7 @@ export class AgentDaemon extends EventEmitter {
       cached.status = 'completed';
       cached.lastAccessed = Date.now();
     }
-    this.emitTaskEvent(taskId, 'task_completed', { message: 'Task completed successfully' });
+    this.logEvent(taskId, 'task_completed', { message: 'Task completed successfully' });
     // Notify queue manager so it can start next task
     this.queueManager.onTaskFinished(taskId);
   }
@@ -792,7 +1016,7 @@ export class AgentDaemon extends EventEmitter {
     });
 
     // Emit timeout event
-    this.emitTaskEvent(taskId, 'step_timeout', {
+    this.logEvent(taskId, 'step_timeout', {
       message: 'Task exceeded maximum execution time and was automatically cancelled',
     });
   }

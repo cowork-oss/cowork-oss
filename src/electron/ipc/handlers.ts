@@ -28,7 +28,7 @@ import { MentionRepository } from '../agents/MentionRepository';
 import { TaskLabelRepository } from '../database/TaskLabelRepository';
 import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 import { ContextPolicyManager } from '../gateway/context-policy';
-import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData } from '../../shared/types';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
 import { LLMProviderFactory, LLMProviderConfig, ModelKey, MODELS, GEMINI_MODELS, OPENROUTER_MODELS, OLLAMA_MODELS, OpenAIOAuth } from '../agent/llm';
@@ -45,6 +45,7 @@ import {
   ApprovalResponseSchema,
   LLMSettingsSchema,
   SearchSettingsSchema,
+  XSettingsSchema,
   AddChannelSchema,
   UpdateChannelSchema,
   GrantAccessSchema,
@@ -57,11 +58,223 @@ import {
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { AppearanceManager } from '../settings/appearance-manager';
 import { PersonalityManager } from '../settings/personality-manager';
+
+const normalizeMentionToken = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const buildAgentMentionIndex = (roles: AgentRole[]) => {
+  const index = new Map<string, AgentRole>();
+  roles.forEach((role) => {
+    const baseTokens = [
+      role.name,
+      role.displayName,
+      role.name.replace(/[_-]+/g, ''),
+      role.displayName.replace(/\s+/g, ''),
+      role.displayName.replace(/\s+/g, '_'),
+      role.displayName.replace(/\s+/g, '-'),
+    ];
+    baseTokens.forEach((token) => {
+      const normalized = normalizeMentionToken(token);
+      if (normalized) {
+        index.set(normalized, role);
+      }
+    });
+  });
+  return index;
+};
+
+const CAPABILITY_KEYWORDS: Record<string, string[]> = {
+  code: ['code', 'implement', 'build', 'develop', 'feature', 'api', 'backend', 'frontend', 'refactor', 'bug', 'fix'],
+  review: ['review', 'audit', 'best practices', 'quality', 'lint'],
+  test: ['test', 'testing', 'qa', 'unit', 'integration', 'e2e', 'regression', 'coverage'],
+  design: ['design', 'ui', 'ux', 'wireframe', 'mockup', 'figma', 'layout', 'visual', 'brand'],
+  ops: ['deploy', 'ci', 'cd', 'devops', 'infra', 'infrastructure', 'docker', 'kubernetes', 'pipeline', 'monitor'],
+  security: ['security', 'vulnerability', 'threat', 'audit', 'compliance', 'encryption'],
+  research: ['research', 'investigate', 'compare', 'comparison', 'competitive', 'competitor', 'benchmark', 'study'],
+  analyze: ['analyze', 'analysis', 'data', 'metrics', 'insights', 'report', 'trend', 'dashboard'],
+  plan: ['plan', 'strategy', 'roadmap', 'architecture', 'outline', 'spec'],
+  document: ['document', 'documentation', 'docs', 'guide', 'manual', 'readme', 'spec'],
+  write: ['write', 'draft', 'copy', 'blog', 'post', 'article', 'content', 'summary'],
+  communicate: ['email', 'support', 'customer', 'communication', 'outreach', 'reply', 'respond'],
+  market: ['marketing', 'growth', 'campaign', 'social', 'seo', 'launch', 'newsletter', 'ads'],
+  manage: ['manage', 'project', 'timeline', 'milestone', 'coordination', 'sprint', 'backlog'],
+  product: ['product', 'feature', 'user story', 'requirements', 'prioritize', 'mvp'],
+};
+
+const scoreAgentForTask = (role: AgentRole, text: string) => {
+  const lowerText = text.toLowerCase();
+  let score = 0;
+  const roleText = `${role.name} ${role.displayName} ${role.description ?? ''}`.toLowerCase();
+  const tokens = roleText.split(/[^a-z0-9]+/).filter((token) => token.length > 2);
+  tokens.forEach((token) => {
+    if (lowerText.includes(token)) {
+      score += 1;
+    }
+  });
+
+  if (role.capabilities) {
+    role.capabilities.forEach((capability) => {
+      const keywords = CAPABILITY_KEYWORDS[capability];
+      if (keywords && keywords.some((keyword) => lowerText.includes(keyword))) {
+        score += 3;
+      }
+    });
+  }
+
+  return score;
+};
+
+const selectBestAgentsForTask = (text: string, roles: AgentRole[]) => {
+  if (roles.length === 0) return roles;
+  const scored = roles
+    .map((role) => ({ role, score: scoreAgentForTask(role, text) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (a.role.sortOrder ?? 0) - (b.role.sortOrder ?? 0);
+    });
+
+  const withScore = scored.filter((entry) => entry.score > 0);
+  if (withScore.length > 0) {
+    const maxScore = withScore[0].score;
+    const threshold = Math.max(1, maxScore - 2);
+    const selected = withScore
+      .filter((entry) => entry.score >= threshold)
+      .slice(0, 4)
+      .map((entry) => entry.role);
+    return selected.length > 0 ? selected : withScore.slice(0, 3).map((entry) => entry.role);
+  }
+
+  const leads = roles
+    .filter((role) => role.autonomyLevel === 'lead')
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  if (leads.length > 0) {
+    return leads.slice(0, 3);
+  }
+
+  return roles.slice(0, Math.min(3, roles.length));
+};
+
+const extractMentionedRoles = (
+  text: string,
+  roles: AgentRole[]
+) => {
+  const normalizedText = text.toLowerCase();
+  const useSmartSelection = /\B@everybody\b/.test(normalizedText);
+  if (/\B@all\b/.test(normalizedText) || /\B@everyone\b/.test(normalizedText)) {
+    return roles;
+  }
+
+  const index = buildAgentMentionIndex(roles);
+  const matches = new Map<string, AgentRole>();
+
+  const regex = /@([a-zA-Z0-9][a-zA-Z0-9 _-]{0,50})/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const raw = match[1].replace(/[.,:;!?)]*$/, '').trim();
+    const token = normalizeMentionToken(raw);
+    const role = index.get(token);
+    if (role) {
+      matches.set(role.id, role);
+    }
+  }
+
+  if (matches.size > 0) {
+    if (useSmartSelection) {
+      const selected = selectBestAgentsForTask(text, roles);
+      const merged = new Map<string, AgentRole>();
+      selected.forEach((role) => merged.set(role.id, role));
+      matches.forEach((role) => merged.set(role.id, role));
+      return Array.from(merged.values());
+    }
+    return Array.from(matches.values());
+  }
+
+  const normalizedWithAt = text
+    .toLowerCase()
+    .replace(/[^a-z0-9@]/g, '');
+
+  index.forEach((role, token) => {
+    if (normalizedWithAt.includes(`@${token}`)) {
+      matches.set(role.id, role);
+    }
+  });
+
+  if (useSmartSelection) {
+    return selectBestAgentsForTask(text, roles);
+  }
+
+  return Array.from(matches.values());
+};
+
+const buildSoulSummary = (soul?: string): string | null => {
+  if (!soul) return null;
+  try {
+    const parsed = JSON.parse(soul) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof parsed.name === 'string') parts.push(`Name: ${parsed.name}`);
+    if (typeof parsed.role === 'string') parts.push(`Role: ${parsed.role}`);
+    if (typeof parsed.personality === 'string') parts.push(`Personality: ${parsed.personality}`);
+    if (typeof parsed.communicationStyle === 'string') parts.push(`Style: ${parsed.communicationStyle}`);
+    if (Array.isArray(parsed.focusAreas)) parts.push(`Focus: ${parsed.focusAreas.join(', ')}`);
+    if (Array.isArray(parsed.strengths)) parts.push(`Strengths: ${parsed.strengths.join(', ')}`);
+    if (parts.length === 0) {
+      return null;
+    }
+    return parts.join('\n');
+  } catch {
+    return soul;
+  }
+};
+
+const buildAgentDispatchPrompt = (
+  role: {
+    displayName: string;
+    description?: string | null;
+    capabilities?: string[];
+    systemPrompt?: string | null;
+    soul?: string | null;
+  },
+  parentTask: { title: string; prompt: string }
+) => {
+  const lines: string[] = [
+    `You are ${role.displayName}${role.description ? ` — ${role.description}` : ''}.`,
+  ];
+
+  if (role.capabilities && role.capabilities.length > 0) {
+    lines.push(`Capabilities: ${role.capabilities.join(', ')}`);
+  }
+
+  if (role.systemPrompt) {
+    lines.push('System guidance:');
+    lines.push(role.systemPrompt);
+  }
+
+  const soulSummary = buildSoulSummary(role.soul || undefined);
+  if (soulSummary) {
+    lines.push('Role notes:');
+    lines.push(soulSummary);
+  }
+
+  lines.push('');
+  lines.push(`Parent task: ${parentTask.title}`);
+  lines.push('Request:');
+  lines.push(parentTask.prompt);
+  lines.push('');
+  lines.push('Deliverables:');
+  lines.push('- Provide a concise summary of your findings.');
+  lines.push('- Call out risks or open questions.');
+  lines.push('- Recommend next steps.');
+
+  return lines.join('\n');
+};
+import { XSettingsManager } from '../settings/x-manager';
+import { testXConnection, checkBirdInstalled } from '../utils/x-cli';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { CustomSkill } from '../../shared/types';
 import { MCPSettingsManager } from '../mcp/settings';
 import { MCPClientManager } from '../mcp/client/MCPClientManager';
 import { MCPRegistryManager } from '../mcp/registry/MCPRegistryManager';
+import type { MCPSettings, MCPServerConfig } from '../mcp/types';
 import { MCPHostServer } from '../mcp/host/MCPHostServer';
 import { BuiltinToolsSettingsManager } from '../agent/tools/builtin-settings';
 import {
@@ -483,6 +696,92 @@ export async function setupIpcHandlers(
         error: error.message || 'Failed to start task',
       });
       throw new Error(error.message || 'Failed to start task. Please check your LLM provider settings.');
+    }
+
+    // Dispatch to mentioned agents (e.g., "Please review @Vision @Loki")
+    try {
+      const activeRoles = agentRoleRepo.findAll(false).filter((role) => role.isActive);
+      const mentionedRoles = extractMentionedRoles(`${title}\n${prompt}`, activeRoles);
+      const dispatchRoles = mentionedRoles.length > 0 ? mentionedRoles : activeRoles;
+
+      if (dispatchRoles.length > 0) {
+        const taskUpdate: Partial<Task> = {
+          mentionedAgentRoleIds: dispatchRoles.map((role) => role.id),
+        };
+        taskRepo.update(task.id, taskUpdate);
+
+        // Parallelize child task creation for better performance
+        const dispatchPromises = dispatchRoles.map(async (role) => {
+          const childPrompt = buildAgentDispatchPrompt(role, task);
+          const childTask = await agentDaemon.createChildTask({
+            title: `@${role.displayName}: ${task.title}`,
+            prompt: childPrompt,
+            workspaceId: task.workspaceId,
+            parentTaskId: task.id,
+            agentType: 'sub',
+            agentConfig: {
+              ...(role.modelKey ? { modelKey: role.modelKey } : {}),
+              ...(role.personalityId ? { personalityId: role.personalityId } : {}),
+              retainMemory: false,
+            },
+          });
+
+          const childUpdate: Partial<Task> = {
+            assignedAgentRoleId: role.id,
+            boardColumn: 'todo' as BoardColumn,
+          };
+          taskRepo.update(childTask.id, childUpdate);
+
+          const dispatchActivity = activityRepo.create({
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            agentRoleId: role.id,
+            actorType: 'system',
+            activityType: 'agent_assigned',
+            title: `Dispatched to ${role.displayName}`,
+            description: childTask.title,
+          });
+          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: dispatchActivity });
+
+          const mention = mentionRepo.create({
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            toAgentRoleId: role.id,
+            mentionType: 'request',
+            context: `New task: ${task.title}`,
+          });
+          getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
+
+          const mentionActivity = activityRepo.create({
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            agentRoleId: role.id,
+            actorType: 'user',
+            activityType: 'mention',
+            title: `@${role.displayName} mentioned`,
+            description: mention.context,
+            metadata: { mentionId: mention.id, mentionType: mention.mentionType },
+          });
+          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: mentionActivity });
+
+          return { role, childTask };
+        });
+
+        await Promise.all(dispatchPromises);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to dispatch to mentioned agents:', error);
+      // Notify user of dispatch failure via activity feed
+      const errorActivity = activityRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        actorType: 'system',
+        activityType: 'error',
+        title: 'Agent dispatch failed',
+        description: `Failed to dispatch task to mentioned agents: ${errorMessage}`,
+      });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: errorActivity });
     }
 
     return task;
@@ -1125,6 +1424,46 @@ export async function setupIpcHandlers(
     return SearchProviderFactory.testProvider(providerType);
   });
 
+  // X/Twitter Settings handlers
+  ipcMain.handle(IPC_CHANNELS.X_GET_SETTINGS, async () => {
+    return XSettingsManager.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.X_SAVE_SETTINGS);
+    const validated = validateInput(XSettingsSchema, settings, 'x settings') as XSettingsData;
+    XSettingsManager.saveSettings(validated);
+    XSettingsManager.clearCache();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_TEST_CONNECTION, async () => {
+    checkRateLimit(IPC_CHANNELS.X_TEST_CONNECTION);
+    const settings = XSettingsManager.loadSettings();
+    return testXConnection(settings);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_GET_STATUS, async () => {
+    checkRateLimit(IPC_CHANNELS.X_GET_STATUS);
+    const installStatus = await checkBirdInstalled();
+    if (!installStatus.installed) {
+      return { installed: false, connected: false };
+    }
+
+    const settings = XSettingsManager.loadSettings();
+    if (!settings.enabled) {
+      return { installed: true, connected: false };
+    }
+
+    const result = await testXConnection(settings);
+    return {
+      installed: true,
+      connected: result.success,
+      username: result.username,
+      error: result.success ? undefined : result.error,
+    };
+  });
+
   // Gateway / Channel handlers
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNELS, async () => {
     if (!gateway) return [];
@@ -1685,7 +2024,34 @@ export async function setupIpcHandlers(
         throw new Error('Agent role not found');
       }
     }
-    taskRepo.update(validatedTaskId, { assignedAgentRoleId: agentRoleId ?? undefined } as any);
+    const taskUpdate: Partial<Task> = { assignedAgentRoleId: agentRoleId ?? undefined };
+    taskRepo.update(validatedTaskId, taskUpdate);
+    const task = taskRepo.findById(validatedTaskId);
+    if (task) {
+      if (agentRoleId) {
+        const role = agentRoleRepo.findById(agentRoleId);
+        const activity = activityRepo.create({
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          agentRoleId,
+          actorType: 'system',
+          activityType: 'agent_assigned',
+          title: `Assigned to ${role?.displayName || 'agent'}`,
+          description: task.title,
+        });
+        getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+      } else {
+        const activity = activityRepo.create({
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          actorType: 'system',
+          activityType: 'info',
+          title: 'Task unassigned',
+          description: task.title,
+        });
+        getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+      }
+    }
     return { success: true };
   });
 
@@ -1821,6 +2187,23 @@ export async function setupIpcHandlers(
     const task = taskRepo.moveToColumn(validatedId, column);
     if (task) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'moved', task, column });
+      const columnLabels: Record<string, string> = {
+        backlog: 'Inbox',
+        todo: 'Assigned',
+        in_progress: 'In Progress',
+        review: 'Review',
+        done: 'Done',
+      };
+      const activity = activityRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        agentRoleId: task.assignedAgentRoleId,
+        actorType: 'system',
+        activityType: 'info',
+        title: `Moved to ${columnLabels[column] || column}`,
+        description: task.title,
+      });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
     }
     return task;
   });
@@ -2055,8 +2438,8 @@ function setupMCPHandlers(): void {
   // Save settings
   ipcMain.handle(IPC_CHANNELS.MCP_SAVE_SETTINGS, async (_, settings) => {
     checkRateLimit(IPC_CHANNELS.MCP_SAVE_SETTINGS);
-    const validated = validateInput(MCPSettingsSchema, settings, 'MCP settings');
-    MCPSettingsManager.saveSettings(validated as any);
+    const validated = validateInput(MCPSettingsSchema, settings, 'MCP settings') as MCPSettings;
+    MCPSettingsManager.saveSettings(validated);
     MCPSettingsManager.clearCache();
     return { success: true };
   });
@@ -2071,15 +2454,15 @@ function setupMCPHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_ADD_SERVER, async (_, serverConfig) => {
     checkRateLimit(IPC_CHANNELS.MCP_ADD_SERVER);
     const validated = validateInput(MCPServerConfigSchema, serverConfig, 'MCP server config');
-    const { id, ...configWithoutId } = validated;
-    return MCPSettingsManager.addServer(configWithoutId as any);
+    const { id: _id, ...configWithoutId } = validated;
+    return MCPSettingsManager.addServer(configWithoutId as Omit<MCPServerConfig, 'id'>);
   });
 
   // Update a server
   ipcMain.handle(IPC_CHANNELS.MCP_UPDATE_SERVER, async (_, serverId: string, updates) => {
     const validatedId = validateInput(UUIDSchema, serverId, 'server ID');
-    const validatedUpdates = validateInput(MCPServerUpdateSchema, updates, 'server updates');
-    return MCPSettingsManager.updateServer(validatedId, validatedUpdates as any);
+    const validatedUpdates = validateInput(MCPServerUpdateSchema, updates, 'server updates') as Partial<MCPServerConfig>;
+    return MCPSettingsManager.updateServer(validatedId, validatedUpdates);
   });
 
   // Remove a server
