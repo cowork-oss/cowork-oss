@@ -29,6 +29,8 @@ export class BedrockProvider implements LLMProvider {
   private client: BedrockRuntimeClient;
   private model: string;
 
+  private static readonly toolNameRegex = /^[a-zA-Z0-9_-]+$/;
+
   constructor(config: LLMProviderConfig) {
     const clientConfig: BedrockRuntimeClientConfig = {
       region: config.awsRegion || 'us-east-1',
@@ -56,9 +58,10 @@ export class BedrockProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const messages = this.convertMessages(request.messages);
+    const toolNameMap = request.tools ? this.buildToolNameMap(request.tools) : undefined;
+    const messages = this.convertMessages(request.messages, toolNameMap);
     const system = this.convertSystem(request.system);
-    const toolConfig = request.tools ? this.convertTools(request.tools) : undefined;
+    const toolConfig = request.tools ? this.convertTools(request.tools, toolNameMap) : undefined;
 
     const command = new ConverseCommand({
       modelId: request.model,
@@ -77,7 +80,7 @@ export class BedrockProvider implements LLMProvider {
         // Pass abort signal to allow cancellation
         request.signal ? { abortSignal: request.signal } : undefined
       );
-      return this.convertResponse(response);
+      return this.convertResponse(response, toolNameMap);
     } catch (error: any) {
       // Handle abort errors gracefully
       if (error.name === 'AbortError' || error.message?.includes('aborted')) {
@@ -135,7 +138,7 @@ export class BedrockProvider implements LLMProvider {
     return [{ text: system }];
   }
 
-  private convertMessages(messages: LLMMessage[]): Message[] {
+  private convertMessages(messages: LLMMessage[], toolNameMap?: ToolNameMap): Message[] {
     return messages.map((msg) => {
       const content: ContentBlock[] = [];
 
@@ -146,10 +149,11 @@ export class BedrockProvider implements LLMProvider {
           if (item.type === 'text') {
             content.push({ text: item.text });
           } else if (item.type === 'tool_use') {
+            const mappedName = toolNameMap?.toProvider.get(item.name) || item.name;
             content.push({
               toolUse: {
                 toolUseId: item.id,
-                name: item.name,
+                name: mappedName,
                 input: item.input,
               },
             });
@@ -172,11 +176,11 @@ export class BedrockProvider implements LLMProvider {
     });
   }
 
-  private convertTools(tools: LLMTool[]): ToolConfiguration {
+  private convertTools(tools: LLMTool[], toolNameMap?: ToolNameMap): ToolConfiguration {
     return {
       tools: tools.map((tool) => ({
         toolSpec: {
-          name: tool.name,
+          name: toolNameMap?.toProvider.get(tool.name) || tool.name,
           description: tool.description,
           inputSchema: {
             json: tool.input_schema,
@@ -186,7 +190,7 @@ export class BedrockProvider implements LLMProvider {
     };
   }
 
-  private convertResponse(response: any): LLMResponse {
+  private convertResponse(response: any, toolNameMap?: ToolNameMap): LLMResponse {
     const content: LLMContent[] = [];
 
     if (response.output?.message?.content) {
@@ -197,10 +201,11 @@ export class BedrockProvider implements LLMProvider {
             text: block.text,
           });
         } else if (block.toolUse) {
+          const mappedName = toolNameMap?.fromProvider.get(block.toolUse.name) || block.toolUse.name;
           content.push({
             type: 'tool_use',
             id: block.toolUse.toolUseId,
-            name: block.toolUse.name,
+            name: mappedName,
             input: block.toolUse.input,
           });
         }
@@ -219,6 +224,49 @@ export class BedrockProvider implements LLMProvider {
     };
   }
 
+  private buildToolNameMap(tools: LLMTool[]): ToolNameMap {
+    const toProvider = new Map<string, string>();
+    const fromProvider = new Map<string, string>();
+    const used = new Set<string>();
+
+    for (const tool of tools) {
+      let base = this.normalizeToolName(tool.name);
+      if (!base) {
+        base = `tool_${this.shortHash(tool.name)}`;
+      }
+
+      let candidate = base;
+      if (used.has(candidate)) {
+        const hashed = `${base}_${this.shortHash(tool.name)}`;
+        candidate = hashed;
+        let counter = 1;
+        while (used.has(candidate)) {
+          candidate = `${hashed}_${counter++}`;
+        }
+      }
+
+      used.add(candidate);
+      toProvider.set(tool.name, candidate);
+      fromProvider.set(candidate, tool.name);
+    }
+
+    return { toProvider, fromProvider };
+  }
+
+  private normalizeToolName(name: string): string {
+    const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return BedrockProvider.toolNameRegex.test(sanitized) ? sanitized : '';
+  }
+
+  private shortHash(input: string): string {
+    let hash = 2166136261;
+    for (let i = 0; i < input.length; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
   private mapStopReason(reason: StopReason | undefined): LLMResponse['stopReason'] {
     switch (reason) {
       case 'end_turn':
@@ -233,4 +281,9 @@ export class BedrockProvider implements LLMProvider {
         return 'end_turn';
     }
   }
+}
+
+interface ToolNameMap {
+  toProvider: Map<string, string>;
+  fromProvider: Map<string, string>;
 }
