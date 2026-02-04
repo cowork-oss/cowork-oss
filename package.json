@@ -136,7 +136,8 @@
         "from": "resources/skills",
         "to": "skills",
         "filter": [
-          "**/*.json"
+          "**/*.json",
+          "scripts/**"
         ]
       },
       {

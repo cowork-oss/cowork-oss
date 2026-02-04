@@ -390,7 +390,7 @@ export class CustomSkillLoader {
     skill: CustomSkill,
     parameterValues: Record<string, string | number | boolean>
   ): string {
-    let prompt = skill.prompt;
+    let prompt = this.expandBaseDir(skill.prompt, skill);
 
     // Replace {{param}} placeholders with values
     if (skill.parameters) {
@@ -405,6 +405,39 @@ export class CustomSkillLoader {
     prompt = prompt.replace(/\{\{[^}]+\}\}/g, '');
 
     return prompt.trim();
+  }
+
+  /**
+   * Expand {baseDir} placeholders to the resolved skill base directory.
+   */
+  expandBaseDir(prompt: string, skill: CustomSkill): string {
+    if (!prompt.includes('{baseDir}')) {
+      return prompt;
+    }
+    const baseDir = this.resolveBaseDir(skill);
+    return prompt.replace(/\{baseDir\}/g, baseDir);
+  }
+
+  private resolveBaseDir(skill: CustomSkill): string {
+    const fileDir = skill.filePath ? path.dirname(skill.filePath) : this.bundledSkillsDir;
+    const candidates = [
+      fileDir,
+      this.bundledSkillsDir,
+      this.managedSkillsDir,
+      this.workspaceSkillsDir || '',
+    ].filter(Boolean) as string[];
+
+    for (const dir of candidates) {
+      try {
+        if (fs.existsSync(path.join(dir, 'scripts'))) {
+          return dir;
+        }
+      } catch {
+        // ignore and continue
+      }
+    }
+
+    return fileDir;
   }
 
   /**
