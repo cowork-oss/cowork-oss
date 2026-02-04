@@ -1085,6 +1085,8 @@ export function ControlPlaneSettings() {
           padding: 0.75rem 1rem;
           border-radius: 6px;
           margin: 0.5rem 0;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
 
         .test-result.success {
