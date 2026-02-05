@@ -27,17 +27,19 @@ export class WorkspaceRepository {
   constructor(private db: Database.Database) {}
 
   create(name: string, path: string, permissions: WorkspacePermissions): Workspace {
+    const now = Date.now();
     const workspace: Workspace = {
       id: uuidv4(),
       name,
       path,
-      createdAt: Date.now(),
+      createdAt: now,
+      lastUsedAt: now,
       permissions,
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, permissions)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -45,6 +47,7 @@ export class WorkspaceRepository {
       workspace.name,
       workspace.path,
       workspace.createdAt,
+      workspace.lastUsedAt,
       JSON.stringify(workspace.permissions)
     );
 
@@ -58,7 +61,11 @@ export class WorkspaceRepository {
   }
 
   findAll(): Workspace[] {
-    const stmt = this.db.prepare('SELECT * FROM workspaces ORDER BY created_at DESC');
+    const stmt = this.db.prepare(`
+      SELECT *
+      FROM workspaces
+      ORDER BY COALESCE(last_used_at, created_at) DESC
+    `);
     const rows = stmt.all() as any[];
     return rows.map(row => this.mapRowToWorkspace(row));
   }
@@ -87,6 +94,14 @@ export class WorkspaceRepository {
   updatePermissions(id: string, permissions: WorkspacePermissions): void {
     const stmt = this.db.prepare('UPDATE workspaces SET permissions = ? WHERE id = ?');
     stmt.run(JSON.stringify(permissions), id);
+  }
+
+  /**
+   * Update last used timestamp for recency ordering
+   */
+  updateLastUsedAt(id: string, lastUsedAt: number = Date.now()): void {
+    const stmt = this.db.prepare('UPDATE workspaces SET last_used_at = ? WHERE id = ?');
+    stmt.run(lastUsedAt, id);
   }
 
   /**
@@ -120,6 +135,7 @@ export class WorkspaceRepository {
       name: row.name,
       path: row.path,
       createdAt: row.created_at,
+      lastUsedAt: row.last_used_at ?? undefined,
       permissions: mergedPermissions,
     };
   }

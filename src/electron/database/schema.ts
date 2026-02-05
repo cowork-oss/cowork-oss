@@ -234,6 +234,7 @@ export class DatabaseManager {
         name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE,
         created_at INTEGER NOT NULL,
+        last_used_at INTEGER,
         permissions TEXT NOT NULL
       );
 
@@ -590,6 +591,13 @@ export class DatabaseManager {
       } catch {
         // Column already exists, ignore
       }
+    }
+
+    // Migration: Add last_used_at to workspaces for recency ordering
+    try {
+      this.db.exec('ALTER TABLE workspaces ADD COLUMN last_used_at INTEGER');
+    } catch {
+      // Column already exists, ignore
     }
 
     // Migration: Add Sub-Agent / Parallel Agent columns to tasks table
