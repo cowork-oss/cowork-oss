@@ -1067,6 +1067,7 @@ export class TaskExecutor {
   private lastNonVerificationOutput: string | null = null;
   private readonly toolResultMemoryLimit = 8;
   private readonly shouldPauseForQuestions: boolean;
+  private dispatchedMentionedAgents = false;
 
   // Plan revision tracking to prevent infinite revision loops
   private planRevisionCount: number = 0;
@@ -2675,6 +2676,18 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
+  private async dispatchMentionedAgentsAfterPlanning(): Promise<void> {
+    if (this.dispatchedMentionedAgents) return;
+    if (!this.shouldPauseForQuestions) return;
+    if (!this.plan) return;
+    try {
+      await this.daemon.dispatchMentionedAgents(this.task.id, this.plan);
+      this.dispatchedMentionedAgents = true;
+    } catch (error) {
+      console.warn('[TaskExecutor] Failed to dispatch mentioned agents:', error);
+    }
+  }
+
   /**
    * Main execution loop
    */
@@ -2710,6 +2723,8 @@ You are continuing a previous conversation. The context from the previous conver
       // Phase 1: Planning
       this.daemon.updateTaskStatus(this.task.id, 'planning');
       await this.createPlan();
+
+      await this.dispatchMentionedAgentsAfterPlanning();
 
       if (this.cancelled) return;
 

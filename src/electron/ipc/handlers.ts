@@ -247,67 +247,6 @@ const extractMentionedRoles = (
   return Array.from(matches.values());
 };
 
-const buildSoulSummary = (soul?: string): string | null => {
-  if (!soul) return null;
-  try {
-    const parsed = JSON.parse(soul) as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof parsed.name === 'string') parts.push(`Name: ${parsed.name}`);
-    if (typeof parsed.role === 'string') parts.push(`Role: ${parsed.role}`);
-    if (typeof parsed.personality === 'string') parts.push(`Personality: ${parsed.personality}`);
-    if (typeof parsed.communicationStyle === 'string') parts.push(`Style: ${parsed.communicationStyle}`);
-    if (Array.isArray(parsed.focusAreas)) parts.push(`Focus: ${parsed.focusAreas.join(', ')}`);
-    if (Array.isArray(parsed.strengths)) parts.push(`Strengths: ${parsed.strengths.join(', ')}`);
-    if (parts.length === 0) {
-      return null;
-    }
-    return parts.join('\n');
-  } catch {
-    return soul;
-  }
-};
-
-const buildAgentDispatchPrompt = (
-  role: {
-    displayName: string;
-    description?: string | null;
-    capabilities?: string[];
-    systemPrompt?: string | null;
-    soul?: string | null;
-  },
-  parentTask: { title: string; prompt: string }
-) => {
-  const lines: string[] = [
-    `You are ${role.displayName}${role.description ? ` — ${role.description}` : ''}.`,
-  ];
-
-  if (role.capabilities && role.capabilities.length > 0) {
-    lines.push(`Capabilities: ${role.capabilities.join(', ')}`);
-  }
-
-  if (role.systemPrompt) {
-    lines.push('System guidance:');
-    lines.push(role.systemPrompt);
-  }
-
-  const soulSummary = buildSoulSummary(role.soul || undefined);
-  if (soulSummary) {
-    lines.push('Role notes:');
-    lines.push(soulSummary);
-  }
-
-  lines.push('');
-  lines.push(`Parent task: ${parentTask.title}`);
-  lines.push('Request:');
-  lines.push(parentTask.prompt);
-  lines.push('');
-  lines.push('Deliverables:');
-  lines.push('- Provide a concise summary of your findings.');
-  lines.push('- Call out risks or open questions.');
-  lines.push('- Recommend next steps.');
-
-  return lines.join('\n');
-};
 import { XSettingsManager } from '../settings/x-manager';
 import { testXConnection, checkBirdInstalled } from '../utils/x-cli';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
@@ -910,6 +849,29 @@ export async function setupIpcHandlers(
       }
     }
 
+    // Capture mentioned agent roles for deferred dispatch (after main plan is created)
+    try {
+      const activeRoles = agentRoleRepo.findAll(false).filter((role) => role.isActive);
+      const mentionedRoles = extractMentionedRoles(`${title}\n${prompt}`, activeRoles);
+      const mentionedAgentRoleIds = mentionedRoles.map((role) => role.id);
+      if (mentionedAgentRoleIds.length > 0) {
+        taskRepo.update(task.id, { mentionedAgentRoleIds });
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to record mentioned agents:', error);
+      // Notify user of dispatch failure via activity feed
+      const errorActivity = activityRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        actorType: 'system',
+        activityType: 'error',
+        title: 'Agent mention capture failed',
+        description: `Failed to record mentioned agents for deferred dispatch: ${errorMessage}`,
+      });
+      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: errorActivity });
+    }
+
     // Start task execution in agent daemon
     try {
       await agentDaemon.startTask(task);
@@ -920,92 +882,6 @@ export async function setupIpcHandlers(
         error: error.message || 'Failed to start task',
       });
       throw new Error(error.message || 'Failed to start task. Please check your LLM provider settings.');
-    }
-
-    // Dispatch to mentioned agents (e.g., "Please review @Vision @Loki")
-    try {
-      const activeRoles = agentRoleRepo.findAll(false).filter((role) => role.isActive);
-      const mentionedRoles = extractMentionedRoles(`${title}\n${prompt}`, activeRoles);
-      const dispatchRoles = mentionedRoles;
-
-      if (dispatchRoles.length > 0) {
-        const taskUpdate: Partial<Task> = {
-          mentionedAgentRoleIds: dispatchRoles.map((role) => role.id),
-        };
-        taskRepo.update(task.id, taskUpdate);
-
-        // Parallelize child task creation for better performance
-        const dispatchPromises = dispatchRoles.map(async (role) => {
-          const childPrompt = buildAgentDispatchPrompt(role, task);
-          const childTask = await agentDaemon.createChildTask({
-            title: `@${role.displayName}: ${task.title}`,
-            prompt: childPrompt,
-            workspaceId: task.workspaceId,
-            parentTaskId: task.id,
-            agentType: 'sub',
-            agentConfig: {
-              ...(role.modelKey ? { modelKey: role.modelKey } : {}),
-              ...(role.personalityId ? { personalityId: role.personalityId } : {}),
-              retainMemory: false,
-            },
-          });
-
-          const childUpdate: Partial<Task> = {
-            assignedAgentRoleId: role.id,
-            boardColumn: 'todo' as BoardColumn,
-          };
-          taskRepo.update(childTask.id, childUpdate);
-
-          const dispatchActivity = activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            agentRoleId: role.id,
-            actorType: 'system',
-            activityType: 'agent_assigned',
-            title: `Dispatched to ${role.displayName}`,
-            description: childTask.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: dispatchActivity });
-
-          const mention = mentionRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            toAgentRoleId: role.id,
-            mentionType: 'request',
-            context: `New task: ${task.title}`,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
-
-          const mentionActivity = activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            agentRoleId: role.id,
-            actorType: 'user',
-            activityType: 'mention',
-            title: `@${role.displayName} mentioned`,
-            description: mention.context,
-            metadata: { mentionId: mention.id, mentionType: mention.mentionType },
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: mentionActivity });
-
-          return { role, childTask };
-        });
-
-        await Promise.all(dispatchPromises);
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to dispatch to mentioned agents:', error);
-      // Notify user of dispatch failure via activity feed
-      const errorActivity = activityRepo.create({
-        workspaceId: task.workspaceId,
-        taskId: task.id,
-        actorType: 'system',
-        activityType: 'error',
-        title: 'Agent dispatch failed',
-        description: `Failed to dispatch task to mentioned agents: ${errorMessage}`,
-      });
-      getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity: errorActivity });
     }
 
     return task;

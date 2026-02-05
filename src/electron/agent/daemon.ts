@@ -12,7 +12,10 @@ import {
   MemoryType,
 } from '../database/repositories';
 import { ActivityRepository } from '../activity/ActivityRepository';
-import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest } from '../../shared/types';
+import { AgentRoleRepository } from '../agents/AgentRoleRepository';
+import { MentionRepository } from '../agents/MentionRepository';
+import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
+import { Task, TaskStatus, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -43,6 +46,8 @@ export class AgentDaemon extends EventEmitter {
   private approvalRepo: ApprovalRepository;
   private artifactRepo: ArtifactRepository;
   private activityRepo: ActivityRepository;
+  private agentRoleRepo: AgentRoleRepository;
+  private mentionRepo: MentionRepository;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
@@ -59,6 +64,8 @@ export class AgentDaemon extends EventEmitter {
     this.approvalRepo = new ApprovalRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
     this.activityRepo = new ActivityRepository(db);
+    this.agentRoleRepo = new AgentRoleRepository(db);
+    this.mentionRepo = new MentionRepository(db);
 
     // Initialize queue manager with callbacks
     this.queueManager = new TaskQueueManager({
@@ -280,6 +287,136 @@ export class AgentDaemon extends EventEmitter {
     await this.startTask(task);
 
     return task;
+  }
+
+  private buildPlanSummary(plan?: Plan): string | undefined {
+    if (!plan) return undefined;
+    const lines: string[] = [];
+    if (plan.description) {
+      lines.push(`Plan: ${plan.description}`);
+    }
+    if (plan.steps && plan.steps.length > 0) {
+      lines.push('Steps:');
+      const stepLines = plan.steps
+        .slice(0, 7)
+        .map((step) => `- ${step.description}`);
+      lines.push(...stepLines);
+      if (plan.steps.length > 7) {
+        lines.push(`- …and ${plan.steps.length - 7} more steps`);
+      }
+    }
+    return lines.length > 0 ? lines.join('\n') : undefined;
+  }
+
+  private emitActivityEvent(activity: Activity): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(window => {
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+        }
+      } catch (error) {
+        console.error('[AgentDaemon] Error sending activity IPC:', error);
+      }
+    });
+  }
+
+  private emitMentionEvent(mention: AgentMention): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(window => {
+      try {
+        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
+        }
+      } catch (error) {
+        console.error('[AgentDaemon] Error sending mention IPC:', error);
+      }
+    });
+  }
+
+  /**
+   * Dispatch mentioned agent roles after the main plan is created.
+   * This avoids starting sub-agents before the task is clearly defined.
+   */
+  async dispatchMentionedAgents(taskId: string, plan?: Plan): Promise<void> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || task.parentTaskId) return;
+
+    const mentionedRoleIds = (task.mentionedAgentRoleIds || []).filter(Boolean);
+    if (mentionedRoleIds.length === 0) return;
+
+    const activeRoles = this.agentRoleRepo.findAll(false).filter(role => role.isActive);
+    const mentionedRoles = activeRoles.filter(role => mentionedRoleIds.includes(role.id));
+    if (mentionedRoles.length === 0) return;
+
+    const existingChildren = this.taskRepo.findByParent(taskId);
+    const assignedRoleIds = new Set(
+      existingChildren
+        .map(child => child.assignedAgentRoleId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+
+    const rolesToDispatch = mentionedRoles.filter(role => !assignedRoleIds.has(role.id));
+    if (rolesToDispatch.length === 0) return;
+
+    const planSummary = this.buildPlanSummary(plan);
+
+    for (const role of rolesToDispatch) {
+      const childPrompt = buildAgentDispatchPrompt(
+        role,
+        { title: task.title, prompt: task.prompt },
+        planSummary ? { planSummary } : undefined
+      );
+      const childTask = await this.createChildTask({
+        title: `@${role.displayName}: ${task.title}`,
+        prompt: childPrompt,
+        workspaceId: task.workspaceId,
+        parentTaskId: task.id,
+        agentType: 'sub',
+        agentConfig: {
+          ...(role.modelKey ? { modelKey: role.modelKey } : {}),
+          ...(role.personalityId ? { personalityId: role.personalityId } : {}),
+          retainMemory: false,
+        },
+      });
+
+      this.taskRepo.update(childTask.id, {
+        assignedAgentRoleId: role.id,
+        boardColumn: 'todo' as BoardColumn,
+      });
+
+      const dispatchActivity = this.activityRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        agentRoleId: role.id,
+        actorType: 'system',
+        activityType: 'agent_assigned',
+        title: `Dispatched to ${role.displayName}`,
+        description: childTask.title,
+      });
+      this.emitActivityEvent(dispatchActivity);
+
+      const mention = this.mentionRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        toAgentRoleId: role.id,
+        mentionType: 'request',
+        context: `New task: ${task.title}`,
+      });
+      this.emitMentionEvent(mention);
+
+      const mentionActivity = this.activityRepo.create({
+        workspaceId: task.workspaceId,
+        taskId: task.id,
+        agentRoleId: role.id,
+        actorType: 'user',
+        activityType: 'mention',
+        title: `@${role.displayName} mentioned`,
+        description: mention.context,
+        metadata: { mentionId: mention.id, mentionType: mention.mentionType },
+      });
+      this.emitActivityEvent(mentionActivity);
+    }
   }
 
   /**
@@ -739,19 +876,6 @@ export class AgentDaemon extends EventEmitter {
       default:
         return undefined;
     }
-  }
-
-  private emitActivityEvent(activity: any): void {
-    const windows = BrowserWindow.getAllWindows();
-    windows.forEach(window => {
-      try {
-        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
-          window.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
-        }
-      } catch (error) {
-        console.error('[AgentDaemon] Error sending activity IPC:', error);
-      }
-    });
   }
 
   /**
