@@ -124,6 +124,7 @@
   "build": {
     "appId": "com.cowork-os.app",
     "productName": "CoWork OS",
+    "forceCodeSigning": true,
     "directories": {
       "output": "release"
     },
