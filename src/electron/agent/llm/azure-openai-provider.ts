@@ -319,6 +319,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
+    const testMaxTokens = 16;
     try {
       const chatUrl = this.getChatCompletionsUrl();
       const responsesUrl = this.getResponsesUrl();
@@ -333,7 +334,7 @@ export class AzureOpenAIProvider implements LLMProvider {
               content: [{ type: 'input_text', text: 'Hi' }],
             },
           ],
-          max_output_tokens: 10,
+          max_output_tokens: testMaxTokens,
         });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({})) as { error?: { message?: string } };
@@ -348,7 +349,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       let response = await this.sendRequest(chatUrl, {
         model: this.deployment,
         messages: [{ role: 'user', content: 'Hi' }],
-        max_tokens: 10,
+        max_tokens: testMaxTokens,
       });
 
       if (!response.ok) {
@@ -360,7 +361,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           response = await this.sendRequest(chatUrl, {
             model: this.deployment,
             messages: [{ role: 'user', content: 'Hi' }],
-            max_completion_tokens: 10,
+            max_completion_tokens: testMaxTokens,
           });
           if (response.ok) {
             return { success: true };

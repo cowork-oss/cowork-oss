@@ -120,7 +120,7 @@ describe('AzureOpenAIProvider', () => {
     expect(secondUrl).toBe('https://example.openai.azure.com/openai/v1/responses');
 
     const body = JSON.parse(secondOptions.body);
-    expect(body.max_output_tokens).toBe(10);
+    expect(body.max_output_tokens).toBe(16);
     expect(body.input[0].content[0].text).toBe('Hi');
   });
 
