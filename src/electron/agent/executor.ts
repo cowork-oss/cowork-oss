@@ -1489,6 +1489,75 @@ export class TaskExecutor {
    * This auto-fills parameters when the LLM fails to provide them but context is available
    */
   private inferMissingParameters(toolName: string, input: any): { input: any; modified: boolean; inference?: string } {
+    if (toolName === 'create_document') {
+      let modified = false;
+      let inference = '';
+      input = input || {};
+
+      if (!input.filename) {
+        if (input.path) {
+          input.filename = path.basename(String(input.path));
+          modified = true;
+          inference = 'Normalized path -> filename';
+        } else if (input.name) {
+          input.filename = String(input.name);
+          modified = true;
+          inference = 'Normalized name -> filename';
+        }
+      }
+
+      if (!input.format) {
+        const ext = input.filename ? path.extname(String(input.filename)).toLowerCase() : '';
+        if (ext === '.pdf') {
+          input.format = 'pdf';
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Inferred format="pdf" from filename`;
+        } else if (ext === '.docx') {
+          input.format = 'docx';
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Inferred format="docx" from filename`;
+        } else {
+          input.format = 'docx';
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Defaulted format="docx"`;
+        }
+      }
+
+      if (!input.content) {
+        const fallback = this.getContentFallback();
+        if (fallback) {
+          input.content = fallback;
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Inferred content from latest assistant output`;
+        }
+      }
+
+      return { input, modified, inference: modified ? inference : undefined };
+    }
+
+    if (toolName === 'write_file') {
+      let modified = false;
+      let inference = '';
+      input = input || {};
+
+      if (!input.path && input.filename) {
+        input.path = String(input.filename);
+        modified = true;
+        inference = 'Normalized filename -> path';
+      }
+
+      if (!input.content) {
+        const fallback = this.getContentFallback();
+        if (fallback) {
+          input.content = fallback;
+          modified = true;
+          inference = `${inference ? `${inference}; ` : ''}Inferred content from latest assistant output`;
+        }
+      }
+
+      return { input, modified, inference: modified ? inference : undefined };
+    }
+
     // Handle edit_document - infer sourcePath from recently created documents
     if (toolName === 'edit_document') {
       let modified = false;
@@ -1600,6 +1669,38 @@ export class TaskExecutor {
     }
 
     return { input, modified: false };
+  }
+
+  private getContentFallback(): string | undefined {
+    const candidates = [
+      this.lastAssistantText,
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+    ];
+    const placeholders = new Set([
+      'I understand. Let me continue.',
+    ]);
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const trimmed = candidate.trim();
+      if (trimmed.length < 20) continue;
+      if (placeholders.has(trimmed)) continue;
+      return trimmed;
+    }
+    return undefined;
+  }
+
+  private getToolInputValidationError(toolName: string, input: any): string | null {
+    if (toolName === 'create_document') {
+      if (!input?.filename) return 'create_document requires a filename';
+      if (!input?.format) return 'create_document requires a format (docx or pdf)';
+      if (!input?.content) return 'create_document requires content';
+    }
+    if (toolName === 'write_file') {
+      if (!input?.path) return 'write_file requires a path';
+      if (!input?.content) return 'write_file requires content';
+    }
+    return null;
   }
 
   private async handleCanvasPushFallback(content: LLMToolUse, assistantText: string): Promise<void> {
@@ -3772,6 +3873,26 @@ SCHEDULING & REMINDERS:
             // If canvas_push is missing content, try extracting HTML from assistant text or auto-generate
             await this.handleCanvasPushFallback(content, assistantText);
 
+            const validationError = this.getToolInputValidationError(content.name, content.input);
+            if (validationError) {
+              this.daemon.logEvent(this.task.id, 'tool_warning', {
+                tool: content.name,
+                error: validationError,
+                input: content.input,
+              });
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: validationError,
+                  suggestion: 'Include all required fields in the tool call (e.g., content for create_document/write_file).',
+                  invalid_input: true,
+                }),
+                is_error: true,
+              });
+              continue;
+            }
+
             // Check for duplicate tool calls (prevents stuck loops)
             const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
             if (duplicateCheck.isDuplicate) {
@@ -4595,6 +4716,26 @@ SCHEDULING & REMINDERS:
 
             // If canvas_push is missing content, try extracting HTML from assistant text or auto-generate
             await this.handleCanvasPushFallback(content, assistantText);
+
+            const validationError = this.getToolInputValidationError(content.name, content.input);
+            if (validationError) {
+              this.daemon.logEvent(this.task.id, 'tool_warning', {
+                tool: content.name,
+                error: validationError,
+                input: content.input,
+              });
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: validationError,
+                  suggestion: 'Include all required fields in the tool call (e.g., content for create_document/write_file).',
+                  invalid_input: true,
+                }),
+                is_error: true,
+              });
+              continue;
+            }
 
             // Check for duplicate tool calls (prevents stuck loops)
             const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
