@@ -86,4 +86,23 @@ describe('LLMProviderFactory custom provider config resolution', () => {
 
     expect(modelId).toBe('my-deployment');
   });
+
+  it('prefers explicit bedrock model ID when provider type is bedrock', () => {
+    const modelId = LLMProviderFactory.getModelId(
+      'sonnet-3-5',
+      'bedrock',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'us.anthropic.claude-opus-4-6-20260115-v1:0'
+    );
+
+    expect(modelId).toBe('us.anthropic.claude-opus-4-6-20260115-v1:0');
+  });
 });

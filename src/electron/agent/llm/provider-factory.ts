@@ -7,6 +7,12 @@ import {
   LLMProviderConfig,
   LLMProviderType,
   MODELS,
+  GEMINI_MODELS,
+  OPENROUTER_MODELS,
+  OLLAMA_MODELS,
+  GROQ_MODELS,
+  XAI_MODELS,
+  KIMI_MODELS,
   ModelKey,
   DEFAULT_MODEL,
 } from './types';
@@ -645,7 +651,8 @@ export class LLMProviderFactory {
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,
-        settings.customProviders
+        settings.customProviders,
+        settings.bedrock?.model
       ),
       // Anthropic config - from settings only
       anthropicApiKey: normalizeSecret(overrideConfig?.anthropicApiKey) || settings.anthropic?.apiKey,
@@ -740,7 +747,8 @@ export class LLMProviderFactory {
     groqModel?: string,
     xaiModel?: string,
     kimiModel?: string,
-    customProviders?: Record<string, CustomProviderConfig>
+    customProviders?: Record<string, CustomProviderConfig>,
+    bedrockModel?: string
   ): string {
     const customEntry = getCustomProviderEntry(providerType);
     if (customEntry) {
@@ -786,6 +794,30 @@ export class LLMProviderFactory {
     // For Kimi, use the specific model if provided or default
     if (providerType === 'kimi') {
       return kimiModel || 'kimi-k2.5';
+    }
+
+    // For Bedrock, prefer an explicit Bedrock model ID if configured.
+    if (providerType === 'bedrock') {
+      const configuredBedrockModel = bedrockModel?.trim();
+      if (configuredBedrockModel) {
+        return configuredBedrockModel;
+      }
+
+      if (typeof modelKey === 'string') {
+        const trimmedModelKey = modelKey.trim();
+        if (trimmedModelKey.startsWith('anthropic.') || trimmedModelKey.startsWith('us.')) {
+          return trimmedModelKey;
+        }
+      }
+
+      const mappedBedrockModel = MODELS[modelKey as ModelKey]?.bedrock;
+      if (mappedBedrockModel) {
+        return mappedBedrockModel;
+      }
+
+      if (typeof modelKey === 'string' && modelKey.trim().length > 0) {
+        return modelKey.trim();
+      }
     }
 
     // For other providers, look up in MODELS
@@ -898,16 +930,17 @@ export class LLMProviderFactory {
    */
   static getConfigStatus(): {
     currentProvider: LLMProviderType;
-    currentModel: ModelKey | string;
+    currentModel: string;
     providers: Array<{ type: LLMProviderType; name: string; configured: boolean }>;
-    models: Array<{ key: ModelKey; displayName: string }>;
+    models: Array<{ key: string; displayName: string; description: string }>;
   } {
     const settings = this.loadSettings();
+    const modelStatus = this.getProviderModelStatus(settings);
     return {
       currentProvider: settings.providerType,
-      currentModel: settings.modelKey,
+      currentModel: modelStatus.currentModel,
       providers: this.getAvailableProviders(),
-      models: this.getAvailableModels(),
+      models: modelStatus.models,
     };
   }
 
@@ -922,9 +955,309 @@ export class LLMProviderFactory {
   /**
    * Get the currently selected model key
    */
-  static getSelectedModel(): ModelKey | string {
+  static getSelectedModel(): string {
     const settings = this.loadSettings();
-    return settings.modelKey;
+    return this.getProviderModelStatus(settings).currentModel;
+  }
+
+  /**
+   * Get model list and selected model for the active provider.
+   * This is the shared source of truth used by both renderer IPC and gateway commands.
+   */
+  static getProviderModelStatus(settings: LLMSettings): {
+    currentModel: string;
+    models: CachedModelInfo[];
+  } {
+    const resolvedProviderType = resolveCustomProviderId(settings.providerType);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as any);
+    const ensureCurrentModel = (
+      modelList: CachedModelInfo[],
+      modelKey: string,
+      description = 'Selected model'
+    ) => {
+      if (!modelKey || modelList.some((model) => model.key === modelKey)) {
+        return modelList;
+      }
+      return [
+        {
+          key: modelKey,
+          displayName: modelKey,
+          description,
+        },
+        ...modelList,
+      ];
+    };
+
+    if (customEntry) {
+      const customConfig = settings.customProviders?.[resolvedProviderType] || settings.customProviders?.[settings.providerType];
+      const currentModel = customConfig?.model || customEntry.defaultModel || '';
+      return {
+        currentModel,
+        models: [
+          {
+            key: currentModel,
+            displayName: currentModel,
+            description: customEntry.description || `${customEntry.name} model`,
+          },
+        ],
+      };
+    }
+
+    switch (settings.providerType) {
+      case 'anthropic': {
+        const currentModel = settings.modelKey;
+        const modelList = Object.entries(MODELS).map(([key, value]) => ({
+          key,
+          displayName: value.displayName,
+          description: key.includes('opus')
+            ? 'Most capable for complex work'
+            : key.includes('sonnet')
+              ? 'Balanced performance and speed'
+              : 'Fast and efficient',
+        }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'bedrock': {
+        const fallbackModel = MODELS[settings.modelKey as ModelKey]?.bedrock;
+        const currentModel = settings.bedrock?.model || fallbackModel || settings.modelKey;
+        const modelList = settings.cachedBedrockModels && settings.cachedBedrockModels.length > 0
+          ? settings.cachedBedrockModels
+          : Object.values(MODELS).map((value) => ({
+            key: value.bedrock,
+            displayName: value.displayName,
+            description: value.displayName.toLowerCase().includes('opus')
+              ? 'Most capable for complex work'
+              : value.displayName.toLowerCase().includes('sonnet')
+                ? 'Balanced performance and speed'
+                : 'Fast and efficient',
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'gemini': {
+        const currentModel = settings.gemini?.model || 'gemini-2.0-flash';
+        const modelList = settings.cachedGeminiModels && settings.cachedGeminiModels.length > 0
+          ? settings.cachedGeminiModels
+          : Object.values(GEMINI_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'openrouter': {
+        const currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
+        const modelList = settings.cachedOpenRouterModels && settings.cachedOpenRouterModels.length > 0
+          ? settings.cachedOpenRouterModels
+          : Object.values(OPENROUTER_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'openai': {
+        const currentModel = settings.openai?.model || 'gpt-4o-mini';
+        const modelList = settings.cachedOpenAIModels && settings.cachedOpenAIModels.length > 0
+          ? settings.cachedOpenAIModels
+          : [
+            { key: 'gpt-4o', displayName: 'GPT-4o', description: 'Most capable model for complex tasks' },
+            { key: 'gpt-4o-mini', displayName: 'GPT-4o Mini', description: 'Fast and affordable for most tasks' },
+            { key: 'gpt-4-turbo', displayName: 'GPT-4 Turbo', description: 'Previous generation flagship' },
+            { key: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo', description: 'Fast and cost-effective' },
+            { key: 'o1', displayName: 'o1', description: 'Advanced reasoning model' },
+            { key: 'o1-mini', displayName: 'o1 Mini', description: 'Fast reasoning model' },
+          ];
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'azure': {
+        const deployments = (settings.azure?.deployments || []).filter(Boolean);
+        const currentModel = settings.azure?.deployment || deployments[0] || 'deployment-name';
+        const modelList = deployments.map((deployment) => ({
+          key: deployment,
+          displayName: deployment,
+          description: 'Azure OpenAI deployment',
+        }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'ollama': {
+        const currentModel = settings.ollama?.model || 'llama3.2';
+        const modelList = settings.cachedOllamaModels && settings.cachedOllamaModels.length > 0
+          ? settings.cachedOllamaModels
+          : Object.entries(OLLAMA_MODELS).map(([key, value]) => ({
+            key,
+            displayName: value.displayName,
+            description: `${value.size} parameter model`,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'groq': {
+        const currentModel = settings.groq?.model || 'llama-3.1-8b-instant';
+        const modelList = settings.cachedGroqModels && settings.cachedGroqModels.length > 0
+          ? settings.cachedGroqModels
+          : Object.values(GROQ_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'xai': {
+        const currentModel = settings.xai?.model || 'grok-4-fast-non-reasoning';
+        const modelList = settings.cachedXaiModels && settings.cachedXaiModels.length > 0
+          ? settings.cachedXaiModels
+          : Object.values(XAI_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      case 'kimi': {
+        const currentModel = settings.kimi?.model || 'kimi-k2.5';
+        const modelList = settings.cachedKimiModels && settings.cachedKimiModels.length > 0
+          ? settings.cachedKimiModels
+          : Object.values(KIMI_MODELS).map((value) => ({
+            key: value.id,
+            displayName: value.displayName,
+            description: value.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
+      default: {
+        const currentModel = settings.modelKey;
+        const modelList = Object.entries(MODELS).map(([key, value]) => ({
+          key,
+          displayName: value.displayName,
+          description: 'Claude model',
+        }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+    }
+  }
+
+  /**
+   * Apply a model selection to provider-specific settings.
+   */
+  static applyModelSelection(settings: LLMSettings, modelKey: string): LLMSettings {
+    const updated: LLMSettings = { ...settings };
+    const resolvedProviderType = resolveCustomProviderId(settings.providerType);
+
+    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as any)) {
+      const existing = settings.customProviders?.[resolvedProviderType] || {};
+      updated.customProviders = {
+        ...(settings.customProviders || {}),
+        [resolvedProviderType]: {
+          ...existing,
+          model: modelKey,
+        },
+      };
+      return updated;
+    }
+
+    switch (settings.providerType) {
+      case 'gemini':
+        updated.gemini = { ...settings.gemini, model: modelKey };
+        break;
+      case 'openrouter':
+        updated.openrouter = { ...settings.openrouter, model: modelKey };
+        break;
+      case 'ollama':
+        updated.ollama = { ...settings.ollama, model: modelKey };
+        break;
+      case 'openai':
+        updated.openai = { ...settings.openai, model: modelKey };
+        break;
+      case 'azure': {
+        const existingDeployments = (settings.azure?.deployments || []).filter(Boolean);
+        const nextDeployments = existingDeployments.includes(modelKey)
+          ? existingDeployments
+          : [modelKey, ...existingDeployments];
+        updated.azure = {
+          ...settings.azure,
+          deployment: modelKey,
+          deployments: nextDeployments.length > 0 ? nextDeployments : undefined,
+        };
+        break;
+      }
+      case 'groq':
+        updated.groq = { ...settings.groq, model: modelKey };
+        break;
+      case 'xai':
+        updated.xai = { ...settings.xai, model: modelKey };
+        break;
+      case 'kimi':
+        updated.kimi = { ...settings.kimi, model: modelKey };
+        break;
+      case 'anthropic':
+        updated.modelKey = modelKey as ModelKey;
+        break;
+      case 'bedrock': {
+        const knownBedrockEntry = Object.entries(MODELS).find(([, value]) => value.bedrock === modelKey);
+        const resolvedBedrockModel = knownBedrockEntry
+          ? knownBedrockEntry[1].bedrock
+          : MODELS[modelKey as ModelKey]?.bedrock || modelKey;
+
+        updated.bedrock = {
+          ...settings.bedrock,
+          model: resolvedBedrockModel,
+        };
+
+        if (knownBedrockEntry) {
+          updated.modelKey = knownBedrockEntry[0] as ModelKey;
+        } else if (MODELS[modelKey as ModelKey]) {
+          updated.modelKey = modelKey as ModelKey;
+        }
+        break;
+      }
+      default:
+        updated.modelKey = modelKey as ModelKey;
+        break;
+    }
+
+    return updated;
   }
 
   /**

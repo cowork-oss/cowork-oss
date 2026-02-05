@@ -360,7 +360,8 @@ export class MemoryService {
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,
-        settings.customProviders
+        settings.customProviders,
+        settings.bedrock?.model
       );
 
       const response = await provider.createMessage({

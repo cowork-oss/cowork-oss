@@ -1127,7 +1127,8 @@ export class TaskExecutor {
       settings.groq?.model,
       settings.xai?.model,
       settings.kimi?.model,
-      settings.customProviders
+      settings.customProviders,
+      settings.bedrock?.model
     );
     this.modelKey = effectiveModelKey;
 

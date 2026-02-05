@@ -35,7 +35,7 @@ import { AgentDaemon } from '../agent/daemon';
 import { Task, IPC_CHANNELS, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
 import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
-import { ModelKey, LLMProviderType } from '../agent/llm/types';
+import { LLMProviderType } from '../agent/llm/types';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { app } from 'electron';
 import { getVoiceService } from '../voice/VoiceService';
@@ -1171,7 +1171,7 @@ export class MessageRouter {
 
     // Get provider-specific models and current model
     let models: Array<{ key: string; displayName: string }> = [];
-    let currentModel = settings.modelKey;
+    let currentModel = status.currentModel;
 
     // Provider display names
     const providerModelNames: Record<string, string> = {
@@ -1262,6 +1262,13 @@ export class MessageRouter {
         models = status.models;
     }
 
+    if (providerType !== 'ollama' && currentModel && !models.some((model) => model.key === currentModel)) {
+      models.unshift({
+        key: currentModel,
+        displayName: currentModel,
+      });
+    }
+
     // Current configuration
     text += '*Current:*\n';
     const currentProvider = status.providers.find(p => p.type === providerType);
@@ -1340,7 +1347,7 @@ export class MessageRouter {
 
     // Get provider-specific models and current model
     let models: Array<{ key: string; displayName: string }> = [];
-    let currentModel = settings.modelKey;
+    let currentModel = status.currentModel;
 
     // Get models based on current provider
     switch (providerType) {
@@ -1405,6 +1412,13 @@ export class MessageRouter {
         models = status.models;
     }
 
+    if (providerType !== 'ollama' && currentModel && !models.some((model) => model.key === currentModel)) {
+      models.unshift({
+        key: currentModel,
+        displayName: currentModel,
+      });
+    }
+
     // If no args, show current model and available models
     if (args.length === 0) {
       let text = '🤖 *Current Model*\n\n';
@@ -1467,13 +1481,7 @@ export class MessageRouter {
         return;
       }
 
-      const newSettings: LLMSettings = {
-        ...settings,
-        ollama: {
-          ...settings.ollama,
-          model: result.model!,
-        },
-      };
+      const newSettings = LLMProviderFactory.applyModelSelection(settings, result.model!);
 
       LLMProviderFactory.saveSettings(newSettings);
       LLMProviderFactory.clearCache();
@@ -1496,44 +1504,7 @@ export class MessageRouter {
       return;
     }
 
-    // Save to the appropriate provider-specific setting
-    let newSettings: LLMSettings = { ...settings };
-
-    switch (providerType) {
-      case 'openai':
-        newSettings.openai = {
-          ...settings.openai,
-          model: result.model!.key,
-        };
-        break;
-
-      case 'azure':
-        newSettings.azure = {
-          ...settings.azure,
-          deployment: result.model!.key,
-        };
-        break;
-
-      case 'gemini':
-        newSettings.gemini = {
-          ...settings.gemini,
-          model: result.model!.key,
-        };
-        break;
-
-      case 'openrouter':
-        newSettings.openrouter = {
-          ...settings.openrouter,
-          model: result.model!.key,
-        };
-        break;
-
-      case 'anthropic':
-      case 'bedrock':
-      default:
-        newSettings.modelKey = result.model!.key as ModelKey;
-        break;
-    }
+    const newSettings = LLMProviderFactory.applyModelSelection(settings, result.model!.key);
 
     LLMProviderFactory.saveSettings(newSettings);
     LLMProviderFactory.clearCache();
@@ -1638,15 +1609,10 @@ export class MessageRouter {
     LLMProviderFactory.clearCache();
 
     // Get provider display info
-    const providerInfo = status.providers.find(p => p.type === targetProvider);
-    let modelInfo: string;
-
-    if (targetProvider === 'ollama') {
-      modelInfo = settings.ollama?.model || 'gpt-oss:20b';
-    } else {
-      const model = status.models.find(m => m.key === settings.modelKey);
-      modelInfo = model?.displayName || settings.modelKey;
-    }
+    const updatedStatus = LLMProviderFactory.getConfigStatus();
+    const providerInfo = updatedStatus.providers.find(p => p.type === targetProvider);
+    const model = updatedStatus.models.find((entry) => entry.key === updatedStatus.currentModel);
+    const modelInfo = model?.displayName || updatedStatus.currentModel;
 
     await adapter.sendMessage({
       chatId: message.chatId,
@@ -3160,33 +3126,9 @@ Node.js: \`${nodeVersion}\`
   ): Promise<void> {
     const settings = LLMProviderFactory.loadSettings();
     const status = LLMProviderFactory.getConfigStatus();
-    const providerType = status.currentProvider;
-
-    // Save to the appropriate provider-specific setting
-    let newSettings: LLMSettings = { ...settings };
-    let displayName = modelKey;
-
-    switch (providerType) {
-      case 'openai':
-        newSettings.openai = { ...settings.openai, model: modelKey };
-        break;
-      case 'azure':
-        newSettings.azure = { ...settings.azure, deployment: modelKey };
-        break;
-      case 'gemini':
-        newSettings.gemini = { ...settings.gemini, model: modelKey };
-        break;
-      case 'openrouter':
-        newSettings.openrouter = { ...settings.openrouter, model: modelKey };
-        break;
-      case 'ollama':
-        newSettings.ollama = { ...settings.ollama, model: modelKey };
-        break;
-      default:
-        newSettings.modelKey = modelKey as ModelKey;
-        const modelInfo = status.models.find(m => m.key === modelKey);
-        displayName = modelInfo?.displayName || modelKey;
-    }
+    const modelInfo = status.models.find(m => m.key === modelKey);
+    const displayName = modelInfo?.displayName || modelKey;
+    const newSettings = LLMProviderFactory.applyModelSelection(settings, modelKey);
 
     LLMProviderFactory.saveSettings(newSettings);
     LLMProviderFactory.clearCache();

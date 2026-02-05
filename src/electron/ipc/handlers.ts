@@ -30,20 +30,12 @@ import { TaskLabelRepository } from '../database/TaskLabelRepository';
 import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 import { ContextPolicyManager } from '../gateway/context-policy';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData } from '../../shared/types';
-import { CUSTOM_PROVIDER_MAP, CUSTOM_PROVIDER_IDS } from '../../shared/llm-provider-catalog';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
 import {
   LLMProviderFactory,
   LLMProviderConfig,
   ModelKey,
-  MODELS,
-  GEMINI_MODELS,
-  OPENROUTER_MODELS,
-  OLLAMA_MODELS,
-  GROQ_MODELS,
-  XAI_MODELS,
-  KIMI_MODELS,
   OpenAIOAuth,
 } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
@@ -1210,7 +1202,8 @@ export async function setupIpcHandlers(
         config.groq?.model,
         config.xai?.model,
         config.kimi?.model,
-        config.customProviders
+        config.customProviders,
+        config.bedrock?.model
       ),
       anthropicApiKey: config.anthropic?.apiKey,
       awsRegion: config.bedrock?.region,
@@ -1253,309 +1246,14 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_CONFIG_STATUS, async () => {
-    const settings = LLMProviderFactory.loadSettings();
-    const providers = LLMProviderFactory.getAvailableProviders();
-
-    // Get models based on the current provider type
-    let models: Array<{ key: string; displayName: string; description: string }> = [];
-    let currentModel = settings.modelKey;
-    const resolvedProviderType = resolveCustomProviderId(settings.providerType);
-    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as any);
-
-    if (customEntry) {
-      const customConfig = settings.customProviders?.[resolvedProviderType] || settings.customProviders?.[settings.providerType];
-      currentModel = customConfig?.model || customEntry.defaultModel;
-      models = [
-        {
-          key: currentModel,
-          displayName: currentModel,
-          description: customEntry.description || `${customEntry.name} model`,
-        },
-      ];
-    } else {
-      switch (settings.providerType) {
-        case 'anthropic':
-        case 'bedrock':
-          // Use Anthropic/Bedrock models from MODELS
-          models = Object.entries(MODELS).map(([key, value]) => ({
-            key,
-            displayName: value.displayName,
-            description: key.includes('opus') ? 'Most capable for complex work' :
-                         key.includes('sonnet') ? 'Balanced performance and speed' :
-                         'Fast and efficient',
-          }));
-          break;
-
-        case 'gemini': {
-          // For Gemini, use the specific model from settings (full model ID)
-          currentModel = settings.gemini?.model || 'gemini-2.0-flash';
-          // Use cached models if available, otherwise fall back to static list
-          const cachedGemini = LLMProviderFactory.getCachedModels('gemini');
-          if (cachedGemini && cachedGemini.length > 0) {
-            models = cachedGemini;
-          } else {
-            // Fall back to static models
-            models = Object.values(GEMINI_MODELS).map((value) => ({
-              key: value.id,
-              displayName: value.displayName,
-              description: value.description,
-            }));
-          }
-          // Ensure the currently selected model is in the list
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'openrouter': {
-          // For OpenRouter, use the specific model from settings (full model ID)
-          currentModel = settings.openrouter?.model || 'anthropic/claude-3.5-sonnet';
-          // Use cached models if available, otherwise fall back to static list
-          const cachedOpenRouter = LLMProviderFactory.getCachedModels('openrouter');
-          if (cachedOpenRouter && cachedOpenRouter.length > 0) {
-            models = cachedOpenRouter;
-          } else {
-            // Fall back to static models
-            models = Object.values(OPENROUTER_MODELS).map((value) => ({
-              key: value.id,
-              displayName: value.displayName,
-              description: value.description,
-            }));
-          }
-          // Ensure the currently selected model is in the list
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'ollama': {
-          // For Ollama, use the specific model from settings
-          currentModel = settings.ollama?.model || 'llama3.2';
-          // Use cached models if available, otherwise fall back to static list
-          const cachedOllama = LLMProviderFactory.getCachedModels('ollama');
-          if (cachedOllama && cachedOllama.length > 0) {
-            models = cachedOllama;
-          } else {
-            // Fall back to static models
-            models = Object.entries(OLLAMA_MODELS).map(([key, value]) => ({
-              key,
-              displayName: value.displayName,
-              description: `${value.size} parameter model`,
-            }));
-          }
-          // Ensure the currently selected model is in the list
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'openai': {
-          // For OpenAI, use the specific model from settings
-          currentModel = settings.openai?.model || 'gpt-4o-mini';
-          // Use cached models if available, otherwise fall back to static list
-          const cachedOpenAI = LLMProviderFactory.getCachedModels('openai');
-          if (cachedOpenAI && cachedOpenAI.length > 0) {
-            models = cachedOpenAI;
-          } else {
-            // Fall back to static models
-            models = [
-              { key: 'gpt-4o', displayName: 'GPT-4o', description: 'Most capable model for complex tasks' },
-              { key: 'gpt-4o-mini', displayName: 'GPT-4o Mini', description: 'Fast and affordable for most tasks' },
-              { key: 'gpt-4-turbo', displayName: 'GPT-4 Turbo', description: 'Previous generation flagship' },
-              { key: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo', description: 'Fast and cost-effective' },
-              { key: 'o1', displayName: 'o1', description: 'Advanced reasoning model' },
-              { key: 'o1-mini', displayName: 'o1 Mini', description: 'Fast reasoning model' },
-            ];
-          }
-          // Ensure the currently selected model is in the list
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'azure': {
-          const deployments = (settings.azure?.deployments || []).filter(Boolean);
-          currentModel = settings.azure?.deployment || deployments[0] || 'deployment-name';
-          models = deployments.map((deployment) => ({
-            key: deployment,
-            displayName: deployment,
-            description: 'Azure OpenAI deployment',
-          }));
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'groq': {
-          currentModel = settings.groq?.model || 'llama-3.1-8b-instant';
-          const cachedGroq = LLMProviderFactory.getCachedModels('groq');
-          if (cachedGroq && cachedGroq.length > 0) {
-            models = cachedGroq;
-          } else {
-            models = Object.values(GROQ_MODELS).map((value) => ({
-              key: value.id,
-              displayName: value.displayName,
-              description: value.description,
-            }));
-          }
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'xai': {
-          currentModel = settings.xai?.model || 'grok-4-fast-non-reasoning';
-          const cachedXai = LLMProviderFactory.getCachedModels('xai');
-          if (cachedXai && cachedXai.length > 0) {
-            models = cachedXai;
-          } else {
-            models = Object.values(XAI_MODELS).map((value) => ({
-              key: value.id,
-              displayName: value.displayName,
-              description: value.description,
-            }));
-          }
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        case 'kimi': {
-          currentModel = settings.kimi?.model || 'kimi-k2.5';
-          const cachedKimi = LLMProviderFactory.getCachedModels('kimi');
-          if (cachedKimi && cachedKimi.length > 0) {
-            models = cachedKimi;
-          } else {
-            models = Object.values(KIMI_MODELS).map((value) => ({
-              key: value.id,
-              displayName: value.displayName,
-              description: value.description,
-            }));
-          }
-          if (currentModel && !models.some(m => m.key === currentModel)) {
-            models.unshift({
-              key: currentModel,
-              displayName: currentModel,
-              description: 'Selected model',
-            });
-          }
-          break;
-        }
-
-        default:
-          // Fallback to Anthropic models
-          models = Object.entries(MODELS).map(([key, value]) => ({
-            key,
-            displayName: value.displayName,
-            description: 'Claude model',
-          }));
-      }
-    }
-
-    return {
-      currentProvider: settings.providerType,
-      currentModel,
-      providers,
-      models,
-    };
+    return LLMProviderFactory.getConfigStatus();
   });
 
   // Set the current model (persists selection across sessions)
   ipcMain.handle(IPC_CHANNELS.LLM_SET_MODEL, async (_, modelKey: string) => {
     const settings = LLMProviderFactory.loadSettings();
-    const resolvedProviderType = resolveCustomProviderId(settings.providerType);
-
-    // Update the model key based on the current provider
-    if (CUSTOM_PROVIDER_IDS.has(resolvedProviderType as any)) {
-      const existing = settings.customProviders?.[resolvedProviderType] || {};
-      settings.customProviders = {
-        ...(settings.customProviders || {}),
-        [resolvedProviderType]: {
-          ...existing,
-          model: modelKey,
-        },
-      };
-    } else {
-      switch (settings.providerType) {
-        case 'gemini':
-          settings.gemini = { ...settings.gemini, model: modelKey };
-          break;
-        case 'openrouter':
-          settings.openrouter = { ...settings.openrouter, model: modelKey };
-          break;
-        case 'ollama':
-          settings.ollama = { ...settings.ollama, model: modelKey };
-          break;
-        case 'openai':
-          settings.openai = { ...settings.openai, model: modelKey };
-          break;
-        case 'azure':
-          {
-            const existingDeployments = (settings.azure?.deployments || []).filter(Boolean);
-            const nextDeployments = existingDeployments.includes(modelKey)
-              ? existingDeployments
-              : [modelKey, ...existingDeployments];
-            settings.azure = {
-              ...settings.azure,
-              deployment: modelKey,
-              deployments: nextDeployments.length > 0 ? nextDeployments : undefined,
-            };
-          }
-          break;
-        case 'groq':
-          settings.groq = { ...settings.groq, model: modelKey };
-          break;
-        case 'xai':
-          settings.xai = { ...settings.xai, model: modelKey };
-          break;
-        case 'kimi':
-          settings.kimi = { ...settings.kimi, model: modelKey };
-          break;
-        case 'anthropic':
-        case 'bedrock':
-        default:
-          // For Anthropic/Bedrock, use the modelKey field
-          settings.modelKey = modelKey as ModelKey;
-          break;
-      }
-    }
-
-    LLMProviderFactory.saveSettings(settings);
+    const updatedSettings = LLMProviderFactory.applyModelSelection(settings, modelKey);
+    LLMProviderFactory.saveSettings(updatedSettings);
     return { success: true };
   });
 
