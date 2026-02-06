@@ -205,6 +205,18 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     }
   };
 
+  const handleElevenLabsAgentsApiKeyChange = (apiKey: string) => {
+    debouncedSave({ elevenLabsAgentsApiKey: apiKey });
+  };
+
+  const handleElevenLabsAgentIdChange = (agentId: string) => {
+    debouncedSave({ elevenLabsAgentId: agentId });
+  };
+
+  const handleElevenLabsAgentPhoneNumberIdChange = (phoneNumberId: string) => {
+    debouncedSave({ elevenLabsAgentPhoneNumberId: phoneNumberId });
+  };
+
   const handleOpenAIApiKeyChange = (apiKey: string) => {
     debouncedSave({ openaiApiKey: apiKey });
   };
@@ -494,6 +506,68 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
           </div>
         </div>
       )}
+
+      {/* Phone Calls Configuration (ElevenLabs Agents) */}
+      <div className="settings-section">
+        <h4>Phone Calls (ElevenLabs Agents)</h4>
+        <p className="settings-description">
+          Configure outbound phone calls initiated by the agent. Calls require an ElevenLabs agent and an outbound phone
+          number configured in your ElevenLabs account.
+        </p>
+
+        <div className="settings-field">
+          <label>Agents API Key</label>
+          <input
+            type="password"
+            className="settings-input"
+            placeholder="Enter your ElevenLabs Agents API key"
+            value={settings.elevenLabsAgentsApiKey || ''}
+            onChange={(e) => handleElevenLabsAgentsApiKeyChange(e.target.value)}
+          />
+          <p className="settings-hint">
+            Recommended: create an API key scoped to <code>agents-write</code> with a reasonable spend limit. If left
+            blank, the app will fall back to the ElevenLabs API key from the TTS configuration (if set).
+          </p>
+          <p className="settings-hint">
+            Get your API key from{' '}
+            <a
+              href="https://elevenlabs.io/app/settings/api-keys"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ElevenLabs Dashboard
+            </a>
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label>Agent ID</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="e.g., 7f3d6c2e-...."
+            value={settings.elevenLabsAgentId || ''}
+            onChange={(e) => handleElevenLabsAgentIdChange(e.target.value)}
+          />
+          <p className="settings-hint">
+            Used as the default agent for outbound calls. You can also pass an agent ID per call.
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label>Outbound Phone Number ID</label>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="e.g., 2a1b3c4d-...."
+            value={settings.elevenLabsAgentPhoneNumberId || ''}
+            onChange={(e) => handleElevenLabsAgentPhoneNumberIdChange(e.target.value)}
+          />
+          <p className="settings-hint">
+            The outbound phone number ID associated with your agent. Phone numbers should be configured in ElevenLabs.
+          </p>
+        </div>
+      </div>
 
       {/* OpenAI Configuration - show when TTS or STT uses OpenAI */}
       {(settings.ttsProvider === 'openai' || settings.sttProvider === 'openai') && (

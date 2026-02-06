@@ -1,10 +1,10 @@
 {
   "id": "voice-call",
-  "name": "Voice-call",
-  "description": "Start voice calls via the CoWork-OSS voice-call plugin.",
+  "name": "Voice Call",
+  "description": "Initiate outbound phone calls via ElevenLabs Agents.",
   "icon": "📞",
   "category": "Tools",
-  "prompt": "# Voice Call\n\nUse the voice-call plugin to start or inspect calls (Twilio, Telnyx, Plivo, or mock).\n\n## CLI\n\n```bash\nCoWork-OSS voicecall call --to \"+15555550123\" --message \"Hello from CoWork-OSS\"\nCoWork-OSS voicecall status --call-id <id>\n```\n\n## Tool\n\nUse `voice_call` for agent-initiated calls.\n\nActions:\n\n- `initiate_call` (message, to?, mode?)\n- `continue_call` (callId, message)\n- `speak_to_user` (callId, message)\n- `end_call` (callId)\n- `get_status` (callId)\n\nNotes:\n\n- Requires the voice-call plugin to be enabled.\n- Plugin config lives under `plugins.entries.voice-call.config`.\n- Twilio config: `provider: \"twilio\"` + `twilio.accountSid/authToken` + `fromNumber`.\n- Telnyx config: `provider: \"telnyx\"` + `telnyx.apiKey/connectionId` + `fromNumber`.\n- Plivo config: `provider: \"plivo\"` + `plivo.authId/authToken` + `fromNumber`.\n- Dev fallback: `provider: \"mock\"` (no network).",
+  "prompt": "# Voice Call (Phone Calls)\n\nUse the built-in `voice_call` tool to initiate outbound phone calls via ElevenLabs Agents.\n\n## Setup\n\n1) Configure in **Settings** > **Voice** > **Phone Calls (ElevenLabs Agents)**:\n\n- Agents API Key (recommended scope: `agents-write`)\n- Agent ID\n- Outbound Phone Number ID\n\n2) Ensure your workspace has **Network** permission enabled.\n\n## Tool\n\nUse `voice_call` with one of these actions:\n\n- `list_agents`\n- `list_phone_numbers`\n- `initiate_call` (requires user approval)\n\nExample call:\n\n```json\n{\n  \"action\": \"initiate_call\",\n  \"to_number\": \"+15555550123\"\n}\n```\n\nOptional parameters for `initiate_call`:\n\n- `agent_id` / `agent_phone_number_id` to override defaults\n- `dynamic_variables` (object) to pass per-call variables\n- `prompt` / `first_message` (advanced per-call overrides)\n\nNotes:\n\n- `to_number` must be E.164 (e.g., `+15555550123`).\n- The app always requests approval before placing a call.",
   "parameters": [],
   "enabled": true
 }

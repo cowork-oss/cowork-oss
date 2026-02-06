@@ -127,6 +127,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   calendar_action: 'webfetch',
   dropbox_action: 'webfetch',
   sharepoint_action: 'webfetch',
+  voice_call: 'webfetch',
   // Browser tools
   browser_navigate: 'browser',
   browser_screenshot: 'browser',
