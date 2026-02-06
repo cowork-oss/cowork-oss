@@ -301,6 +301,7 @@ const IPC_CHANNELS = {
   MEMORY_EVENT: 'memory:event',
   MEMORY_IMPORT_CHATGPT: 'memory:importChatGPT',
   MEMORY_IMPORT_CHATGPT_PROGRESS: 'memory:importChatGPTProgress',
+  MEMORY_IMPORT_CHATGPT_CANCEL: 'memory:importChatGPTCancel',
 
   // Memory Features (global toggles)
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
@@ -2033,6 +2034,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_PROGRESS, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_PROGRESS, subscription);
   },
+  cancelChatGPTImport: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_CANCEL) as Promise<{ cancelled: boolean }>,
 
   // Migration Status APIs
   getMigrationStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_GET_STATUS),
@@ -2951,6 +2954,7 @@ export interface ElectronAPI {
   // ChatGPT Import
   importChatGPT: (options: ChatGPTImportOptions) => Promise<ChatGPTImportResult>;
   onChatGPTImportProgress: (callback: (progress: ChatGPTImportProgress) => void) => () => void;
+  cancelChatGPTImport: () => Promise<{ cancelled: boolean }>;
 
   // Migration Status
   getMigrationStatus: () => Promise<MigrationStatus>;

@@ -37,6 +37,7 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
   const [progress, setProgress] = useState<ChatGPTImportProgress | null>(null);
   const [result, setResult] = useState<ChatGPTImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -100,6 +101,15 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
+    }
+  };
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await window.electronAPI.cancelChatGPTImport();
+    } catch {
+      // Best-effort cancel
     }
   };
 
@@ -344,8 +354,19 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
             </div>
           </div>
 
-          <p style={{ fontSize: '13px', color: 'var(--color-text-tertiary)', textAlign: 'center', margin: '16px 0 0' }}>
-            This may take a while depending on your export size and LLM provider speed. Do not close this window.
+          <div className="chatgpt-import-actions" style={{ marginTop: '16px' }}>
+            <button
+              className="chatgpt-import-btn chatgpt-import-btn-secondary"
+              onClick={handleCancel}
+              disabled={cancelling}
+              style={{ opacity: cancelling ? 0.5 : 1 }}
+            >
+              {cancelling ? 'Cancelling...' : 'Cancel Import'}
+            </button>
+          </div>
+
+          <p style={{ fontSize: '13px', color: 'var(--color-text-tertiary)', textAlign: 'center', margin: '12px 0 0' }}>
+            This may take a while depending on your export size and LLM provider speed.
           </p>
         </div>
       )}

@@ -3,6 +3,7 @@
  * Provides type-safe validation to prevent malformed input attacks
  */
 
+import * as path from 'path';
 import { z } from 'zod';
 import { LLM_PROVIDER_TYPES } from '../../shared/types';
 
@@ -490,6 +491,23 @@ export const GeneratePairingSchema = z.object({
   displayName: z.string().max(MAX_TITLE_LENGTH).optional(),
 });
 
+// ============ ChatGPT Import Schema ============
+
+export const ChatGPTImportSchema = z.object({
+  workspaceId: z.string().refine(
+    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    { message: 'Must be a valid UUID or temp workspace ID' }
+  ),
+  filePath: z.string()
+    .min(1)
+    .max(MAX_PATH_LENGTH)
+    .refine((p) => path.isAbsolute(p), { message: 'File path must be absolute' })
+    .refine((p) => p.endsWith('.json'), { message: 'File must be a .json file' }),
+  maxConversations: z.number().int().min(0).max(2000).optional(),
+  minMessages: z.number().int().min(1).max(100).optional(),
+  forcePrivate: z.boolean().optional(),
+});
+
 // ============ File Operation Schemas ============
 
 export const FilePathSchema = z.object({
@@ -559,6 +577,35 @@ export const MCPSettingsSchema = z.object({
   registryUrl: z.string().url().max(500).optional(),
   hostEnabled: z.boolean().default(false),
   hostPort: z.number().int().min(1024).max(65535).optional(),
+});
+
+// ============ Artifact Reputation Schemas ============
+
+const ReputationActionSchema = z.enum(['allow', 'warn', 'block']);
+
+export const ReputationPolicySchema = z.object({
+  clean: ReputationActionSchema.default('allow'),
+  unknown: ReputationActionSchema.default('warn'),
+  suspicious: ReputationActionSchema.default('warn'),
+  malicious: ReputationActionSchema.default('block'),
+  error: ReputationActionSchema.default('warn'),
+}).default({
+  clean: 'allow',
+  unknown: 'warn',
+  suspicious: 'warn',
+  malicious: 'block',
+  error: 'warn',
+});
+
+export const ReputationSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  provider: z.enum(['virustotal']).default('virustotal'),
+  apiKey: z.string().max(500).optional(),
+  allowUpload: z.boolean().default(false),
+  rescanIntervalHours: z.number().int().min(1).max(24 * 30).default(24 * 7),
+  enforceOnMCPConnect: z.boolean().default(true),
+  disableMCPServerOnBlock: z.boolean().default(true),
+  policy: ReputationPolicySchema,
 });
 
 // MCP Registry schemas

@@ -69,6 +69,7 @@ import {
   UUIDSchema,
   StringIdSchema,
   MCPConnectorOAuthSchema,
+  ChatGPTImportSchema,
 } from '../utils/validation';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { AppearanceManager } from '../settings/appearance-manager';
@@ -3576,12 +3577,17 @@ function setupMemoryHandlers(): void {
   });
 
   // ChatGPT Import handler
+  let activeImportAbort: AbortController | null = null;
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_IMPORT_CHATGPT,
-    async (event, options: { workspaceId: string; filePath: string; maxConversations?: number; minMessages?: number; forcePrivate?: boolean }) => {
+    async (event, options: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT, RATE_LIMIT_CONFIGS.limited);
+      const validated = validateInput(ChatGPTImportSchema, options, 'ChatGPT import');
       try {
         const { ChatGPTImporter } = await import('../memory/ChatGPTImporter');
+
+        // Create an abort controller for cancellation
+        activeImportAbort = new AbortController();
 
         // Forward progress events to renderer
         const unsubscribe = ChatGPTImporter.onProgress((progress) => {
@@ -3592,15 +3598,31 @@ function setupMemoryHandlers(): void {
         });
 
         try {
-          const result = await ChatGPTImporter.import(options);
+          const result = await ChatGPTImporter.import({
+            ...validated,
+            signal: activeImportAbort.signal,
+          });
           return result;
         } finally {
           unsubscribe();
+          activeImportAbort = null;
         }
       } catch (error) {
         console.error('[Memory] ChatGPT import failed:', error);
         throw error;
       }
+    }
+  );
+
+  // ChatGPT Import cancel handler
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_CANCEL,
+    async () => {
+      if (activeImportAbort) {
+        activeImportAbort.abort();
+        return { cancelled: true };
+      }
+      return { cancelled: false };
     }
   );
 

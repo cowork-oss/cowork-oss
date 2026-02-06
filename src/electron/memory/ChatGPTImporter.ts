@@ -3,12 +3,14 @@
  *
  * Securely parses a ChatGPT data export (conversations.json),
  * distils conversations into memory entries via LLM, and stores
- * them through the existing MemoryService.
+ * them through the MemoryRepository directly (bypassing auto-capture
+ * checks so imports always work regardless of settings).
  *
  * Security guarantees:
- * - Raw export is read in a streaming fashion; the full file is
- *   never persisted to disk by CoWork OS.
- * - All content is sanitized through InputSanitizer before storage.
+ * - Raw export is read once; the full file is never persisted to disk
+ *   by CoWork OS.
+ * - All content (including conversation titles) is sanitized through
+ *   InputSanitizer before storage.
  * - Sensitive-data detection marks memories as private automatically.
  * - After import the caller is reminded to delete the source file.
  */
@@ -17,9 +19,13 @@ import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { LLMProviderFactory } from '../agent/llm';
-import { estimateTokens } from '../agent/context-manager';
 import { InputSanitizer } from '../agent/security';
-import { MemoryService } from './MemoryService';
+import { estimateTokens } from '../agent/context-manager';
+import {
+  MemoryRepository,
+  MemorySettingsRepository,
+} from '../database/repositories';
+import { DatabaseManager } from '../database/schema';
 
 // ── ChatGPT export format types ────────────────────────────────
 
@@ -75,12 +81,14 @@ export interface ChatGPTImportOptions {
   minMessages?: number;
   /** Mark all imported memories as private regardless of content. */
   forcePrivate?: boolean;
+  /** Abort signal to cancel an in-progress import. */
+  signal?: AbortSignal;
 }
 
 // ── Constants ──────────────────────────────────────────────────
 
-/** Max raw file size we will read (500 MB). */
-const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024;
+/** Max raw file size we will read (200 MB). */
+const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 
 /** Delay between LLM calls to respect rate limits. */
 const DISTILL_DELAY_MS = 300;
@@ -96,6 +104,9 @@ const HARD_MAX_CONVERSATIONS = 2000;
 const importEvents = new EventEmitter();
 
 export class ChatGPTImporter {
+  /** Guard against concurrent imports. */
+  private static isImporting = false;
+
   /**
    * Subscribe to progress events during an active import.
    */
@@ -108,13 +119,33 @@ export class ChatGPTImporter {
    * Run the full import pipeline.
    */
   static async import(options: ChatGPTImportOptions): Promise<ChatGPTImportResult> {
+    if (this.isImporting) {
+      throw new Error('An import is already in progress. Please wait for it to finish.');
+    }
+
+    this.isImporting = true;
+
+    try {
+      return await this.runImport(options);
+    } finally {
+      this.isImporting = false;
+    }
+  }
+
+  private static async runImport(options: ChatGPTImportOptions): Promise<ChatGPTImportResult> {
     const {
       workspaceId,
       filePath,
       maxConversations = 0,
       minMessages = 2,
       forcePrivate = false,
+      signal,
     } = options;
+
+    // Get repository directly to bypass autoCapture check
+    const db = DatabaseManager.getInstance().getDatabase();
+    const memoryRepo = new MemoryRepository(db);
+    const settingsRepo = new MemorySettingsRepository(db);
 
     const result: ChatGPTImportResult = {
       success: false,
@@ -126,6 +157,17 @@ export class ChatGPTImporter {
     };
 
     try {
+      // Check abort before starting
+      if (signal?.aborted) {
+        throw new Error('Import was cancelled.');
+      }
+
+      // Verify memory system is enabled (but ignore autoCapture)
+      const settings = settingsRepo.getOrCreate(workspaceId);
+      if (!settings.enabled) {
+        throw new Error('Memory system is disabled for this workspace. Enable it in settings first.');
+      }
+
       // ── 1. Validate & hash source file ────────────────────
       this.emitProgress({ phase: 'parsing', current: 0, total: 0, memoriesCreated: 0 });
 
@@ -134,7 +176,7 @@ export class ChatGPTImporter {
         throw new Error('Selected path is not a file.');
       }
       if (stat.size > MAX_FILE_SIZE_BYTES) {
-        throw new Error(`File is too large (${Math.round(stat.size / 1024 / 1024)} MB). Maximum is 500 MB.`);
+        throw new Error(`File is too large (${Math.round(stat.size / 1024 / 1024)} MB). Maximum is ${Math.round(MAX_FILE_SIZE_BYTES / 1024 / 1024)} MB.`);
       }
       if (stat.size === 0) {
         throw new Error('File is empty.');
@@ -143,6 +185,10 @@ export class ChatGPTImporter {
       // Hash the source so the user can verify we read the right file
       const rawBuffer = await fs.readFile(filePath);
       result.sourceFileHash = crypto.createHash('sha256').update(rawBuffer).digest('hex').slice(0, 16);
+
+      if (signal?.aborted) {
+        throw new Error('Import was cancelled.');
+      }
 
       // ── 2. Parse JSON ─────────────────────────────────────
       let conversations: ChatGPTConversation[];
@@ -170,8 +216,16 @@ export class ChatGPTImporter {
 
       // ── 3. Distil each conversation ───────────────────────
       for (let i = 0; i < conversations.length; i++) {
+        // Check abort between conversations
+        if (signal?.aborted) {
+          result.errors.push('Import was cancelled by user.');
+          break;
+        }
+
         const convo = conversations[i];
-        const title = convo.title || 'Untitled';
+        const rawTitle = convo.title || 'Untitled';
+        // Sanitize the title before using it anywhere
+        const title = InputSanitizer.sanitizeMemoryContent(rawTitle) || 'Untitled';
 
         try {
           const messages = this.extractMessages(convo);
@@ -195,7 +249,7 @@ export class ChatGPTImporter {
           // Distil via LLM
           const distilled = await this.distilConversation(transcript, title);
 
-          // ── 4. Store memories ─────────────────────────────
+          // ── 4. Store memories directly via repository ──────
           this.emitProgress({
             phase: 'storing',
             current: i + 1,
@@ -209,17 +263,24 @@ export class ChatGPTImporter {
             const sanitized = InputSanitizer.sanitizeMemoryContent(entry.content);
             if (!sanitized || sanitized.length < 10) continue;
 
-            const memory = await MemoryService.capture(
-              workspaceId,
-              undefined, // no task association
-              entry.type as 'observation' | 'decision' | 'insight',
-              `[Imported from ChatGPT — "${title}"]\n${sanitized}`,
-              forcePrivate
-            );
+            const memoryContent = `[Imported from ChatGPT — "${title}"]\n${sanitized}`;
+            const tokens = estimateTokens(memoryContent);
 
-            if (memory) {
-              result.memoriesCreated++;
-            }
+            // Write directly to DB, bypassing MemoryService.capture()
+            // which checks autoCapture setting and would block imports
+            const isPrivate = forcePrivate || settings.privacyMode === 'strict';
+
+            memoryRepo.create({
+              workspaceId,
+              taskId: undefined,
+              type: entry.type as 'observation' | 'decision' | 'insight',
+              content: memoryContent,
+              tokens,
+              isCompressed: false,
+              isPrivate,
+            });
+
+            result.memoriesCreated++;
           }
 
           result.conversationsProcessed++;
@@ -242,7 +303,7 @@ export class ChatGPTImporter {
         }
       }
 
-      result.success = true;
+      result.success = !signal?.aborted;
       this.emitProgress({
         phase: 'done',
         current: conversations.length,
