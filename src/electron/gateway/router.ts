@@ -91,10 +91,43 @@ export class MessageRouter {
     chatId: string;
     sessionId: string;
     originalMessageId?: string; // For reaction updates
+    requestingUserId?: string;
+    requestingUserName?: string;
+    lastChannelMessageId?: string;
   }> = new Map();
 
   // Track pending approval requests for Discord/Telegram
-  private pendingApprovals: Map<string, { taskId: string; approval: any; sessionId: string }> = new Map();
+  private pendingApprovals: Map<string, {
+    taskId: string;
+    approval: any;
+    sessionId: string;
+    chatId: string;
+    channelType: ChannelType;
+    requestingUserId?: string;
+    requestingUserName?: string;
+    contextType?: 'dm' | 'group';
+  }> = new Map();
+
+  // Track inline-keyboard messages that change state (workspace/provider/model selection).
+  // Prevents group hijack and accidental presses on stale keyboards (after restarts).
+  private pendingInlineActionGuards: Map<string, {
+    action: 'workspace' | 'provider' | 'model';
+    channelType: ChannelType;
+    chatId: string;
+    messageId: string;
+    requestingUserId: string;
+    requestingUserName?: string;
+    expiresAt: number;
+  }> = new Map();
+
+  private streamingUpdateBuffers: Map<string, {
+    latestText: string;
+    timeoutHandle: ReturnType<typeof setTimeout> | null;
+    lastSentAt: number;
+  }> = new Map();
+
+  private static readonly STREAMING_UPDATE_DEBOUNCE_MS = 1200;
+  private static readonly INLINE_ACTION_GUARD_TTL_MS = 10 * 60 * 1000;
 
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
     this.db = db;
@@ -306,6 +339,12 @@ export class MessageRouter {
           botUsername: adapter.botUsername,
         });
       }
+
+      if (status === 'connected') {
+        void this.restorePendingTaskRoutes(adapter).catch((restoreError) => {
+          console.error(`[Router] Failed to restore pending task routes for ${adapter.type}:`, restoreError);
+        });
+      }
     });
 
     this.adapters.set(adapter.type, adapter);
@@ -333,14 +372,170 @@ export class MessageRouter {
 
     for (const channel of enabledChannels) {
       const adapter = this.adapters.get(channel.type as ChannelType);
-      if (adapter && adapter.status !== 'connected') {
+      if (!adapter) continue;
+
+      if (adapter.status !== 'connected') {
         try {
           await adapter.connect();
         } catch (error) {
           console.error(`Failed to connect ${channel.type}:`, error);
+          continue;
+        }
+      }
+
+      if (adapter.status === 'connected') {
+        try {
+          await this.restorePendingTaskRoutes(adapter);
+        } catch (error) {
+          console.error(`[Router] Failed to restore pending tasks for ${adapter.type}:`, error);
         }
       }
     }
+  }
+
+  private async restorePendingTaskRoutes(adapter: ChannelAdapter): Promise<void> {
+    const channel = this.channelRepo.findByType(adapter.type);
+    if (!channel) return;
+
+    const sessions = this.sessionRepo.findActiveByChannelId(channel.id);
+    if (sessions.length === 0) return;
+
+    for (const session of sessions) {
+      if (!session.taskId) continue;
+      if (this.pendingTaskResponses.has(session.taskId)) continue;
+
+      const task = this.taskRepo.findById(session.taskId);
+      if (!task) continue;
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+        continue;
+      }
+
+      const context = session.context as any;
+      const requestingUserId =
+        typeof context?.taskRequesterUserId === 'string'
+          ? context.taskRequesterUserId
+          : (typeof context?.lastChannelUserId === 'string' ? context.lastChannelUserId : undefined);
+      const requestingUserName =
+        typeof context?.taskRequesterUserName === 'string'
+          ? context.taskRequesterUserName
+          : (typeof context?.lastChannelUserName === 'string' ? context.lastChannelUserName : undefined);
+      const lastChannelMessageId = typeof context?.lastChannelMessageId === 'string' ? context.lastChannelMessageId : undefined;
+
+      this.pendingTaskResponses.set(session.taskId, {
+        adapter,
+        chatId: session.chatId,
+        sessionId: session.id,
+        requestingUserId,
+        requestingUserName,
+        lastChannelMessageId,
+      });
+
+      // Ensure draft-streaming state is available even after restarts.
+      if (adapter instanceof TelegramAdapter) {
+        await adapter.startDraftStream(session.chatId);
+      }
+    }
+  }
+
+  private makeInlineActionGuardKey(channelType: ChannelType, chatId: string, messageId: string): string {
+    return `${channelType}:${chatId}:${messageId}`;
+  }
+
+  private registerInlineActionGuard(params: {
+    action: 'workspace' | 'provider' | 'model';
+    channelType: ChannelType;
+    chatId: string;
+    messageId: string;
+    requestingUserId: string;
+    requestingUserName?: string;
+  }): void {
+    const expiresAt = Date.now() + MessageRouter.INLINE_ACTION_GUARD_TTL_MS;
+    const key = this.makeInlineActionGuardKey(params.channelType, params.chatId, params.messageId);
+    const entry = {
+      ...params,
+      expiresAt,
+    };
+    this.pendingInlineActionGuards.set(key, entry);
+
+    // Best-effort cleanup.
+    setTimeout(() => {
+      const existing = this.pendingInlineActionGuards.get(key);
+      if (existing && existing.expiresAt === expiresAt) {
+        this.pendingInlineActionGuards.delete(key);
+      }
+    }, MessageRouter.INLINE_ACTION_GUARD_TTL_MS + 500);
+  }
+
+  private resolveTaskRequesterFromSessionContext(session: { context?: unknown }): {
+    requestingUserId?: string;
+    requestingUserName?: string;
+    lastChannelMessageId?: string;
+  } {
+    const ctx = session?.context as any;
+    const requestingUserId =
+      typeof ctx?.taskRequesterUserId === 'string'
+        ? ctx.taskRequesterUserId
+        : (typeof ctx?.lastChannelUserId === 'string' ? ctx.lastChannelUserId : undefined);
+    const requestingUserName =
+      typeof ctx?.taskRequesterUserName === 'string'
+        ? ctx.taskRequesterUserName
+        : (typeof ctx?.lastChannelUserName === 'string' ? ctx.lastChannelUserName : undefined);
+    const lastChannelMessageId = typeof ctx?.lastChannelMessageId === 'string' ? ctx.lastChannelMessageId : undefined;
+    return { requestingUserId, requestingUserName, lastChannelMessageId };
+  }
+
+  /**
+   * Resolve which channel/chat/session should receive messages for a given task.
+   * Primary use: approvals for child tasks (sub-agents) should route back to the
+   * originating chat session (usually the root task).
+   */
+  private resolveRouteForTask(taskId: string): {
+    adapter: ChannelAdapter;
+    chatId: string;
+    sessionId: string;
+    requestingUserId?: string;
+    requestingUserName?: string;
+    lastChannelMessageId?: string;
+    routedTaskId: string;
+  } | undefined {
+    const direct = this.pendingTaskResponses.get(taskId);
+    if (direct) {
+      return { ...direct, routedTaskId: taskId };
+    }
+
+    let currentTaskId: string | undefined = taskId;
+    for (let depth = 0; depth < 12 && currentTaskId; depth++) {
+      const pending = this.pendingTaskResponses.get(currentTaskId);
+      if (pending) {
+        return { ...pending, routedTaskId: currentTaskId };
+      }
+
+      const session = this.sessionRepo.findByTaskId(currentTaskId);
+      if (session) {
+        const channel = this.channelRepo.findById(session.channelId);
+        if (!channel) return undefined;
+        const adapter = this.adapters.get(channel.type as ChannelType);
+        if (!adapter) return undefined;
+
+        const { requestingUserId, requestingUserName, lastChannelMessageId } =
+          this.resolveTaskRequesterFromSessionContext(session);
+
+        return {
+          adapter,
+          chatId: session.chatId,
+          sessionId: session.id,
+          requestingUserId,
+          requestingUserName,
+          lastChannelMessageId,
+          routedTaskId: currentTaskId,
+        };
+      }
+
+      const task = this.taskRepo.findById(currentTaskId);
+      currentTaskId = task?.parentTaskId;
+    }
+
+    return undefined;
   }
 
   /**
@@ -593,8 +788,16 @@ export class MessageRouter {
       this.config.defaultWorkspaceId
     );
 
+    // Track last sender for this chat (useful for restoring after restarts).
+    // Note: sessions are keyed by chatId (group chats share a session).
+    this.sessionManager.updateSessionContext(session.id, {
+      lastChannelUserId: message.userId,
+      lastChannelUserName: message.userName,
+      lastChannelMessageId: message.messageId,
+    });
+
     // Handle the message based on content
-    await this.routeMessage(adapter, message, session.id);
+    await this.routeMessage(adapter, message, session.id, securityResult);
   }
 
   /**
@@ -652,7 +855,8 @@ export class MessageRouter {
   private async routeMessage(
     adapter: ChannelAdapter,
     message: IncomingMessage,
-    sessionId: string
+    sessionId: string,
+    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
   ): Promise<void> {
     const text = message.text.trim();
 
@@ -727,7 +931,7 @@ export class MessageRouter {
     }
 
     // Regular message - send to desktop app for task processing
-    await this.forwardToDesktopApp(adapter, message, sessionId);
+    await this.forwardToDesktopApp(adapter, message, sessionId, securityContext);
   }
 
   /**
@@ -812,13 +1016,13 @@ export class MessageRouter {
       case '/approve':
       case '/yes':
       case '/y':
-        await this.handleApproveCommand(adapter, message, sessionId);
+        await this.handleApproveCommand(adapter, message, sessionId, args);
         break;
 
       case '/deny':
       case '/no':
       case '/n':
-        await this.handleDenyCommand(adapter, message, sessionId);
+        await this.handleDenyCommand(adapter, message, sessionId, args);
         break;
 
       case '/queue':
@@ -954,13 +1158,23 @@ export class MessageRouter {
 
     let text = `${this.getUiCopy('workspacesHeader')}\n\n${this.getUiCopy('workspacesSelectPrompt')}`;
 
-    await adapter.sendMessage({
+    const messageId = await adapter.sendMessage({
       chatId: message.chatId,
       text,
       parseMode: 'markdown',
       inlineKeyboard: keyboard,
       threadId: message.threadId,
     });
+    if (messageId) {
+      this.registerInlineActionGuard({
+        action: 'workspace',
+        channelType: adapter.type,
+        chatId: message.chatId,
+        messageId,
+        requestingUserId: message.userId,
+        requestingUserName: message.userName,
+      });
+    }
   }
 
   /**
@@ -1839,7 +2053,8 @@ export class MessageRouter {
   private async forwardToDesktopApp(
     adapter: ChannelAdapter,
     message: IncomingMessage,
-    sessionId: string
+    sessionId: string,
+    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
   ): Promise<void> {
     let session = this.sessionRepo.findById(sessionId);
 
@@ -1872,11 +2087,18 @@ export class MessageRouter {
                 replyTo: message.messageId,
               });
 
+              const requester = this.resolveTaskRequesterFromSessionContext(session!);
+              const requestingUserId = requester.requestingUserId ?? message.userId;
+              const requestingUserName = requester.requestingUserName ?? message.userName;
+
               // Re-register task for response tracking (may have been removed after initial completion)
               this.pendingTaskResponses.set(session!.taskId!, {
                 adapter,
                 chatId: message.chatId,
                 sessionId,
+                requestingUserId,
+                requestingUserName,
+                lastChannelMessageId: message.messageId,
               });
 
               await this.agentDaemon.sendMessage(session!.taskId!, message.text);
@@ -1921,15 +2143,33 @@ export class MessageRouter {
       ? message.text.substring(0, 50) + '...'
       : message.text;
 
+    // Prefer adapter-provided isGroup. If missing, fall back to a conservative heuristic.
+    // Note: For some adapters chatId/userId can differ even in DMs, which would over-restrict tools.
+    // Adapters should set isGroup explicitly when possible.
+    const dmOnlyChannels: ChannelType[] = ['email', 'imessage', 'bluebubbles'];
+    const inferredIsGroup = message.isGroup ?? (dmOnlyChannels.includes(adapter.type) ? false : message.chatId !== message.userId);
+
+    const contextType = securityContext?.contextType ?? (inferredIsGroup ? 'group' : 'dm');
+    const gatewayContext = contextType === 'group' ? 'group' : 'private';
+    const toolRestrictions = securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0);
+
     const task = this.taskRepo.create({
       workspaceId: workspace.id,
       title: taskTitle,
       prompt: message.text,
       status: 'pending',
+      agentConfig: {
+        gatewayContext,
+        ...(toolRestrictions && toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+      },
     });
 
     // Link session to task
     this.sessionManager.linkSessionToTask(sessionId, task.id);
+    this.sessionManager.updateSessionContext(sessionId, {
+      taskRequesterUserId: message.userId,
+      taskRequesterUserName: message.userName,
+    });
 
     // Track this task for response handling
     this.pendingTaskResponses.set(task.id, {
@@ -1937,6 +2177,9 @@ export class MessageRouter {
       chatId: message.chatId,
       sessionId,
       originalMessageId: message.messageId, // Track for reaction updates
+      requestingUserId: message.userId,
+      requestingUserName: message.userName,
+      lastChannelMessageId: message.messageId,
     });
 
     // Start draft streaming for real-time response preview (Telegram)
@@ -2001,22 +2244,103 @@ export class MessageRouter {
     }
 
     try {
-      if (pending.adapter.type === 'whatsapp') {
-        text = this.normalizeSimpleChannelMessage(text, this.getMessageContext());
-      }
-      // Use draft streaming for Telegram when streaming content
-      if (isStreaming && pending.adapter instanceof TelegramAdapter) {
-        await pending.adapter.updateDraftStream(pending.chatId, text);
-      } else {
-        await pending.adapter.sendMessage({
-          chatId: pending.chatId,
-          text,
+      const sendNow = async (pendingEntry: typeof pending, rawText: string): Promise<void> => {
+        const msgCtx = this.getMessageContext();
+        const normalizedText = pendingEntry.adapter.type === 'whatsapp'
+          ? this.normalizeSimpleChannelMessage(rawText, msgCtx)
+          : rawText;
+
+        // Split long updates for simple messaging channels to avoid silent drops.
+        if (pendingEntry.adapter.type === 'whatsapp' || pendingEntry.adapter.type === 'imessage') {
+          const chunks = this.splitMessage(normalizedText, 4000);
+          for (const chunk of chunks) {
+            await pendingEntry.adapter.sendMessage({
+              chatId: pendingEntry.chatId,
+              text: chunk,
+              parseMode: 'markdown',
+            });
+          }
+          return;
+        }
+
+        await pendingEntry.adapter.sendMessage({
+          chatId: pendingEntry.chatId,
+          text: normalizedText,
           parseMode: 'markdown',
         });
+      };
+
+      const trimmed = (text || '').trim();
+      if (!trimmed) {
+        return;
       }
+
+      // Non-streaming messages should flush any pending streaming buffers to avoid
+      // sending stale partial text after important updates.
+      if (!isStreaming) {
+        this.clearStreamingUpdate(taskId);
+      }
+
+      // Use draft streaming for Telegram when streaming content.
+      if (isStreaming && pending.adapter instanceof TelegramAdapter) {
+        await pending.adapter.updateDraftStream(pending.chatId, trimmed);
+        return;
+      }
+
+      // Coalesce "streaming" updates for channels that don't support message edits
+      // to avoid spamming WhatsApp/iMessage/etc with many near-duplicate messages.
+      if (isStreaming) {
+        const existing = this.streamingUpdateBuffers.get(taskId) || {
+          latestText: '',
+          timeoutHandle: null,
+          lastSentAt: 0,
+        };
+
+        existing.latestText = trimmed;
+
+        if (!existing.timeoutHandle) {
+          const now = Date.now();
+          const sinceLast = now - existing.lastSentAt;
+          const delay = Math.max(0, MessageRouter.STREAMING_UPDATE_DEBOUNCE_MS - sinceLast);
+
+          existing.timeoutHandle = setTimeout(() => {
+            const buffer = this.streamingUpdateBuffers.get(taskId);
+            const latestPending = this.pendingTaskResponses.get(taskId);
+            if (!buffer || !latestPending) {
+              if (buffer?.timeoutHandle) {
+                clearTimeout(buffer.timeoutHandle);
+              }
+              this.streamingUpdateBuffers.delete(taskId);
+              return;
+            }
+
+            buffer.timeoutHandle = null;
+            buffer.lastSentAt = Date.now();
+            const toSend = buffer.latestText;
+            buffer.latestText = '';
+
+            sendNow(latestPending, toSend).catch((error) => {
+              console.error('Error sending buffered task update:', error);
+            });
+          }, delay);
+        }
+
+        this.streamingUpdateBuffers.set(taskId, existing);
+        return;
+      }
+
+      await sendNow(pending, trimmed);
     } catch (error) {
       console.error('Error sending task update:', error);
     }
+  }
+
+  private clearStreamingUpdate(taskId: string): void {
+    const existing = this.streamingUpdateBuffers.get(taskId);
+    if (existing?.timeoutHandle) {
+      clearTimeout(existing.timeoutHandle);
+    }
+    this.streamingUpdateBuffers.delete(taskId);
   }
 
   /**
@@ -2051,6 +2375,8 @@ export class MessageRouter {
   async handleTaskCompletion(taskId: string, result?: string): Promise<void> {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) return;
+
+    this.clearStreamingUpdate(taskId);
 
     try {
       // WhatsApp/iMessage-optimized completion message (no follow-up hint)
@@ -2157,6 +2483,8 @@ export class MessageRouter {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) return;
 
+    this.clearStreamingUpdate(taskId);
+
     try {
       // Cancel any draft stream
       if (pending.adapter instanceof TelegramAdapter) {
@@ -2184,22 +2512,97 @@ export class MessageRouter {
   }
 
   /**
+   * Handle task cancellation.
+   * Note: Cancelling unlinks the session from the task.
+   */
+  async handleTaskCancelled(taskId: string, reason?: string): Promise<void> {
+    const pending = this.pendingTaskResponses.get(taskId);
+    if (!pending) {
+      // Best-effort cleanup if the response tracking entry was already removed.
+      const session = this.sessionRepo.findByTaskId(taskId);
+      if (session) {
+        this.sessionManager.unlinkSessionFromTask(session.id);
+      }
+      return;
+    }
+
+    this.clearStreamingUpdate(taskId);
+
+    try {
+      // Cancel any draft stream
+      if (pending.adapter instanceof TelegramAdapter) {
+        await pending.adapter.cancelDraftStream(pending.chatId);
+
+        // Remove ACK reaction on cancellation
+        if (pending.originalMessageId) {
+          await pending.adapter.removeAckReaction(pending.chatId, pending.originalMessageId);
+        }
+      }
+
+      const base = this.getUiCopy('cancelled');
+      const message = reason ? `${base}\n\nReason: ${reason}` : base;
+      const normalizedMessage = pending.adapter.type === 'whatsapp'
+        ? this.normalizeSimpleChannelMessage(message, this.getMessageContext())
+        : message;
+
+      await pending.adapter.sendMessage({
+        chatId: pending.chatId,
+        text: normalizedMessage,
+      });
+
+      this.sessionManager.unlinkSessionFromTask(pending.sessionId);
+    } catch (err) {
+      console.error('Error sending task cancelled message:', err);
+    } finally {
+      this.pendingTaskResponses.delete(taskId);
+    }
+  }
+
+  /**
    * Send approval request to Discord/Telegram
    */
   async sendApprovalRequest(taskId: string, approval: any): Promise<void> {
-    const pending = this.pendingTaskResponses.get(taskId);
-    if (!pending) return;
+    // Approvals can be requested by sub-agent tasks that do not have their own
+    // channel/session mapping. Route these approvals back to the originating
+    // session (usually the root task that spawned them).
+    const route = this.resolveRouteForTask(taskId);
+    if (!route) return;
+
+    const task = this.taskRepo.findById(taskId);
+    const taskGatewayContext = task?.agentConfig?.gatewayContext;
+    const contextType: 'dm' | 'group' =
+      taskGatewayContext === 'group' || taskGatewayContext === 'public' ? 'group' : 'dm';
+    const isRoutedFromChild = route.routedTaskId !== taskId;
+    const taskTitle = task?.title;
 
     // Store approval for response handling
     this.pendingApprovals.set(approval.id, {
       taskId,
       approval,
-      sessionId: pending.sessionId,
+      sessionId: route.sessionId,
+      chatId: route.chatId,
+      channelType: route.adapter.type,
+      requestingUserId: route.requestingUserId,
+      requestingUserName: route.requestingUserName,
+      contextType,
     });
+
+    // Opportunistic cleanup in case the daemon times out before user responds.
+    // We don't have a dedicated expiry event wired into the router yet.
+    setTimeout(() => {
+      const existing = this.pendingApprovals.get(approval.id);
+      if (existing && existing.taskId === taskId) {
+        this.pendingApprovals.delete(approval.id);
+      }
+    }, 6 * 60 * 1000);
 
     // Format approval message
     let message = `🔐 *${this.getUiCopy('approvalRequiredTitle')}*\n\n`;
     message += `**${approval.description}**\n\n`;
+
+    if (isRoutedFromChild && taskTitle) {
+      message += `Source task: *${taskTitle}*\n\n`;
+    }
 
     if (approval.type === 'run_command' && approval.details?.command) {
       message += `\`\`\`\n${approval.details.command}\n\`\`\`\n\n`;
@@ -2207,15 +2610,21 @@ export class MessageRouter {
       message += `Details: ${JSON.stringify(approval.details, null, 2)}\n\n`;
     }
 
+    if (contextType === 'group' && route.requestingUserName) {
+      message += `Requested by: *${route.requestingUserName}*\n\n`;
+    }
+
     message += `⏳ _Expires in 5 minutes_`;
 
     // WhatsApp/iMessage don't support inline keyboards - use text commands
-    if (pending.adapter.type === 'whatsapp' || pending.adapter.type === 'imessage') {
-      message += `\n\n━━━━━━━━━━━━━━━\nReply */approve* or */deny*`;
+    if (route.adapter.type === 'whatsapp' || route.adapter.type === 'imessage') {
+      const shortId = typeof approval.id === 'string' ? approval.id.slice(0, 8) : 'unknown';
+      message += `\n\nID: \`${shortId}\``;
+      message += `\n\n━━━━━━━━━━━━━━━\nReply */approve ${shortId}* or */deny ${shortId}*`;
 
       try {
-        await pending.adapter.sendMessage({
-          chatId: pending.chatId,
+        await route.adapter.sendMessage({
+          chatId: route.chatId,
           text: message,
           parseMode: 'markdown',
         });
@@ -2232,8 +2641,8 @@ export class MessageRouter {
       ];
 
       try {
-        await pending.adapter.sendMessage({
-          chatId: pending.chatId,
+        await route.adapter.sendMessage({
+          chatId: route.chatId,
           text: message,
           parseMode: 'markdown',
           inlineKeyboard: keyboard,
@@ -2250,36 +2659,10 @@ export class MessageRouter {
   private async handleApproveCommand(
     adapter: ChannelAdapter,
     message: IncomingMessage,
-    sessionId: string
+    sessionId: string,
+    args: string[]
   ): Promise<void> {
-    // Find pending approval for this session
-    const approvalEntry = Array.from(this.pendingApprovals.entries())
-      .find(([, data]) => data.sessionId === sessionId);
-
-    if (!approvalEntry) {
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: this.getUiCopy('approvalNone'),
-      });
-      return;
-    }
-
-    const [approvalId, data] = approvalEntry;
-    this.pendingApprovals.delete(approvalId);
-
-    try {
-      await this.agentDaemon?.respondToApproval(approvalId, true);
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: this.getUiCopy('approvalApproved'),
-      });
-    } catch (error) {
-      console.error('Error responding to approval:', error);
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: this.getUiCopy('approvalFailed'),
-      });
-    }
+    await this.handleApprovalTextCommand(adapter, message, sessionId, args, true);
   }
 
   /**
@@ -2288,34 +2671,179 @@ export class MessageRouter {
   private async handleDenyCommand(
     adapter: ChannelAdapter,
     message: IncomingMessage,
-    sessionId: string
+    sessionId: string,
+    args: string[]
   ): Promise<void> {
-    // Find pending approval for this session
-    const approvalEntry = Array.from(this.pendingApprovals.entries())
-      .find(([, data]) => data.sessionId === sessionId);
+    await this.handleApprovalTextCommand(adapter, message, sessionId, args, false);
+  }
 
-    if (!approvalEntry) {
+  private formatPendingApprovalChoices(
+    approvals: Array<[string, { approval: any }]>
+  ): string {
+    return approvals
+      .map(([id, data], index) => {
+        const shortId = id.slice(0, 8);
+        const description =
+          typeof data.approval?.description === 'string' ? data.approval.description : 'Approval required';
+        const trimmed = description.length > 80 ? description.slice(0, 77) + '...' : description;
+        return `${index + 1}. \`${shortId}\` - ${trimmed}`;
+      })
+      .join('\n');
+  }
+
+  private async handleApprovalTextCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[],
+    approved: boolean
+  ): Promise<void> {
+    if (!this.agentDaemon) {
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: this.getUiCopy('approvalNone'),
+        text: this.getUiCopy('agentUnavailable'),
+        replyTo: message.messageId,
       });
       return;
     }
 
-    const [approvalId] = approvalEntry;
-    this.pendingApprovals.delete(approvalId);
+    const candidates = Array.from(this.pendingApprovals.entries())
+      .filter(([, data]) => data.sessionId === sessionId);
 
-    try {
-      await this.agentDaemon?.respondToApproval(approvalId, false);
+    if (candidates.length === 0) {
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: this.getUiCopy('approvalDenied'),
+        text: this.getUiCopy('approvalNone'),
+        replyTo: message.messageId,
       });
-    } catch (error) {
-      console.error('Error responding to denial:', error);
+      return;
+    }
+
+    const selector = args[0]?.trim();
+
+    let selected: [string, (typeof candidates)[number][1]] | undefined;
+
+    if (!selector) {
+      if (candidates.length > 1) {
+        const list = this.formatPendingApprovalChoices(candidates as any);
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `Multiple approvals are pending. Reply with:\n\n- \`/approve <id>\` or \`/deny <id>\` (recommended)\n- Or use \`/approve <number>\` (example: \`/approve 1\`)\n\n${list}`,
+          parseMode: 'markdown',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+      selected = candidates[0];
+    } else {
+      // Support selecting by numeric index (1-based) or by ID prefix.
+      const idx = Number.parseInt(selector, 10);
+      if (!Number.isNaN(idx) && idx >= 1 && idx <= candidates.length) {
+        selected = candidates[idx - 1];
+      } else {
+        const prefix = selector.toLowerCase();
+        const matches = candidates.filter(([id]) => id.toLowerCase().startsWith(prefix));
+        if (matches.length === 1) {
+          selected = matches[0];
+        } else if (matches.length === 0) {
+          const list = this.formatPendingApprovalChoices(candidates as any);
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: `No pending approval found for \`${selector}\`.\n\n${list}`,
+            parseMode: 'markdown',
+            replyTo: message.messageId,
+          });
+          return;
+        } else {
+          const list = this.formatPendingApprovalChoices(matches as any);
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: `That ID prefix is ambiguous. Please paste more characters.\n\n${list}`,
+            parseMode: 'markdown',
+            replyTo: message.messageId,
+          });
+          return;
+        }
+      }
+    }
+
+    const [approvalId, data] = selected;
+
+    // Sanity check: approvals are scoped to a session/chat.
+    if (data.chatId !== message.chatId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('approvalNone'),
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    // Group chat safety: only the user who triggered the approval request can respond.
+    // This prevents group-hijack of dangerous approvals.
+    if (data.contextType === 'group' && data.requestingUserId && message.userId !== data.requestingUserId) {
+      const who = data.requestingUserName ? `*${data.requestingUserName}*` : 'the original requester';
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: `⚠️ Only ${who} can approve/deny this request in a group chat.`,
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    try {
+      const status = await this.agentDaemon.respondToApproval(approvalId, approved);
+      if (status === 'in_progress') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '⏳ That approval is already being processed. Try again in a moment.',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      // Remove it from local pending approvals regardless of daemon response outcome.
+      this.pendingApprovals.delete(approvalId);
+
+      if (status === 'handled') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: approved ? this.getUiCopy('approvalApproved') : this.getUiCopy('approvalDenied'),
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      if (status === 'duplicate') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '✅ That approval was already handled.',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      if (status === 'not_found') {
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '⌛ That approval request has expired or was already handled.',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy('approvalFailed'),
+        replyTo: message.messageId,
+      });
+    } catch (error) {
+      console.error('Error responding to approval:', error);
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: this.getUiCopy('approvalFailed'),
+        replyTo: message.messageId,
       });
     }
   }
@@ -2372,7 +2900,8 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
   }
 
   /**
-   * Split a message into chunks for Telegram's character limit
+   * Split a message into chunks for channel character limits.
+   * Prefers splitting on newlines/spaces to avoid breaking words.
    */
   private splitMessage(text: string, maxLength: number): string[] {
     if (text.length <= maxLength) {
@@ -2417,21 +2946,53 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     const session = this.sessionRepo.findById(sessionId);
 
     if (session?.taskId) {
-      // Notify desktop app to cancel the task
+      const taskId = session.taskId;
+
+      const task = this.taskRepo.findById(taskId);
+      if (!task || ['completed', 'failed', 'cancelled'].includes(task.status)) {
+        // No active task to cancel.
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: this.getUiCopy('cancelNoActive'),
+        });
+        return;
+      }
+
+      // Cancel task directly when daemon is available (works even without a renderer window).
+      // When the daemon is present, it will emit task_cancelled, and handleTaskCancelled performs the cleanup + user message.
+      if (this.agentDaemon) {
+        try {
+          await this.agentDaemon.cancelTask(taskId);
+        } catch (error) {
+          console.error('Error cancelling task:', error);
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: `❌ Failed to cancel task: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          });
+        }
+        return;
+      }
+
+      // Fallback: notify desktop app to cancel the task.
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('gateway:cancel-task', {
-          taskId: session.taskId,
+          taskId,
           sessionId,
         });
       }
 
-      // Update session state
-      this.sessionRepo.update(sessionId, { state: 'idle', taskId: undefined });
-
-      await adapter.sendMessage({
-        chatId: message.chatId,
-        text: this.getUiCopy('cancelled'),
-      });
+      // Without a daemon, we won't receive task_cancelled. Perform the same cleanup + user message here.
+      const pending = this.pendingTaskResponses.get(taskId);
+      if (pending) {
+        await this.handleTaskCancelled(taskId);
+      } else {
+        this.sessionManager.unlinkSessionFromTask(sessionId);
+        this.pendingTaskResponses.delete(taskId);
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: this.getUiCopy('cancelled'),
+        });
+      }
     } else {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -2797,13 +3358,23 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     } else {
       let text = `🤖 *AI Providers*\n\nCurrent: ${currentProviderInfo?.name || current}\n\nTap to switch:`;
 
-      await adapter.sendMessage({
+      const messageId = await adapter.sendMessage({
         chatId: message.chatId,
         text,
         parseMode: 'markdown',
         inlineKeyboard: keyboard,
         threadId: message.threadId,
       });
+      if (messageId) {
+        this.registerInlineActionGuard({
+          action: 'provider',
+          channelType: adapter.type,
+          chatId: message.chatId,
+          messageId,
+          requestingUserId: message.userId,
+          requestingUserName: message.userName,
+        });
+      }
     }
   }
 
@@ -2983,13 +3554,45 @@ Node.js: \`${nodeVersion}\`
     const param = params.join(':');
 
     try {
-      // Get or create session for this chat
+      let callbackAnswered = false;
+      const answer = async (text?: string, showAlert?: boolean): Promise<void> => {
+        if (callbackAnswered) return;
+        callbackAnswered = true;
+        if (adapter.answerCallbackQuery) {
+          await adapter.answerCallbackQuery(query.id, text, showAlert);
+        }
+      };
+
       const channel = this.channelRepo.findByType(adapter.type);
       if (!channel) {
         console.error(`No channel configuration found for ${adapter.type}`);
         return;
       }
 
+      // Security check for callback actions (inline keyboard presses).
+      // Without this, any user in a group could press buttons even if they aren't authorized.
+      const syntheticMessage: IncomingMessage = {
+        messageId: query.messageId,
+        channel: adapter.type,
+        userId: query.userId,
+        userName: query.userName,
+        chatId: query.chatId,
+        text: '',
+        timestamp: new Date(),
+      };
+      const securityResult = await this.securityManager.checkAccess(channel, syntheticMessage);
+      if (!securityResult.allowed) {
+        await answer('Not authorized.', true);
+        if (securityResult.pairingRequired) {
+          await adapter.sendMessage({
+            chatId: query.chatId,
+            text: this.getUiCopy('pairingRequired'),
+          });
+        }
+        return;
+      }
+
+      // Get or create session for this chat
       // Find existing session or create one
       let session = this.sessionRepo.findByChatId(channel.id, chatId);
       if (!session) {
@@ -3001,30 +3604,60 @@ Node.js: \`${nodeVersion}\`
         });
       }
 
-      // Answer the callback to remove loading indicator
-      if (adapter.answerCallbackQuery) {
-        await adapter.answerCallbackQuery(query.id);
+      // Guard certain inline actions (workspace/provider/model selectors) so only the
+      // initiating user can press buttons, and so old keyboards don't keep working.
+      const guardKey = this.makeInlineActionGuardKey(adapter.type, query.chatId, query.messageId);
+      const guardable = action === 'workspace' || action === 'provider' || action === 'model';
+      if (guardable) {
+        const guard = this.pendingInlineActionGuards.get(guardKey);
+        const expiredText =
+          action === 'workspace'
+            ? '⌛ This workspace selector has expired. Run /workspaces again.'
+            : action === 'provider'
+              ? '⌛ This provider selector has expired. Run /providers again.'
+              : '⌛ This selector has expired. Please run the command again.';
+
+        if (!guard || guard.action !== action || guard.channelType !== adapter.type || guard.chatId !== query.chatId) {
+          await answer(expiredText, true);
+          return;
+        }
+        if (Date.now() > guard.expiresAt) {
+          this.pendingInlineActionGuards.delete(guardKey);
+          await answer(expiredText, true);
+          return;
+        }
+        if (guard.requestingUserId && guard.requestingUserId !== query.userId) {
+          const who = guard.requestingUserName ? guard.requestingUserName : 'the original requester';
+          await answer(`Only ${who} can use these buttons.`, true);
+          return;
+        }
       }
+
+      // Answer the callback to remove loading indicator (after validation).
+      await answer();
 
       switch (action) {
         case 'workspace':
           await this.handleWorkspaceCallback(adapter, query, session.id, param);
+          this.pendingInlineActionGuards.delete(guardKey);
           break;
 
         case 'provider':
           await this.handleProviderCallback(adapter, query, param);
+          this.pendingInlineActionGuards.delete(guardKey);
           break;
 
         case 'model':
           await this.handleModelCallback(adapter, query, param);
+          this.pendingInlineActionGuards.delete(guardKey);
           break;
 
         case 'approve':
-          await this.handleApprovalCallback(adapter, query, session.id, true);
+          await this.handleApprovalCallback(adapter, query, session.id, param, true);
           break;
 
         case 'deny':
-          await this.handleApprovalCallback(adapter, query, session.id, false);
+          await this.handleApprovalCallback(adapter, query, session.id, param, false);
           break;
 
         default:
@@ -3064,7 +3697,8 @@ Node.js: \`${nodeVersion}\`
         this.getUiCopy('workspaceSet', {
           workspaceName: workspace.name,
           workspacePath: workspace.path,
-        })
+        }),
+        []
       );
     } else {
       await adapter.sendMessage({
@@ -3105,7 +3739,8 @@ Node.js: \`${nodeVersion}\`
       await adapter.editMessageWithKeyboard(
         query.chatId,
         query.messageId,
-        `✅ Provider changed to: *${providerInfo?.name || providerType}*\n\nUse /models to see available models.`
+        `✅ Provider changed to: *${providerInfo?.name || providerType}*\n\nUse /models to see available models.`,
+        []
       );
     } else {
       await adapter.sendMessage({
@@ -3138,7 +3773,8 @@ Node.js: \`${nodeVersion}\`
       await adapter.editMessageWithKeyboard(
         query.chatId,
         query.messageId,
-        `✅ Model changed to: *${displayName}*`
+        `✅ Model changed to: *${displayName}*`,
+        []
       );
     } else {
       await adapter.sendMessage({
@@ -3156,37 +3792,83 @@ Node.js: \`${nodeVersion}\`
     adapter: ChannelAdapter,
     query: CallbackQuery,
     sessionId: string,
+    approvalId: string,
     approved: boolean
   ): Promise<void> {
-    // Find pending approval for this session
-    const approvalEntry = Array.from(this.pendingApprovals.entries())
-      .find(([, data]) => data.sessionId === sessionId);
+    if (!this.agentDaemon) {
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: this.getUiCopy('agentUnavailable'),
+      });
+      return;
+    }
 
-    if (!approvalEntry) {
+    if (!approvalId) {
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: this.getUiCopy('approvalNone'),
+      });
+      return;
+    }
+
+    const data = this.pendingApprovals.get(approvalId);
+    if (!data || data.sessionId !== sessionId || data.chatId !== query.chatId) {
       if (adapter.editMessageWithKeyboard) {
         await adapter.editMessageWithKeyboard(
           query.chatId,
           query.messageId,
-          this.getUiCopy('approvalNone')
+          '⌛ This approval request has expired or is no longer pending.',
+          []
         );
+      } else {
+        await adapter.sendMessage({
+          chatId: query.chatId,
+          text: '⌛ This approval request has expired or is no longer pending.',
+        });
       }
       return;
     }
 
-    const [approvalId] = approvalEntry;
-    this.pendingApprovals.delete(approvalId);
+    // Group chat safety: only the user who triggered the approval request can respond.
+    if (data.contextType === 'group' && data.requestingUserId && query.userId !== data.requestingUserId) {
+      const who = data.requestingUserName ? `*${data.requestingUserName}*` : 'the original requester';
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: `⚠️ Only ${who} can approve/deny this request in a group chat.`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
 
     try {
-      await this.agentDaemon?.respondToApproval(approvalId, approved);
+      const status = await this.agentDaemon.respondToApproval(approvalId, approved);
+      if (status === 'in_progress') {
+        await adapter.sendMessage({
+          chatId: query.chatId,
+          text: '⏳ That approval is already being processed. Try again in a moment.',
+        });
+        return;
+      }
 
-      const statusText = approved
-        ? this.getUiCopy('approvalApproved')
-        : this.getUiCopy('approvalDenied');
+      this.pendingApprovals.delete(approvalId);
+
+      let statusText: string;
+      if (status === 'handled') {
+        statusText = approved ? this.getUiCopy('approvalApproved') : this.getUiCopy('approvalDenied');
+      } else if (status === 'duplicate') {
+        statusText = '✅ That approval was already handled.';
+      } else if (status === 'not_found') {
+        statusText = '⌛ This approval request has expired or was already handled.';
+      } else {
+        statusText = this.getUiCopy('approvalFailed');
+      }
+
       if (adapter.editMessageWithKeyboard) {
         await adapter.editMessageWithKeyboard(
           query.chatId,
           query.messageId,
-          statusText
+          statusText,
+          []
         );
       } else {
         await adapter.sendMessage({

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { Workspace, GatewayContextType, AgentConfig, AgentType, Task } from '../../../shared/types';
+import { Workspace, GatewayContextType, AgentConfig, AgentType, Task, TOOL_GROUPS, ToolGroupName } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { FileTools } from './file-tools';
 import { SkillTools } from './skill-tools';
@@ -26,6 +26,7 @@ import { GmailTools } from './gmail-tools';
 import { GoogleCalendarTools } from './google-calendar-tools';
 import { DropboxTools } from './dropbox-tools';
 import { SharePointTools } from './sharepoint-tools';
+import { VoiceCallTools } from './voice-call-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -64,14 +65,18 @@ export class ToolRegistry {
   private googleCalendarTools: GoogleCalendarTools;
   private dropboxTools: DropboxTools;
   private sharePointTools: SharePointTools;
+  private voiceCallTools: VoiceCallTools;
   private gatewayContext?: GatewayContextType;
+  private deniedTools: Set<string> = new Set();
+  private deniedGroups: Set<ToolGroupName> = new Set();
   private shadowedToolsLogged = false;
 
   constructor(
     private workspace: Workspace,
     private daemon: AgentDaemon,
     private taskId: string,
-    gatewayContext?: GatewayContextType
+    gatewayContext?: GatewayContextType,
+    toolRestrictions?: string[]
   ) {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
@@ -96,7 +101,28 @@ export class ToolRegistry {
     this.googleCalendarTools = new GoogleCalendarTools(workspace, daemon, taskId);
     this.dropboxTools = new DropboxTools(workspace, daemon, taskId);
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
+    this.voiceCallTools = new VoiceCallTools(workspace, daemon, taskId);
     this.gatewayContext = gatewayContext;
+    this.applyToolRestrictions(toolRestrictions);
+  }
+
+  private applyToolRestrictions(restrictions?: string[]): void {
+    this.deniedTools = new Set();
+    this.deniedGroups = new Set();
+    if (!restrictions || restrictions.length === 0) return;
+
+    for (const raw of restrictions) {
+      const value = typeof raw === 'string' ? raw.trim() : '';
+      if (!value) continue;
+
+      // Context policies may specify tool group names (e.g., "group:memory") or
+      // individual tool names (e.g., "read_clipboard").
+      if (Object.prototype.hasOwnProperty.call(TOOL_GROUPS, value)) {
+        this.deniedGroups.add(value as ToolGroupName);
+      } else {
+        this.deniedTools.add(value);
+      }
+    }
   }
 
   /**
@@ -134,6 +160,7 @@ export class ToolRegistry {
     this.googleCalendarTools.setWorkspace(workspace);
     this.dropboxTools.setWorkspace(workspace);
     this.sharePointTools.setWorkspace(workspace);
+    this.voiceCallTools.setWorkspace(workspace);
   }
 
   /**
@@ -178,6 +205,15 @@ export class ToolRegistry {
    * Check if a tool is allowed based on security policy
    */
   isToolAllowed(toolName: string): boolean {
+    if (this.deniedTools.has(toolName)) {
+      return false;
+    }
+    for (const groupName of this.deniedGroups) {
+      const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
+      if (tools && tools.includes(toolName)) {
+        return false;
+      }
+    }
     return isToolAllowedQuick(toolName, this.workspace, this.gatewayContext);
   }
 
@@ -246,6 +282,9 @@ export class ToolRegistry {
     if (SharePointTools.isEnabled()) {
       allTools.push(...this.getSharePointToolDefinitions());
     }
+
+    // Voice call tools (outbound phone calls)
+    allTools.push(...this.getVoiceCallToolDefinitions());
 
     // Only add shell tool if workspace has shell permission
     if (this.workspace.permissions.shell) {
@@ -716,6 +755,9 @@ ${skillDescriptions}`;
 
     // SharePoint tools
     if (name === 'sharepoint_action') return await this.sharePointTools.executeAction(input);
+
+    // Voice call tools
+    if (name === 'voice_call') return await this.voiceCallTools.executeAction(input);
 
     // Shell tools
     if (name === 'run_command') return await this.shellTools.runCommand(input.command, input);
@@ -2811,6 +2853,85 @@ ${skillDescriptions}`;
             remote_path: {
               type: 'string',
               description: 'Remote path (for upload_file, relative to root)',
+            },
+          },
+          required: ['action'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define voice call tools (outbound phone calls)
+   */
+  private getVoiceCallToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'voice_call',
+        description:
+          'Initiate an outbound phone call via ElevenLabs Agents + Twilio integration. ' +
+          'Placing a call requires user approval. You can also list configured agents and phone numbers.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['list_agents', 'list_phone_numbers', 'initiate_call'],
+              description: 'Action to perform',
+            },
+            to_number: {
+              type: 'string',
+              description: 'Destination phone number in E.164 format (e.g., "+15555550123")',
+            },
+            agent_id: {
+              type: 'string',
+              description:
+                'ElevenLabs Agent ID. Optional if you set a default Agent ID in Settings > Voice > Phone Calls.',
+            },
+            agent_phone_number_id: {
+              type: 'string',
+              description:
+                'ElevenLabs agent phone number ID to use for outbound calls. Optional if configured in Settings > Voice > Phone Calls.',
+            },
+            dynamic_variables: {
+              type: 'object',
+              description:
+                'Dynamic variables to pass into the call. These can be referenced by the agent configuration.',
+              additionalProperties: true,
+            },
+            conversation_config_override: {
+              type: 'object',
+              description:
+                'Optional per-call conversation config override object (advanced).',
+              additionalProperties: true,
+            },
+            prompt: {
+              type: 'string',
+              description:
+                'Convenience: set conversation_config_override.agent.prompt.prompt for this call (advanced).',
+            },
+            first_message: {
+              type: 'string',
+              description:
+                'Convenience: set conversation_config_override.agent.first_message for this call (advanced).',
+            },
+            conversation_initiation_client_data: {
+              type: 'object',
+              description:
+                'Advanced: pass the full conversation initiation client data object. If provided, it overrides dynamic_variables/prompt/first_message/conversation_config_override.',
+              additionalProperties: true,
+            },
+            cursor: {
+              type: 'string',
+              description: 'Pagination cursor (for list actions)',
+            },
+            page_size: {
+              type: 'number',
+              description: 'Page size (for list actions)',
+            },
+            include_archived: {
+              type: 'boolean',
+              description: 'Include archived entries (for list actions)',
             },
           },
           required: ['action'],

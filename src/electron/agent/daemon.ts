@@ -160,6 +160,24 @@ export class AgentDaemon extends EventEmitter {
    */
   async startTask(task: Task): Promise<void> {
     await this.queueManager.enqueue(task);
+
+    // If the task was queued (concurrency full), emit an explicit event so
+    // remote gateways (WhatsApp/Telegram/etc) can inform the user instead of
+    // appearing to "hang" silently.
+    const refreshed = this.taskRepo.findById(task.id);
+    if (refreshed?.status === 'queued') {
+      const status = this.queueManager.getStatus();
+      const idx = status.queuedTaskIds.indexOf(task.id);
+      const position = idx >= 0 ? idx + 1 : undefined;
+      const message = position
+        ? `⏳ Queued (position ${position}). I’ll start as soon as a slot is free.`
+        : '⏳ Queued. I’ll start as soon as a slot is free.';
+      this.logEvent(task.id, 'task_queued', {
+        position,
+        reason: 'concurrency',
+        message,
+      });
+    }
   }
 
   /**
@@ -167,6 +185,14 @@ export class AgentDaemon extends EventEmitter {
    */
   async startTaskImmediate(task: Task): Promise<void> {
     console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
+
+    const wasQueued = task.status === 'queued';
+    if (wasQueued) {
+      const isRetry = this.retryCounts.has(task.id);
+      const count = this.retryCounts.get(task.id) ?? 0;
+      const retrySuffix = isRetry ? ` (retry ${count}/${this.maxTaskRetries})` : '';
+      this.logEvent(task.id, 'task_dequeued', { message: `▶️ Starting now${retrySuffix}.` });
+    }
 
     // Get workspace details
     const workspace = this.workspaceRepo.findById(task.workspaceId);
@@ -202,7 +228,7 @@ export class AgentDaemon extends EventEmitter {
     });
 
     // Update task status
-    this.taskRepo.update(task.id, { status: 'planning' });
+    this.taskRepo.update(task.id, { status: 'planning', error: undefined });
     this.logEvent(task.id, 'task_created', { task });
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
@@ -278,6 +304,52 @@ export class AgentDaemon extends EventEmitter {
     budgetTokens?: number;
     budgetCost?: number;
   }): Promise<Task> {
+    const parent = this.taskRepo.findById(params.parentTaskId);
+    const parentGatewayContext = parent?.agentConfig?.gatewayContext;
+    const childGatewayContext = params.agentConfig?.gatewayContext;
+
+    // Prevent privilege escalation: a child task may not become "more private" than its parent.
+    const mergedGatewayContext: AgentConfig['gatewayContext'] | undefined = (() => {
+      const rank: Record<NonNullable<AgentConfig['gatewayContext']>, number> = {
+        private: 0,
+        group: 1,
+        public: 2,
+      };
+      const contexts = [parentGatewayContext, childGatewayContext].filter(
+        (value): value is NonNullable<AgentConfig['gatewayContext']> =>
+          value === 'private' || value === 'group' || value === 'public'
+      );
+      if (contexts.length === 0) return undefined;
+      return contexts.sort((a, b) => rank[b] - rank[a])[0];
+    })();
+
+    // Prevent privilege escalation: tool restrictions are inherited and additive.
+    const mergedToolRestrictions: string[] | undefined = (() => {
+      const merged = new Set<string>();
+      const addAll = (values: unknown) => {
+        if (!Array.isArray(values)) return;
+        for (const raw of values) {
+          const value = typeof raw === 'string' ? raw.trim() : '';
+          if (!value) continue;
+          merged.add(value);
+        }
+      };
+      addAll(parent?.agentConfig?.toolRestrictions);
+      addAll(params.agentConfig?.toolRestrictions);
+      return merged.size > 0 ? Array.from(merged) : undefined;
+    })();
+
+    const mergedAgentConfig: AgentConfig | undefined = (() => {
+      const next: AgentConfig = params.agentConfig ? { ...params.agentConfig } : {};
+      if (mergedGatewayContext) {
+        next.gatewayContext = mergedGatewayContext;
+      }
+      if (mergedToolRestrictions) {
+        next.toolRestrictions = mergedToolRestrictions;
+      }
+      return Object.keys(next).length > 0 ? next : undefined;
+    })();
+
     const task = this.taskRepo.create({
       title: params.title,
       prompt: params.prompt,
@@ -285,7 +357,7 @@ export class AgentDaemon extends EventEmitter {
       workspaceId: params.workspaceId,
       parentTaskId: params.parentTaskId,
       agentType: params.agentType,
-      agentConfig: params.agentConfig,
+      agentConfig: mergedAgentConfig,
       depth: params.depth ?? 0,
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
@@ -477,9 +549,16 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Mark as queued with a helpful message
+    const retrySeconds = Math.ceil(delayMs / 1000);
+    const queuedError = `Transient provider error. Retry ${nextCount}/${this.maxTaskRetries} in ${retrySeconds}s.`;
     this.taskRepo.update(taskId, {
       status: 'queued',
-      error: `Transient provider error. Retry ${nextCount}/${this.maxTaskRetries} in ${Math.ceil(delayMs / 1000)}s.`,
+      error: queuedError,
+    });
+
+    this.logEvent(taskId, 'task_queued', {
+      reason: 'transient_retry',
+      message: `⏳ Temporary provider error. Retrying ${nextCount}/${this.maxTaskRetries} in ${retrySeconds}s.`,
     });
 
     this.logEvent(taskId, 'log', {
@@ -602,7 +681,10 @@ export class AgentDaemon extends EventEmitter {
    * Uses idempotency to prevent double-approval race conditions
    * Implements C6: Approval Gate Enforcement
    */
-  async respondToApproval(approvalId: string, approved: boolean): Promise<void> {
+  async respondToApproval(
+    approvalId: string,
+    approved: boolean
+  ): Promise<'handled' | 'duplicate' | 'not_found' | 'in_progress'> {
     // Generate idempotency key for this approval response
     const idempotencyKey = IdempotencyManager.generateKey(
       'approval:respond',
@@ -614,13 +696,13 @@ export class AgentDaemon extends EventEmitter {
     const existing = approvalIdempotency.check(idempotencyKey);
     if (existing.exists) {
       console.log(`[AgentDaemon] Duplicate approval response ignored: ${approvalId}`);
-      return; // Silently ignore duplicate
+      return 'duplicate';
     }
 
     // Start tracking this operation
     if (!approvalIdempotency.start(idempotencyKey)) {
       console.log(`[AgentDaemon] Concurrent approval response in progress: ${approvalId}`);
-      return; // Another response is being processed
+      return 'in_progress';
     }
 
     try {
@@ -644,9 +726,13 @@ export class AgentDaemon extends EventEmitter {
         } else {
           pending.reject(new Error('User denied approval'));
         }
+
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: 'handled' });
+        return 'handled';
       }
 
-      approvalIdempotency.complete(idempotencyKey, { success: true });
+      approvalIdempotency.complete(idempotencyKey, { success: true, status: 'not_found' });
+      return 'not_found';
     } catch (error) {
       approvalIdempotency.fail(idempotencyKey, error);
       throw error;
@@ -701,6 +787,14 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
 
+    // Memory retention:
+    // - Sub-agents (child tasks) default to retainMemory=false to avoid leaking sensitive
+    //   private context into disposable agents.
+    // - Shared gateway contexts (group/public) must never contribute injectable memories.
+    const isSubAgentTask = (task.agentType ?? 'main') === 'sub' || !!task.parentTaskId;
+    const retainMemory = task.agentConfig?.retainMemory ?? !isSubAgentTask;
+    if (!retainMemory) return;
+
     // Build content string based on event type
     let content = '';
     if (type === 'tool_call') {
@@ -734,7 +828,9 @@ export class AgentDaemon extends EventEmitter {
       content = content.slice(0, 5000) + '\n[... truncated]';
     }
 
-    await MemoryService.capture(task.workspaceId, taskId, memoryType, content);
+    const gatewayContext = task.agentConfig?.gatewayContext;
+    const forcePrivate = gatewayContext === 'group' || gatewayContext === 'public';
+    await MemoryService.capture(task.workspaceId, taskId, memoryType, content, forcePrivate);
   }
 
   /**
@@ -1071,11 +1167,15 @@ export class AgentDaemon extends EventEmitter {
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */
-  completeTask(taskId: string): void {
-    this.taskRepo.update(taskId, {
+  completeTask(taskId: string, resultSummary?: string): void {
+    const updates: Partial<Task> = {
       status: 'completed',
       completedAt: Date.now(),
-    });
+    };
+    if (typeof resultSummary === 'string' && resultSummary.trim().length > 0) {
+      updates.resultSummary = resultSummary.trim();
+    }
+    this.taskRepo.update(taskId, updates);
     this.clearRetryState(taskId);
     // Mark executor as completed for TTL-based cleanup
     const cached = this.activeTasks.get(taskId);
@@ -1083,7 +1183,10 @@ export class AgentDaemon extends EventEmitter {
       cached.status = 'completed';
       cached.lastAccessed = Date.now();
     }
-    this.logEvent(taskId, 'task_completed', { message: 'Task completed successfully' });
+    this.logEvent(taskId, 'task_completed', {
+      message: 'Task completed successfully',
+      ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
+    });
     // Notify queue manager so it can start next task
     this.queueManager.onTaskFinished(taskId);
   }

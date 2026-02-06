@@ -887,8 +887,17 @@ export class TelegramAdapter implements ChannelAdapter {
   async updateDraftStream(chatId: string, text: string): Promise<void> {
     if (!this.bot || !this.config.draftStreamingEnabled) return;
 
-    const state = this.draftStates.get(chatId);
-    if (!state) return;
+    let state = this.draftStates.get(chatId);
+    if (!state) {
+      // Be robust to callers that didn't explicitly start a draft stream
+      // (e.g., follow-ups or after process restarts).
+      state = {
+        chatId,
+        currentText: '',
+        lastUpdateTime: 0,
+      };
+      this.draftStates.set(chatId, state);
+    }
 
     const now = Date.now();
 
@@ -1150,7 +1159,9 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     const options: Record<string, unknown> = {};
-    if (inlineKeyboard && inlineKeyboard.length > 0) {
+    // If inlineKeyboard is provided (even empty), update reply_markup accordingly.
+    // Passing an empty keyboard clears existing buttons.
+    if (inlineKeyboard) {
       options.reply_markup = this.buildInlineKeyboard(inlineKeyboard);
     }
 

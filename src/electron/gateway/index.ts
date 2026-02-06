@@ -137,41 +137,93 @@ export class ChannelGateway {
   private setupAgentDaemonListeners(agentDaemon: AgentDaemon): void {
     // Track the last assistant message for each task to send as completion result
     const lastMessages = new Map<string, string>();
+    // Track whether any user-visible assistant messages were sent during a follow-up window.
+    const followUpMessagesSent = new Map<string, boolean>();
+
+    // Follow-ups log a user_message event at the start of processing. Use it to
+    // reset per-task follow-up tracking so we don't incorrectly carry state from
+    // the original task execution.
+    const onUserMessage = (data: { taskId: string; message?: string }) => {
+      followUpMessagesSent.set(data.taskId, false);
+    };
+    agentDaemon.on('user_message', onUserMessage);
+    this.daemonListeners.push({ event: 'user_message', handler: onUserMessage });
 
     // Listen for assistant messages (streaming responses)
     // Note: daemon emits { taskId, message } not { taskId, content }
     const onAssistantMessage = (data: { taskId: string; message?: string }) => {
-      const message = data.message;
-      if (message && message.length > 10) {
+      const message = typeof data.message === 'string' ? data.message : '';
+      const trimmed = message.trim();
+      if (trimmed) {
         // Keep the BEST (longest substantive) answer, not just the last one
         // This prevents confused step messages from overwriting good answers
         const existingMessage = lastMessages.get(data.taskId);
-        const isConfusedMessage = message.toLowerCase().includes("don't have") ||
-                                  message.toLowerCase().includes("please provide") ||
-                                  message.toLowerCase().includes("i cannot") ||
-                                  message.toLowerCase().includes("not available");
+        const isConfusedMessage = trimmed.toLowerCase().includes("don't have") ||
+                                  trimmed.toLowerCase().includes("please provide") ||
+                                  trimmed.toLowerCase().includes("i cannot") ||
+                                  trimmed.toLowerCase().includes("not available");
 
         // Only overwrite if new message is better (longer and not confused)
-        if (!existingMessage || (!isConfusedMessage && message.length >= existingMessage.length)) {
-          lastMessages.set(data.taskId, message);
+        if (!existingMessage || (!isConfusedMessage && trimmed.length >= existingMessage.length)) {
+          lastMessages.set(data.taskId, trimmed);
         }
 
-        // Always stream updates to channel (so user sees progress)
-        this.router.sendTaskUpdate(data.taskId, message);
+        // Stream updates to channel (router will debounce for channels that can't edit messages).
+        this.router.sendTaskUpdate(data.taskId, trimmed, true);
+
+        // Mark follow-up as having produced user-visible output, but only after a
+        // follow-up has actually started (see onUserMessage above).
+        if (followUpMessagesSent.has(data.taskId)) {
+          followUpMessagesSent.set(data.taskId, true);
+        }
       }
     };
     agentDaemon.on('assistant_message', onAssistantMessage);
     this.daemonListeners.push({ event: 'assistant_message', handler: onAssistantMessage });
 
+    const onTaskQueued = (data: { taskId: string; message?: string; position?: number; reason?: string }) => {
+      const explicit = typeof data.message === 'string' ? data.message.trim() : '';
+      const position = typeof data.position === 'number' && data.position > 0 ? data.position : undefined;
+      const fallback = position
+        ? `⏳ Queued (position ${position}). I’ll start as soon as a slot is free.`
+        : '⏳ Queued. I’ll start as soon as a slot is free.';
+      this.router.sendTaskUpdate(data.taskId, explicit || fallback);
+    };
+    agentDaemon.on('task_queued', onTaskQueued);
+    this.daemonListeners.push({ event: 'task_queued', handler: onTaskQueued });
+
+    const onTaskDequeued = (data: { taskId: string; message?: string }) => {
+      const explicit = typeof data.message === 'string' ? data.message.trim() : '';
+      this.router.sendTaskUpdate(data.taskId, explicit || '▶️ Starting now.');
+    };
+    agentDaemon.on('task_dequeued', onTaskDequeued);
+    this.daemonListeners.push({ event: 'task_dequeued', handler: onTaskDequeued });
+
     // Listen for task completion
-    const onTaskCompleted = (data: { taskId: string; message?: string }) => {
-      // Use the last assistant message as the result
-      const result = lastMessages.get(data.taskId);
+    const onTaskCompleted = (data: { taskId: string; resultSummary?: string; message?: string }) => {
+      // Prefer an explicit result summary if provided by the daemon.
+      // Otherwise, fall back to the best streamed assistant message.
+      const messageResult =
+        typeof data.message === 'string' && data.message.trim() !== 'Task completed successfully'
+          ? data.message
+          : undefined;
+      const result = (data.resultSummary || lastMessages.get(data.taskId) || messageResult)?.trim();
       this.router.handleTaskCompletion(data.taskId, result);
       lastMessages.delete(data.taskId);
+      followUpMessagesSent.delete(data.taskId);
     };
     agentDaemon.on('task_completed', onTaskCompleted);
     this.daemonListeners.push({ event: 'task_completed', handler: onTaskCompleted });
+
+    // Listen for task cancellation
+    const onTaskCancelled = (data: { taskId: string; message?: string }) => {
+      const reason = typeof data.message === 'string' ? data.message.trim() : undefined;
+      this.router.handleTaskCancelled(data.taskId, reason);
+      lastMessages.delete(data.taskId);
+      followUpMessagesSent.delete(data.taskId);
+    };
+    agentDaemon.on('task_cancelled', onTaskCancelled);
+    this.daemonListeners.push({ event: 'task_cancelled', handler: onTaskCancelled });
 
     // Listen for task errors
     // Note: daemon emits { taskId, error } or { taskId, message }
@@ -179,6 +231,7 @@ export class ChannelGateway {
       const errorMsg = data.error || data.message || 'Unknown error';
       this.router.handleTaskFailure(data.taskId, errorMsg);
       lastMessages.delete(data.taskId);
+      followUpMessagesSent.delete(data.taskId);
     };
     agentDaemon.on('error', onError);
     this.daemonListeners.push({ event: 'error', handler: onError });
@@ -194,22 +247,6 @@ export class ChannelGateway {
     this.daemonListeners.push({ event: 'tool_error', handler: onToolError });
 
     // Listen for follow-up message completion
-    // Track if any assistant messages were sent during follow-up
-    const followUpMessagesSent = new Map<string, boolean>();
-    const originalOnAssistantMessage = onAssistantMessage;
-    // Override to track follow-up messages
-    agentDaemon.off('assistant_message', onAssistantMessage);
-    const trackingAssistantMessage = (data: { taskId: string; message?: string }) => {
-      followUpMessagesSent.set(data.taskId, true);
-      originalOnAssistantMessage(data);
-    };
-    agentDaemon.on('assistant_message', trackingAssistantMessage);
-    // Update the stored handler
-    const assistantIdx = this.daemonListeners.findIndex(l => l.event === 'assistant_message');
-    if (assistantIdx >= 0) {
-      this.daemonListeners[assistantIdx] = { event: 'assistant_message', handler: trackingAssistantMessage };
-    }
-
     const onFollowUpCompleted = async (data: { taskId: string }) => {
       // If no assistant messages were sent during the follow-up, send a confirmation
       if (!followUpMessagesSent.get(data.taskId)) {

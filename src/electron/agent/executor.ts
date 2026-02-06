@@ -1070,6 +1070,35 @@ export class TaskExecutor {
   private dispatchedMentionedAgents = false;
   private lastAssistantText: string | null = null;
 
+  private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
+  private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
+    'i understand. let me continue.',
+    'done.',
+    'done',
+    'task complete.',
+    'task complete',
+    'task completed.',
+    'task completed',
+    'task completed successfully.',
+    'task completed successfully',
+    'complete.',
+    'complete',
+    'completed.',
+    'completed',
+    'all set.',
+    'all set',
+    'finished.',
+    'finished',
+  ]);
+
+  private isUsefulResultSummaryCandidate(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (TaskExecutor.RESULT_SUMMARY_PLACEHOLDERS.has(trimmed.toLowerCase())) return false;
+    if (trimmed.length < TaskExecutor.MIN_RESULT_SUMMARY_LENGTH) return false;
+    return true;
+  }
+
   // Plan revision tracking to prevent infinite revision loops
   private planRevisionCount: number = 0;
   private readonly maxPlanRevisions: number = 5;
@@ -1136,7 +1165,13 @@ export class TaskExecutor {
     this.contextManager = new ContextManager(effectiveModelKey);
 
     // Initialize tool registry
-    this.toolRegistry = new ToolRegistry(workspace, daemon, task.id);
+    this.toolRegistry = new ToolRegistry(
+      workspace,
+      daemon,
+      task.id,
+      task.agentConfig?.gatewayContext,
+      task.agentConfig?.toolRestrictions
+    );
 
     // Set up plan revision handler
     this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
@@ -1679,16 +1714,29 @@ export class TaskExecutor {
       this.lastNonVerificationOutput,
       this.lastAssistantOutput,
     ];
-    const placeholders = new Set([
-      'I understand. Let me continue.',
-    ]);
     for (const candidate of candidates) {
       if (!candidate) continue;
       const trimmed = candidate.trim();
-      if (trimmed.length < 20) continue;
-      if (placeholders.has(trimmed)) continue;
+      if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
       return trimmed;
     }
+    return undefined;
+  }
+
+  private buildResultSummary(): string | undefined {
+    const candidates = [
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.lastAssistantText,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const trimmed = candidate.trim();
+      if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
+      return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+    }
+
     return undefined;
   }
 
@@ -2089,7 +2137,13 @@ You are continuing a previous conversation. The context from the previous conver
   updateWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
     // Recreate tool registry to pick up new permissions (e.g., shell enabled)
-    this.toolRegistry = new ToolRegistry(workspace, this.daemon, this.task.id);
+    this.toolRegistry = new ToolRegistry(
+      workspace,
+      this.daemon,
+      this.task.id,
+      this.task.agentConfig?.gatewayContext,
+      this.task.agentConfig?.toolRestrictions
+    );
 
     // Re-register handlers after recreating tool registry
     this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
@@ -2916,7 +2970,7 @@ You are continuing a previous conversation. The context from the previous conver
       // Save conversation snapshot before completing task for future follow-ups
       this.saveConversationSnapshot();
       this.taskCompleted = true;  // Mark task as completed to prevent any further processing
-      this.daemon.completeTask(this.task.id);
+      this.daemon.completeTask(this.task.id, this.buildResultSummary());
     } catch (error: any) {
       // Don't log cancellation as an error - it's intentional
       const isCancellation = this.cancelled ||
@@ -3427,10 +3481,17 @@ Format your plan as a JSON object with this structure:
 
     // Get memory context for injection (from previous sessions)
     let memoryContext = '';
-    try {
-      memoryContext = MemoryService.getContextForInjection(this.workspace.id, this.task.prompt);
-    } catch {
-      // Memory service may not be initialized, continue without context
+    const isSubAgentTask = (this.task.agentType ?? 'main') === 'sub' || !!this.task.parentTaskId;
+    const retainMemory = this.task.agentConfig?.retainMemory ?? !isSubAgentTask;
+    const gatewayContext = this.task.agentConfig?.gatewayContext ?? 'private';
+    const allowMemoryInjection = retainMemory && gatewayContext === 'private';
+
+    if (allowMemoryInjection) {
+      try {
+        memoryContext = MemoryService.getContextForInjection(this.workspace.id, this.task.prompt);
+      } catch {
+        // Memory service may not be initialized, continue without context
+      }
     }
 
     // Define system prompt once so we can track its token usage
@@ -4278,7 +4339,7 @@ SCHEDULING & REMINDERS:
 
       this.saveConversationSnapshot();
       this.taskCompleted = true;
-      this.daemon.completeTask(this.task.id);
+      this.daemon.completeTask(this.task.id, this.buildResultSummary());
     } finally {
       await this.toolRegistry.cleanup().catch(e => {
         console.error('Cleanup error:', e);
