@@ -15,6 +15,7 @@ import {
   KIMI_MODELS,
   ModelKey,
   DEFAULT_MODEL,
+  DEFAULT_PI_MODEL,
 } from './types';
 import { AnthropicProvider } from './anthropic-provider';
 import { BedrockProvider } from './bedrock-provider';
@@ -26,6 +27,7 @@ import { AzureOpenAIProvider } from './azure-openai-provider';
 import { GroqProvider } from './groq-provider';
 import { XAIProvider } from './xai-provider';
 import { KimiProvider } from './kimi-provider';
+import { PiProvider } from './pi-provider';
 import { AnthropicCompatibleProvider } from './anthropic-compatible-provider';
 import { OpenAICompatibleProvider } from './openai-compatible-provider';
 import { GitHubCopilotProvider } from './github-copilot-provider';
@@ -297,6 +299,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.pi) {
+    sanitized.pi = {
+      ...sanitized.pi,
+      apiKey: decryptSecret(sanitized.pi.apiKey),
+    };
+  }
+
   if (sanitized.customProviders) {
     const normalized: Record<string, CustomProviderConfig> = {};
     for (const [key, value] of Object.entries(sanitized.customProviders)) {
@@ -386,6 +395,11 @@ export interface LLMSettings {
     model?: string;
     baseUrl?: string;
   };
+  pi?: {
+    provider?: string;  // pi-ai KnownProvider
+    apiKey?: string;
+    model?: string;
+  };
   customProviders?: Record<string, CustomProviderConfig>;
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
@@ -396,6 +410,7 @@ export interface LLMSettings {
   cachedGroqModels?: CachedModelInfo[];
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
+  cachedPiModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -581,6 +596,9 @@ export class LLMProviderFactory {
     if (settings.ollama?.baseUrl || settings.ollama?.model) {
       return 'ollama';
     }
+    if (settings.pi?.apiKey && settings.pi?.provider) {
+      return 'pi';
+    }
 
     if (settings.customProviders) {
       for (const entry of CUSTOM_PROVIDER_CATALOG) {
@@ -689,6 +707,9 @@ export class LLMProviderFactory {
       // Kimi config - from settings only
       kimiApiKey: normalizeSecret(overrideConfig?.kimiApiKey) || settings.kimi?.apiKey,
       kimiBaseUrl: overrideConfig?.kimiBaseUrl || settings.kimi?.baseUrl,
+      // Pi config - from settings only
+      piProvider: overrideConfig?.piProvider || settings.pi?.provider,
+      piApiKey: normalizeSecret(overrideConfig?.piApiKey) || settings.pi?.apiKey,
       // Custom provider config
       providerApiKey: normalizeSecret(overrideConfig?.providerApiKey) || customConfig?.apiKey,
       providerBaseUrl: overrideConfig?.providerBaseUrl || customConfig?.baseUrl,
@@ -728,6 +749,8 @@ export class LLMProviderFactory {
         return new XAIProvider(config);
       case 'kimi':
         return new KimiProvider(config);
+      case 'pi':
+        return new PiProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -794,6 +817,12 @@ export class LLMProviderFactory {
     // For Kimi, use the specific model if provided or default
     if (providerType === 'kimi') {
       return kimiModel || 'kimi-k2.5';
+    }
+
+    // For Pi, use the specific model from settings
+    if (providerType === 'pi') {
+      const settings = this.loadSettings();
+      return settings.pi?.model || DEFAULT_PI_MODEL;
     }
 
     // For Bedrock, prefer an explicit Bedrock model ID if configured.
@@ -910,6 +939,11 @@ export class LLMProviderFactory {
         type: 'ollama' as LLMProviderType,
         name: 'Ollama (Local)',
         configured: !!(settings.ollama?.baseUrl || settings.ollama?.model),
+      },
+      {
+        type: 'pi' as LLMProviderType,
+        name: 'Pi (Unified)',
+        configured: !!(settings.pi?.apiKey && settings.pi?.provider),
       },
     ];
 
@@ -1163,6 +1197,21 @@ export class LLMProviderFactory {
         };
       }
 
+      case 'pi': {
+        const currentModel = settings.pi?.model || DEFAULT_PI_MODEL;
+        const modelList = settings.cachedPiModels && settings.cachedPiModels.length > 0
+          ? settings.cachedPiModels
+          : PiProvider.getAvailableModels(settings.pi?.provider).map((m) => ({
+            key: m.id,
+            displayName: m.name,
+            description: m.description,
+          }));
+        return {
+          currentModel,
+          models: ensureCurrentModel(modelList, currentModel),
+        };
+      }
+
       default: {
         const currentModel = settings.modelKey;
         const modelList = Object.entries(MODELS).map(([key, value]) => ({
@@ -1230,6 +1279,9 @@ export class LLMProviderFactory {
         break;
       case 'kimi':
         updated.kimi = { ...settings.kimi, model: modelKey };
+        break;
+      case 'pi':
+        updated.pi = { ...settings.pi, model: modelKey };
         break;
       case 'anthropic':
         updated.modelKey = modelKey as ModelKey;
@@ -1641,6 +1693,20 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Fetch available Pi models for a given Pi backend provider
+   */
+  static async getPiModels(piProvider?: string): Promise<Array<{ id: string; name: string; description: string }>> {
+    return PiProvider.getAvailableModels(piProvider);
+  }
+
+  /**
+   * Get available Pi backend providers
+   */
+  static getPiProviders(): Array<{ id: string; name: string }> {
+    return PiProvider.getAvailableProviders();
+  }
+
+  /**
    * Format OpenAI model ID to display name
    */
   private static formatOpenAIModelName(modelId: string): string {
@@ -1690,7 +1756,7 @@ export class LLMProviderFactory {
    * Save cached models for a provider
    */
   static saveCachedModels(
-    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi',
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi' | 'pi',
     models: CachedModelInfo[]
   ): void {
     const settings = this.loadSettings();
@@ -1720,6 +1786,9 @@ export class LLMProviderFactory {
       case 'kimi':
         settings.cachedKimiModels = models;
         break;
+      case 'pi':
+        settings.cachedPiModels = models;
+        break;
     }
 
     this.saveSettings(settings);
@@ -1729,7 +1798,7 @@ export class LLMProviderFactory {
    * Get cached models for a provider
    */
   static getCachedModels(
-    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi'
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi' | 'pi'
   ): CachedModelInfo[] | undefined {
     const settings = this.loadSettings();
 
@@ -1750,6 +1819,8 @@ export class LLMProviderFactory {
         return settings.cachedXaiModels;
       case 'kimi':
         return settings.cachedKimiModels;
+      case 'pi':
+        return settings.cachedPiModels;
       default:
         return undefined;
     }

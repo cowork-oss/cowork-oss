@@ -40,6 +40,8 @@ const IPC_CHANNELS = {
   LLM_GET_GROQ_MODELS: 'llm:getGroqModels',
   LLM_GET_XAI_MODELS: 'llm:getXAIModels',
   LLM_GET_KIMI_MODELS: 'llm:getKimiModels',
+  LLM_GET_PI_MODELS: 'llm:getPiModels',
+  LLM_GET_PI_PROVIDERS: 'llm:getPiProviders',
   LLM_OPENAI_OAUTH_START: 'llm:openaiOAuthStart',
   LLM_OPENAI_OAUTH_LOGOUT: 'llm:openaiOAuthLogout',
   LLM_GET_BEDROCK_MODELS: 'llm:getBedrockModels',
@@ -1501,6 +1503,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getGroqModels: (apiKey?: string, baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GROQ_MODELS, apiKey, baseUrl),
   getXAIModels: (apiKey?: string, baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_XAI_MODELS, apiKey, baseUrl),
   getKimiModels: (apiKey?: string, baseUrl?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_KIMI_MODELS, apiKey, baseUrl),
+  getPiModels: (piProvider?: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_MODELS, piProvider),
+  getPiProviders: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_PROVIDERS),
   openaiOAuthStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_START),
   openaiOAuthLogout: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT),
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) =>
@@ -2303,6 +2307,8 @@ export interface ElectronAPI {
   getGroqModels: (apiKey?: string, baseUrl?: string) => Promise<Array<{ id: string; name: string }>>;
   getXAIModels: (apiKey?: string, baseUrl?: string) => Promise<Array<{ id: string; name: string }>>;
   getKimiModels: (apiKey?: string, baseUrl?: string) => Promise<Array<{ id: string; name: string }>>;
+  getPiModels: (piProvider?: string) => Promise<Array<{ id: string; name: string; description: string }>>;
+  getPiProviders: () => Promise<Array<{ id: string; name: string }>>;
   openaiOAuthStart: () => Promise<{ success: boolean; error?: string }>;
   openaiOAuthLogout: () => Promise<{ success: boolean }>;
   getBedrockModels: (config?: { region?: string; accessKeyId?: string; secretAccessKey?: string; profile?: string }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;

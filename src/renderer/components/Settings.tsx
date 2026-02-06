@@ -358,6 +358,13 @@ const LLM_PROVIDER_ICONS: Record<string, JSX.Element> = {
       <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
     </svg>
   ),
+  pi: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M5 6h14" />
+      <path d="M9 6v12" />
+      <path d="M15 6v12" />
+    </svg>
+  ),
 };
 
 const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?: string }) => {
@@ -459,6 +466,14 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
   const [kimiModel, setKimiModel] = useState('kimi-k2.5');
   const [kimiModels, setKimiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingKimiModels, setLoadingKimiModels] = useState(false);
+
+  // Pi state
+  const [piProvider, setPiProvider] = useState('anthropic');
+  const [piApiKey, setPiApiKey] = useState('');
+  const [piModel, setPiModel] = useState('');
+  const [piModels, setPiModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [piProviders, setPiProviders] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingPiModels, setLoadingPiModels] = useState(false);
 
   // Custom provider state
   const [customProviders, setCustomProviders] = useState<Record<string, CustomProviderConfig>>({});
@@ -698,6 +713,17 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
         setKimiModel(loadedSettings.kimi.model);
       }
 
+      // Set Pi form state
+      if (loadedSettings.pi?.provider) {
+        setPiProvider(loadedSettings.pi.provider);
+      }
+      if (loadedSettings.pi?.apiKey) {
+        setPiApiKey(loadedSettings.pi.apiKey);
+      }
+      if (loadedSettings.pi?.model) {
+        setPiModel(loadedSettings.pi.model);
+      }
+
       // Set Bedrock form state (access key and secret key are set earlier)
       if (loadedSettings.bedrock?.accessKeyId) {
         setAwsAccessKeyId(loadedSettings.bedrock.accessKeyId);
@@ -739,6 +765,13 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
       }
       if (loadedSettings.cachedBedrockModels && loadedSettings.cachedBedrockModels.length > 0) {
         setBedrockModels(loadedSettings.cachedBedrockModels.map((m: any) => ({
+          id: m.key,
+          name: m.displayName,
+          description: m.description || '',
+        })));
+      }
+      if (loadedSettings.cachedPiModels && loadedSettings.cachedPiModels.length > 0) {
+        setPiModels(loadedSettings.cachedPiModels.map((m: any) => ({
           id: m.key,
           name: m.displayName,
           description: m.description || '',
@@ -879,6 +912,33 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
     }
   };
 
+  const loadPiModels = async (provider?: string) => {
+    try {
+      setLoadingPiModels(true);
+      const resolvedProvider = provider || piProvider;
+      const models = await window.electronAPI.getPiModels(resolvedProvider);
+      setPiModels(models || []);
+      if (models && models.length > 0 && !models.some(m => m.id === piModel)) {
+        setPiModel(models[0].id);
+      }
+      onSettingsChanged?.();
+    } catch (error) {
+      console.error('Failed to load Pi models:', error);
+      setPiModels([]);
+    } finally {
+      setLoadingPiModels(false);
+    }
+  };
+
+  const loadPiProviders = async () => {
+    try {
+      const providers = await window.electronAPI.getPiProviders();
+      setPiProviders(providers || []);
+    } catch (error) {
+      console.error('Failed to load Pi providers:', error);
+    }
+  };
+
   const handleProviderSelect = (providerType: LLMProviderType) => {
     setSettings((prev) => ({ ...prev, providerType }));
 
@@ -912,6 +972,9 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
       loadXAIModels();
     } else if (providerType === 'kimi') {
       loadKimiModels();
+    } else if (providerType === 'pi') {
+      loadPiProviders();
+      loadPiModels();
     }
   };
 
@@ -1064,6 +1127,12 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
           model: kimiModel || undefined,
           baseUrl: kimiBaseUrl || undefined,
         },
+        // Always include Pi settings
+        pi: {
+          provider: piProvider || undefined,
+          apiKey: piApiKey || undefined,
+          model: piModel || undefined,
+        },
         customProviders: Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
 
@@ -1141,6 +1210,11 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
           apiKey: kimiApiKey || undefined,
           model: kimiModel || undefined,
           baseUrl: kimiBaseUrl || undefined,
+        } : undefined,
+        pi: settings.providerType === 'pi' ? {
+          provider: piProvider || undefined,
+          apiKey: piApiKey || undefined,
+          model: piModel || undefined,
         } : undefined,
         customProviders: Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
@@ -1976,6 +2050,101 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
                             placeholder="kimi-k2.5"
                             value={kimiModel}
                             onChange={(e) => setKimiModel(e.target.value)}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {settings.providerType === 'pi' && (
+                    <>
+                      <div className="settings-section">
+                        <h3>Pi Backend Provider</h3>
+                        <p className="settings-description">
+                          Select which LLM provider to route through{' '}
+                          <a href="https://github.com/badlogic/pi-mono" target="_blank" rel="noopener noreferrer">
+                            Pi
+                          </a>
+                          's unified API.
+                        </p>
+                        <select
+                          className="settings-select"
+                          value={piProvider}
+                          onChange={(e) => {
+                            setPiProvider(e.target.value);
+                            setPiModels([]);
+                            setPiModel('');
+                            loadPiModels(e.target.value);
+                          }}
+                        >
+                          {piProviders.length > 0 ? (
+                            piProviders.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="anthropic">Anthropic</option>
+                              <option value="openai">OpenAI</option>
+                              <option value="google">Google</option>
+                              <option value="xai">xAI</option>
+                              <option value="groq">Groq</option>
+                              <option value="cerebras">Cerebras</option>
+                              <option value="openrouter">OpenRouter</option>
+                              <option value="mistral">Mistral</option>
+                              <option value="amazon-bedrock">Amazon Bedrock</option>
+                              <option value="minimax">MiniMax</option>
+                              <option value="huggingface">HuggingFace</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="settings-section">
+                        <h3>API Key</h3>
+                        <p className="settings-description">
+                          Enter the API key for the selected backend provider.
+                        </p>
+                        <div className="settings-input-group">
+                          <input
+                            type="password"
+                            className="settings-input"
+                            placeholder="Enter API key..."
+                            value={piApiKey}
+                            onChange={(e) => setPiApiKey(e.target.value)}
+                          />
+                          <button
+                            className="button-small button-secondary"
+                            onClick={() => loadPiModels(piProvider)}
+                            disabled={loadingPiModels}
+                          >
+                            {loadingPiModels ? 'Loading...' : 'Refresh Models'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="settings-section">
+                        <h3>Model</h3>
+                        <p className="settings-description">
+                          Select a model from Pi's model registry.
+                        </p>
+                        {piModels.length > 0 ? (
+                          <SearchableSelect
+                            options={piModels.map(model => ({
+                              value: model.id,
+                              label: model.name,
+                              description: model.description,
+                            }))}
+                            value={piModel}
+                            onChange={setPiModel}
+                            placeholder="Select a model..."
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            className="settings-input"
+                            placeholder="claude-sonnet-4-5-20250514"
+                            value={piModel}
+                            onChange={(e) => setPiModel(e.target.value)}
                           />
                         )}
                       </div>

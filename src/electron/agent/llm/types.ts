@@ -46,6 +46,9 @@ export interface LLMProviderConfig {
   // Kimi-specific
   kimiApiKey?: string;
   kimiBaseUrl?: string;
+  // Pi-specific (uses pi-ai unified LLM API)
+  piProvider?: string;  // pi-ai KnownProvider (e.g. 'anthropic', 'openai', 'google')
+  piApiKey?: string;
   // Generic provider support
   providerApiKey?: string;
   providerBaseUrl?: string;
@@ -360,6 +363,33 @@ export const KIMI_MODELS = {
 } as const;
 
 export type KimiModelKey = keyof typeof KIMI_MODELS;
+
+/**
+ * Pi provider backends
+ * These map to pi-ai KnownProvider types
+ */
+export const PI_PROVIDERS = {
+  'anthropic': { displayName: 'Anthropic' },
+  'openai': { displayName: 'OpenAI' },
+  'google': { displayName: 'Google' },
+  'xai': { displayName: 'xAI' },
+  'groq': { displayName: 'Groq' },
+  'cerebras': { displayName: 'Cerebras' },
+  'openrouter': { displayName: 'OpenRouter' },
+  'mistral': { displayName: 'Mistral' },
+  'amazon-bedrock': { displayName: 'Amazon Bedrock' },
+  'openai-codex': { displayName: 'OpenAI Codex (OAuth)' },
+  'github-copilot': { displayName: 'GitHub Copilot' },
+  'azure-openai-responses': { displayName: 'Azure OpenAI' },
+  'minimax': { displayName: 'MiniMax' },
+  'huggingface': { displayName: 'HuggingFace' },
+  'kimi-coding': { displayName: 'Kimi Coding' },
+} as const;
+
+export type PiProviderKey = keyof typeof PI_PROVIDERS;
+
+/** Default model used when no Pi model is explicitly configured */
+export const DEFAULT_PI_MODEL = 'claude-sonnet-4-5-20250514';
 
 /**
  * Popular Ollama models with their details

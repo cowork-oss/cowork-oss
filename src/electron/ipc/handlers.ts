@@ -307,6 +307,8 @@ rateLimiter.configure(IPC_CHANNELS.LLM_GET_BEDROCK_MODELS, RATE_LIMIT_CONFIGS.st
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_GROQ_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_XAI_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_KIMI_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_PROVIDERS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SEARCH_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limited);
@@ -1346,6 +1348,23 @@ export async function setupIpcHandlers(
     }));
     LLMProviderFactory.saveCachedModels('kimi', cachedModels);
     return models;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_PI_MODELS, async (_, piProvider?: string) => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_PI_MODELS);
+    const models = await LLMProviderFactory.getPiModels(piProvider);
+    const cachedModels = models.map(m => ({
+      key: m.id,
+      displayName: m.name,
+      description: m.description,
+    }));
+    LLMProviderFactory.saveCachedModels('pi', cachedModels);
+    return models;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LLM_GET_PI_PROVIDERS, async () => {
+    checkRateLimit(IPC_CHANNELS.LLM_GET_PI_PROVIDERS);
+    return LLMProviderFactory.getPiProviders();
   });
 
   // OpenAI OAuth handlers

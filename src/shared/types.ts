@@ -1347,6 +1347,8 @@ export const IPC_CHANNELS = {
   LLM_GET_GROQ_MODELS: 'llm:getGroqModels',
   LLM_GET_XAI_MODELS: 'llm:getXAIModels',
   LLM_GET_KIMI_MODELS: 'llm:getKimiModels',
+  LLM_GET_PI_MODELS: 'llm:getPiModels',
+  LLM_GET_PI_PROVIDERS: 'llm:getPiProviders',
   LLM_OPENAI_OAUTH_START: 'llm:openaiOAuthStart',
   LLM_OPENAI_OAUTH_LOGOUT: 'llm:openaiOAuthLogout',
   LLM_GET_BEDROCK_MODELS: 'llm:getBedrockModels',
@@ -1644,6 +1646,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   'groq',
   'xai',
   'kimi',
+  'pi',
 ] as const;
 
 export const CUSTOM_LLM_PROVIDER_TYPES = [
@@ -1751,6 +1754,11 @@ export interface LLMSettingsData {
     model?: string;
     baseUrl?: string;
   };
+  pi?: {
+    provider?: string;  // pi-ai KnownProvider (e.g. 'anthropic', 'openai', 'google')
+    apiKey?: string;
+    model?: string;
+  };
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
@@ -1760,6 +1768,7 @@ export interface LLMSettingsData {
   cachedGroqModels?: CachedModelInfo[];
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
+  cachedPiModels?: CachedModelInfo[];
   customProviders?: Record<string, CustomProviderConfig>;
 }
 
