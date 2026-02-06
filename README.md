@@ -30,7 +30,10 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **14 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
 | **8 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
 | **6 Cloud Storage** | Notion, Box, OneDrive, Google Workspace (Drive/Gmail/Calendar), Dropbox, SharePoint |
-| **Security-First** | 2350+ unit tests, configurable guardrails, approval workflows |
+| **Voice Calls** | Outbound phone calls via ElevenLabs Agents |
+| **Agent Teams** | Multi-agent collaboration with shared checklists and coordinated runs |
+| **Memory Kit** | Workspace `.cowork/` memory indexing, context injection, per-workspace settings |
+| **Security-First** | 2350+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
 > **Status**: macOS desktop app (cross-platform support planned)
@@ -132,7 +135,7 @@ The packaged app will be in the `release/` directory.
 
 - Claude Code-style tools: `glob`, `grep`, `edit_file`
 - Browser automation with Playwright
-- 75+ bundled skills for popular services
+- 85+ bundled skills for popular services
 - MCP (Model Context Protocol) support for extensibility
 
 ---
@@ -148,7 +151,8 @@ CoWork OS is designed with security as a core principle, not an afterthought.
 | **Channel Access** | Pairing codes, allowlists, brute-force lockout (5 attempts, 15 min cooldown) |
 | **Context Policies** | Per-context security modes (DM vs group), tool restrictions per context |
 | **Encrypted Storage** | OS keychain (macOS/Windows/Linux) + AES-256 fallback, SHA-256 integrity checks |
-| **Tool Execution** | Risk-level categorization, context-aware isolation |
+| **Gateway Hardening** | Requester-only approval in group chats, tool restrictions, streaming coalescing |
+| **Tool Execution** | Risk-level categorization, context-aware isolation, denied tools/groups enforcement |
 | **Sandbox Isolation** | Docker containers (cross-platform) or macOS sandbox-exec |
 | **File Operations** | Workspace boundaries, path traversal protection |
 | **Shell Commands** | Dangerous command blocking, explicit approval required |
@@ -204,7 +208,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | OpenRouter | API key in Settings | Pay-per-token (multi-model access) |
 | OpenAI (API Key) | API key in Settings | Pay-per-token |
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
-| AWS Bedrock | AWS credentials in Settings | Pay-per-token via AWS |
+| AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 | Groq | API key in Settings | Pay-per-token |
 | xAI (Grok) | API key in Settings | Pay-per-token |
@@ -286,20 +290,24 @@ Configure in **Settings** > **Appearance**.
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Goal Mode**: Define success criteria and auto-retry until verification passes
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **75+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
+- **85+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
+- **Workspace Memory Kit**: `.cowork/` directory indexing with markdown search and context injection
+- **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
+- **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
 - **Workspace Recency**: Workspaces ordered by last used time for quick access
 
-### Voice Mode (NEW)
+### Voice Mode
 
-Talk to your AI assistant with voice input and audio responses.
+Talk to your AI assistant with voice input and audio responses, plus make outbound phone calls.
 
 | Feature | Description |
 |---------|-------------|
 | **Text-to-Speech** | ElevenLabs (premium), OpenAI TTS, or local Web Speech API |
 | **Speech-to-Text** | OpenAI Whisper for accurate transcription |
 | **Multiple Voices** | Choose from ElevenLabs voices or OpenAI voices (alloy, echo, fable, onyx, nova, shimmer) |
+| **Outbound Phone Calls** | Initiate phone calls via ElevenLabs Agents (list agents, list numbers, make calls) |
 | **Customizable** | Volume, speech rate, language settings |
 | **Secure Storage** | All settings encrypted via OS keychain (macOS/Windows/Linux) with AES-256 fallback |
 
@@ -335,6 +343,36 @@ Capture and recall observations across sessions for improved context continuity.
 | **Disabled** | No memory capture |
 
 Configure in **Settings** > **Memory** for each workspace.
+
+### Workspace Memory Kit
+
+Index and search `.cowork/` workspace directories for persistent project context that agents can leverage.
+
+| Feature | Description |
+|---------|-------------|
+| **Markdown Indexing** | Indexes `.cowork/` markdown files (AGENTS.md, SOUL.md, etc.) in each workspace |
+| **Keyword Search** | Search by keyword matching against indexed sections |
+| **Context Injection** | Aggregates workspace kit files into agent prompts automatically |
+| **Global Toggles** | Enable/disable memory features globally via Memory Hub settings |
+| **Per-Workspace Settings** | Configure memory behavior per workspace |
+| **Mixed Search Results** | Supports both database and markdown-backed search results |
+
+Configure in **Settings** > **Memory Hub**.
+
+### Agent Teams
+
+Coordinate multiple agents working together on complex tasks with shared state.
+
+| Feature | Description |
+|---------|-------------|
+| **Team Management** | Create and manage teams with multiple agent members |
+| **Shared Checklists** | Agents share checklist items for coordinated task execution |
+| **Run Tracking** | Track team runs with status, progress, and history |
+| **Member Roles** | Assign different agents to team members |
+| **UI Panel** | Full React UI for creating, managing, and monitoring agent teams |
+| **Data Persistence** | SQLite-backed repositories for teams, members, items, and runs |
+
+Configure in the **Agent Teams** panel.
 
 ### Configurable Guardrails
 
@@ -1797,15 +1835,18 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 
 ---
 
-## Built-in Skills (75+)
+## Built-in Skills (85+)
 
 | Category | Skills |
 |----------|--------|
-| **Developer** | GitHub, GitLab, Linear, Jira, Sentry |
-| **Communication** | Slack, Discord, Telegram, Email |
-| **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders |
+| **Developer** | GitHub, GitLab, Linear, Jira, Sentry, Code Reviewer, Multi-PR Review, Developer Growth Analysis |
+| **Communication** | Slack, Discord, Telegram, Email, Voice Calls (ElevenLabs Agents) |
+| **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders, PRD Generator, Memory Kit |
 | **Media** | Spotify, YouTube, SoundCloud |
 | **Documents** | Excel, Word, PDF, PowerPoint |
+| **Frontend** | Frontend Design, React Native Best Practices |
+| **Data** | Supabase SDK Patterns |
+| **Search** | Local Web Search (SearXNG), Bird |
 
 ---
 
@@ -1934,7 +1975,7 @@ Users must comply with their model provider's terms:
 - [x] WebSocket Control Plane with API
 - [x] Tailscale and SSH remote access
 - [x] Personality system
-- [x] 75+ bundled skills
+- [x] 85+ bundled skills (code reviewer, PRD, multi-PR review, frontend design, local websearch, developer growth, React Native, Supabase, bird)
 - [x] 2350+ unit tests
 - [x] Docker-based sandboxing (cross-platform)
 - [x] Per-context security policies (DM vs group)
@@ -1951,6 +1992,14 @@ Users must comply with their model provider's terms:
 - [x] Gateway channel cleanup and enhanced security (Matrix direct rooms, Slack groups)
 - [x] Agent transient error retry logic for improved reliability
 - [x] Smart parameter inference for document creation tools
+- [x] Bedrock inference profile auto-resolution (auto-resolves model IDs to inference profiles)
+- [x] Gateway hardening (group chat security, streaming coalescing, restart resilience, tool restrictions)
+- [x] Outbound phone calls via ElevenLabs Agents (voice_call tool)
+- [x] Workspace Memory Kit (`.cowork/` markdown indexing, context injection, memory hub settings)
+- [x] Agent Teams (multi-agent collaboration with shared checklists, coordinated runs, team UI)
+- [x] Gateway pending selection state for workspace/provider commands (improved WhatsApp/iMessage UX)
+- [x] Task result summary persistence from executor to daemon
+- [x] Memory retention isolation for sub-agents and public contexts
 
 ### Planned
 
