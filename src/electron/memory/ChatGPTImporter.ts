@@ -107,11 +107,11 @@ const HARD_MAX_CONVERSATIONS = 2000;
 const SENSITIVE_PATTERNS = [
   /(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*\S+/i,
   /(?:password|passwd|pwd)\s*[:=]\s*\S+/i,
-  /(?:bearer|token)\s+[A-Za-z0-9\-._~+\/]+=*/i,
+  /(?:bearer|token)\s+[A-Za-z0-9\-._~+/]+=*/i,
   /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/,
   /sk-[A-Za-z0-9]{20,}/,
   /ghp_[A-Za-z0-9]{36}/,
-  /xox[bpoas]-[A-Za-z0-9\-]+/,
+  /xox[bpoas]-[A-Za-z0-9-]+/,
 ];
 
 function containsSensitiveData(text: string): boolean {

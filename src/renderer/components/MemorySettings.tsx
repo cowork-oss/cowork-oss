@@ -4,7 +4,7 @@ import { ChatGPTImportWizard } from './ChatGPTImportWizard';
 // Types inlined since preload types aren't directly importable in renderer
 type PrivacyMode = 'normal' | 'strict' | 'disabled';
 
-interface MemorySettings {
+interface MemorySettingsData {
   workspaceId: string;
   enabled: boolean;
   autoCapture: boolean;
@@ -28,7 +28,7 @@ interface MemorySettingsProps {
 }
 
 export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySettingsProps) {
-  const [settings, setSettings] = useState<MemorySettings | null>(null);
+  const [settings, setSettings] = useState<MemorySettingsData | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -57,7 +57,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     }
   };
 
-  const handleSave = async (updates: Partial<MemorySettings>) => {
+  const handleSave = async (updates: Partial<MemorySettingsData>) => {
     if (!settings) return;
     try {
       setSaving(true);

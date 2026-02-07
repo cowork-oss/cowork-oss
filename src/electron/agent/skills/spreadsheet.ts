@@ -55,7 +55,20 @@ export class SpreadsheetBuilder {
       // Add all rows
       for (let rowIndex = 0; rowIndex < sheetData.data.length; rowIndex++) {
         const rowData = sheetData.data[rowIndex];
-        const row = worksheet.addRow(rowData);
+
+        // The tool schema for create_spreadsheet uses strings for cell values, so
+        // formulas are commonly provided as strings like "=SUM(A1:A2)". ExcelJS
+        // requires formulas to be passed as objects: { formula: "SUM(A1:A2)" }.
+        const normalizedRowData = rowData.map((cell) => {
+          if (typeof cell !== 'string') return cell;
+          const trimmed = cell.trim();
+          if (trimmed.startsWith('=') && trimmed.length > 1) {
+            return { formula: trimmed.slice(1) };
+          }
+          return cell;
+        });
+
+        const row = worksheet.addRow(normalizedRowData);
 
         // Style header row if specified
         if (rowIndex === 0 && sheetData.hasHeader !== false) {

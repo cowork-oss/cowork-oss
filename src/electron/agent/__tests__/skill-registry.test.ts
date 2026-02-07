@@ -1,6 +1,7 @@
 /**
  * Tests for SkillRegistry
  */
+/* eslint-disable no-undef -- variables from top-level dynamic import */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type { CustomSkill, SkillRegistryEntry, SkillSearchResult } from '../../../shared/types';

@@ -99,7 +99,7 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
             case 'labelAdded':
               return {
                 ...t,
-                labels: [...(t.labels || []), event.data?.labelId!].filter(Boolean),
+                labels: [...(t.labels || []), event.data?.labelId].filter((l): l is string => Boolean(l)),
               };
             case 'labelRemoved':
               return {

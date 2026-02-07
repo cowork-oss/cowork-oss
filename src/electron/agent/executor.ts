@@ -194,11 +194,11 @@ function isAskingQuestion(text: string): boolean {
   ];
 
   const explicitProceedPatterns = [
-    /\bi\s+(?:will|\'ll)\s+(?:proceed|continue|go\s+ahead|move\s+forward)\b/i,
+    /\bi\s+(?:will|'ll)\s+(?:proceed|continue|go\s+ahead|move\s+forward)\b/i,
     /\bi\s+can\s+(?:proceed|continue|move\s+forward)\b/i,
-    /\bi\s+(?:will|\'ll)\s+assume\b/i,
+    /\bi\s+(?:will|'ll)\s+assume\b/i,
     /\bif\s+you\s+do\s+not\s+(?:respond|answer|reply)\b/i,
-    /\bif\s+you\s+don\'t\s+(?:respond|answer|reply)\b/i,
+    /\bif\s+you\s+don't\s+(?:respond|answer|reply)\b/i,
   ];
 
   const questionWordPatterns = [
@@ -229,7 +229,7 @@ function isAskingQuestion(text: string): boolean {
   let tailImperative = false;
 
   for (const line of tailLines) {
-    const normalized = line.replace(/^[\-\*]?\s*\d*[\).]?\s*/, '').trim();
+    const normalized = line.replace(/^[-*]?\s*\d*[).]?\s*/, '').trim();
     if (!normalized) continue;
     if (nonBlockingQuestionPatterns.some(pattern => pattern.test(normalized))) {
       continue;
@@ -2537,7 +2537,7 @@ You are continuing a previous conversation. The context from the previous conver
     ];
 
     const pathOrFilePatterns = [
-      /(?:^|[\s/\\])[\w.\-\/\\]+?\.(ts|tsx|js|jsx|py|rs|go|java|kt|swift|json|yml|yaml|toml|md|sol|c|cpp|h|hpp)\b/i,
+      /(?:^|[\s/\\])[\w.\-/\\]+?\.(ts|tsx|js|jsx|py|rs|go|java|kt|swift|json|yml|yaml|toml|sol|c|cpp|h|hpp)\b/i,
       /\b(?:src|app|apps|packages|programs|frontend|backend|server|client|contracts|lib|services)\//i,
     ];
 

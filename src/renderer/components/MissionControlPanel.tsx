@@ -323,7 +323,7 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
             case 'labelAdded':
               return {
                 ...task,
-                labels: [...(task.labels || []), event.data?.labelId!].filter(Boolean),
+                labels: [...(task.labels || []), event.data?.labelId].filter((l): l is string => Boolean(l)),
               };
             case 'labelRemoved':
               return {

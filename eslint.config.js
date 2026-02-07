@@ -15,6 +15,9 @@ export default [
       },
       globals: {
         ...globals.node,
+        NodeJS: 'readonly',
+        Electron: 'readonly',
+        EventListener: 'readonly',
       },
     },
     plugins: {
@@ -24,6 +27,28 @@ export default [
       ...typescript.configs['recommended'].rules,
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-require-imports': 'warn',
+      'no-control-regex': 'off',
+    },
+  },
+  // Test file overrides
+  {
+    files: [
+      'src/**/__tests__/**/*.ts',
+      'src/**/*.test.ts',
+      'tests/**/*.ts',
+    ],
+    languageOptions: {
+      globals: {
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        vi: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+      },
     },
   },
   {
@@ -40,6 +65,8 @@ export default [
       globals: {
         ...globals.browser,
         React: 'readonly',
+        NodeJS: 'readonly',
+        EventListener: 'readonly',
       },
     },
     plugins: {
