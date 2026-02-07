@@ -503,9 +503,10 @@ export const ChatGPTImportSchema = z.object({
     .max(MAX_PATH_LENGTH)
     .refine((p) => path.isAbsolute(p), { message: 'File path must be absolute' })
     .refine((p) => p.endsWith('.json'), { message: 'File must be a .json file' }),
-  maxConversations: z.number().int().min(0).max(2000).optional(),
+  maxConversations: z.number().int().min(0).max(10000).optional(),
   minMessages: z.number().int().min(1).max(100).optional(),
   forcePrivate: z.boolean().optional(),
+  modelOverride: z.string().max(200).optional(),
 });
 
 // ============ File Operation Schemas ============

@@ -33,7 +33,8 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
   const [fileName, setFileName] = useState<string>('');
   const [fileSize, setFileSize] = useState<number>(0);
   const [forcePrivate, setForcePrivate] = useState(true);
-  const [maxConversations, setMaxConversations] = useState(500);
+  const [maxConversations, setMaxConversations] = useState(0);
+  const [modelOverride, setModelOverride] = useState('');
   const [progress, setProgress] = useState<ChatGPTImportProgress | null>(null);
   const [result, setResult] = useState<ChatGPTImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
         maxConversations,
         minMessages: 2,
         forcePrivate,
+        ...(modelOverride.trim() ? { modelOverride: modelOverride.trim() } : {}),
       });
 
       setResult(importResult);
@@ -256,11 +258,12 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
               onChange={(e) => setMaxConversations(parseInt(e.target.value))}
               className="settings-select"
             >
+              <option value="0">All conversations</option>
               <option value="50">50 (quick test)</option>
               <option value="200">200</option>
-              <option value="500">500 (recommended)</option>
+              <option value="500">500</option>
               <option value="1000">1000</option>
-              <option value="2000">2000 (maximum)</option>
+              <option value="2000">2000</option>
             </select>
             <p className="settings-form-hint">
               More conversations means better memory, but takes longer to process.
@@ -279,6 +282,31 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
             </label>
             <p className="settings-form-hint">
               Recommended. Private memories are never exposed through gateway channels or shared contexts. Personal chat history should stay private.
+            </p>
+          </div>
+
+          <div className="settings-form-group">
+            <label className="settings-label">Distillation model (optional)</label>
+            <input
+              type="text"
+              value={modelOverride}
+              onChange={(e) => setModelOverride(e.target.value)}
+              placeholder="Leave empty to use your default model"
+              className="settings-input"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg-secondary)',
+                color: 'var(--color-text-primary)',
+                fontSize: '13px',
+              }}
+            />
+            <p className="settings-form-hint">
+              Each conversation requires an LLM call to extract memories. For large imports, use a cheaper/faster model
+              (e.g. <code style={{ background: 'var(--color-bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>claude-haiku-4-5-20250315</code>,{' '}
+              <code style={{ background: 'var(--color-bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>gpt-4o-mini</code>) to reduce cost.
             </p>
           </div>
 

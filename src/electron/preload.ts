@@ -925,6 +925,7 @@ interface ChatGPTImportOptions {
   maxConversations?: number;
   minMessages?: number;
   forcePrivate?: boolean;
+  modelOverride?: string;
 }
 
 interface ChatGPTImportProgress {
