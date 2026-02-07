@@ -1317,11 +1317,37 @@ export class TaskExecutor {
    * Update tracking after an LLM response
    */
   private updateTracking(inputTokens: number, outputTokens: number): void {
-    this.totalInputTokens += inputTokens;
-    this.totalOutputTokens += outputTokens;
-    this.totalCost += calculateCost(this.modelId, inputTokens, outputTokens);
+    const safeInput = Number.isFinite(inputTokens) ? inputTokens : 0;
+    const safeOutput = Number.isFinite(outputTokens) ? outputTokens : 0;
+    const deltaCost = calculateCost(this.modelId, safeInput, safeOutput);
+
+    this.totalInputTokens += safeInput;
+    this.totalOutputTokens += safeOutput;
+    this.totalCost += deltaCost;
     this.iterationCount++;
     this.globalTurnCount++; // Track global turns across all steps
+
+    // Persist usage to task events so it can be exported/audited later.
+    // Store totals (not just deltas) so consumers can just take the most recent record.
+    if (safeInput > 0 || safeOutput > 0 || deltaCost > 0) {
+      this.daemon.logEvent(this.task.id, 'llm_usage', {
+        modelId: this.modelId,
+        modelKey: this.modelKey,
+        delta: {
+          inputTokens: safeInput,
+          outputTokens: safeOutput,
+          totalTokens: safeInput + safeOutput,
+          cost: deltaCost,
+        },
+        totals: {
+          inputTokens: this.totalInputTokens,
+          outputTokens: this.totalOutputTokens,
+          totalTokens: this.totalInputTokens + this.totalOutputTokens,
+          cost: this.totalCost,
+        },
+        updatedAt: Date.now(),
+      });
+    }
   }
 
   private getToolTimeoutMs(toolName: string, input: unknown): number {

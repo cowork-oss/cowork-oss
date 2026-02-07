@@ -98,6 +98,8 @@ export type EventType =
   | 'tool_warning'
   | 'user_message'
   | 'command_output'
+  // LLM usage tracking (tokens/cost)
+  | 'llm_usage'
   // Sub-Agent / Parallel Agent events
   | 'agent_spawned'        // Parent spawned a child agent
   | 'agent_completed'      // Child agent completed successfully
@@ -453,6 +455,55 @@ export interface TaskEvent {
   timestamp: number;
   type: EventType;
   payload: any;
+}
+
+export interface TaskUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cost: number;
+  modelId?: string;
+  modelKey?: string;
+  updatedAt?: number;
+}
+
+export interface TaskFileChanges {
+  created: string[];
+  modified: string[];
+  deleted: string[];
+}
+
+export interface TaskExportQuery {
+  workspaceId?: string;
+  taskIds?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskExportItem {
+  taskId: string;
+  title: string;
+  status: TaskStatus;
+  workspaceId: string;
+  workspaceName?: string;
+  parentTaskId?: string;
+  agentType?: AgentType;
+  depth?: number;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+  usage?: TaskUsageTotals;
+  files?: TaskFileChanges;
+  resultSummary?: string;
+  error?: string;
+}
+
+export interface TaskExportJson {
+  schemaVersion: 1;
+  exportedAt: number;
+  query: TaskExportQuery;
+  tasks: TaskExportItem[];
 }
 
 export interface Artifact {
@@ -1345,6 +1396,7 @@ export const IPC_CHANNELS = {
   TASK_CREATE: 'task:create',
   TASK_GET: 'task:get',
   TASK_LIST: 'task:list',
+  TASK_EXPORT_JSON: 'task:exportJSON',
   TASK_CANCEL: 'task:cancel',
   TASK_PAUSE: 'task:pause',
   TASK_RESUME: 'task:resume',

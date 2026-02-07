@@ -99,6 +99,25 @@ const MAX_DISTILL_INPUT_CHARS = 6000;
 /** Max conversations processed in one import. */
 const HARD_MAX_CONVERSATIONS = 2000;
 
+/**
+ * Patterns that indicate sensitive data in memory content.
+ * Mirrors the detection used by MemoryService so imports get the same
+ * privacy protection as auto-captured memories.
+ */
+const SENSITIVE_PATTERNS = [
+  /(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*\S+/i,
+  /(?:password|passwd|pwd)\s*[:=]\s*\S+/i,
+  /(?:bearer|token)\s+[A-Za-z0-9\-._~+\/]+=*/i,
+  /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/,
+  /sk-[A-Za-z0-9]{20,}/,
+  /ghp_[A-Za-z0-9]{36}/,
+  /xox[bpoas]-[A-Za-z0-9\-]+/,
+];
+
+function containsSensitiveData(text: string): boolean {
+  return SENSITIVE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 // ── Importer ───────────────────────────────────────────────────
 
 const importEvents = new EventEmitter();
@@ -268,7 +287,7 @@ export class ChatGPTImporter {
 
             // Write directly to DB, bypassing MemoryService.capture()
             // which checks autoCapture setting and would block imports
-            const isPrivate = forcePrivate || settings.privacyMode === 'strict';
+            const isPrivate = forcePrivate || settings.privacyMode === 'strict' || containsSensitiveData(memoryContent);
 
             memoryRepo.create({
               workspaceId,

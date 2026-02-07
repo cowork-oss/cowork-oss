@@ -21,6 +21,7 @@ const IPC_CHANNELS = {
   TASK_CREATE: 'task:create',
   TASK_GET: 'task:get',
   TASK_LIST: 'task:list',
+  TASK_EXPORT_JSON: 'task:exportJSON',
   TASK_CANCEL: 'task:cancel',
   TASK_PAUSE: 'task:pause',
   TASK_RESUME: 'task:resume',
@@ -1532,6 +1533,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createTask: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_GET, id),
   listTasks: () => ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST),
+  exportTasksJson: (query?: any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
   pauseTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PAUSE, id),
   resumeTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME, id),
@@ -2408,6 +2410,7 @@ export interface ElectronAPI {
   createTask: (data: any) => Promise<any>;
   getTask: (id: string) => Promise<any>;
   listTasks: () => Promise<any[]>;
+  exportTasksJson: (query?: any) => Promise<any>;
   cancelTask: (id: string) => Promise<void>;
   pauseTask: (id: string) => Promise<void>;
   resumeTask: (id: string) => Promise<void>;

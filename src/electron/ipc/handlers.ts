@@ -26,12 +26,12 @@ import {
 import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { ActivityRepository } from '../activity/ActivityRepository';
 import { MentionRepository } from '../agents/MentionRepository';
-import { TaskLabelRepository } from '../database/TaskLabelRepository';
-import { WorkingStateRepository } from '../agents/WorkingStateRepository';
-import { ContextPolicyManager } from '../gateway/context-policy';
-import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData } from '../../shared/types';
-import * as os from 'os';
-import { AgentDaemon } from '../agent/daemon';
+	import { TaskLabelRepository } from '../database/TaskLabelRepository';
+	import { WorkingStateRepository } from '../agents/WorkingStateRepository';
+	import { ContextPolicyManager } from '../gateway/context-policy';
+	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery } from '../../shared/types';
+	import * as os from 'os';
+	import { AgentDaemon } from '../agent/daemon';
 import {
   LLMProviderFactory,
   LLMProviderConfig,
@@ -40,8 +40,9 @@ import {
 } from '../agent/llm';
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../agent/search';
 import { ChannelGateway } from '../gateway';
-import { updateManager } from '../updater';
-import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
+	import { updateManager } from '../updater';
+	import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
+	import { buildTaskExportJson } from '../telemetry/task-export';
 import {
   validateInput,
   WorkspaceCreateSchema,
@@ -300,6 +301,7 @@ function checkRateLimit(channel: string, config: { maxRequests: number; windowMs
 // Configure rate limits for sensitive channels
 rateLimiter.configure(IPC_CHANNELS.TASK_CREATE, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
@@ -890,6 +892,57 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_LIST, async () => {
     return taskRepo.findAll();
+  });
+
+  // Export task telemetry as a structured JSON blob (prompt-free summaries)
+  ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (_, rawQuery?: TaskExportQuery) => {
+    checkRateLimit(IPC_CHANNELS.TASK_EXPORT_JSON);
+
+    const query: TaskExportQuery = {
+      workspaceId: typeof rawQuery?.workspaceId === 'string' ? rawQuery.workspaceId : undefined,
+      taskIds: Array.isArray(rawQuery?.taskIds)
+        ? rawQuery.taskIds
+            .filter((id): id is string => typeof id === 'string')
+            .map((id) => id.trim())
+            .filter(Boolean)
+        : undefined,
+      limit: typeof rawQuery?.limit === 'number' && Number.isFinite(rawQuery.limit) ? rawQuery.limit : undefined,
+      offset: typeof rawQuery?.offset === 'number' && Number.isFinite(rawQuery.offset) ? rawQuery.offset : undefined,
+    };
+
+    const maxLimit = 2000;
+    const limit = Math.min(Math.max(query.limit ?? 500, 1), maxLimit);
+    const offset = Math.max(query.offset ?? 0, 0);
+
+    let tasks: Task[] = [];
+
+    if (query.taskIds && query.taskIds.length > 0) {
+      tasks = query.taskIds.map((id) => taskRepo.findById(id)).filter((t): t is Task => !!t);
+    } else if (query.workspaceId) {
+      const all = taskRepo.findByWorkspace(query.workspaceId);
+      tasks = all.slice(offset, offset + limit);
+    } else {
+      tasks = taskRepo.findAll(limit, offset);
+    }
+
+    const taskIds = tasks.map((task) => task.id);
+    const events = taskIds.length > 0
+      ? taskEventRepo.findByTaskIds(taskIds, ['file_created', 'file_modified', 'file_deleted', 'llm_usage'])
+      : [];
+
+    const workspaceIds = Array.from(new Set(tasks.map((task) => task.workspaceId)));
+    const workspaces = workspaceIds.map((id) => workspaceRepo.findById(id)).filter((ws): ws is Workspace => !!ws);
+
+    return buildTaskExportJson({
+      query: {
+        ...query,
+        // Materialize defaults/caps so callers see what was actually applied.
+        ...(query.taskIds && query.taskIds.length > 0 ? {} : { limit, offset }),
+      },
+      tasks,
+      workspaces,
+      events,
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_CANCEL, async (_, id: string) => {
@@ -3146,6 +3199,10 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         });
 
         return { taskId: task.id };
+      },
+      onTaskMessage: async (action) => {
+        console.log('[Hooks] Task message:', action.taskId);
+        await agentDaemon.sendMessage(action.taskId, action.message);
       },
       onEvent: (event) => {
         console.log('[Hooks] Server event:', event.action);
