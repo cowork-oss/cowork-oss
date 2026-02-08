@@ -257,8 +257,20 @@ export class ChannelTools {
     const result = {
       success: true,
       channel: channelType,
+      channel_id: channel.id,
+      channel_name: channel.name,
+      channel_enabled: Boolean(channel.enabled),
+      channel_status: channel.status,
       since_ms: typeof sinceMs === 'number' ? sinceMs : undefined,
       chats,
+      ...(chats.length === 0 && (channel.status === 'error' || channel.enabled === false)
+        ? {
+            warning:
+              channel.enabled === false
+                ? `Channel "${channelType}" is configured but disabled. Enable it in Settings > Channels.`
+                : `Channel "${channelType}" is configured but currently in error. Check Settings > Channels for connection issues.`,
+          }
+        : {}),
     };
 
     this.daemon.logEvent(this.taskId, 'tool_result', {
@@ -383,10 +395,22 @@ export class ChannelTools {
     const result = {
       success: true,
       channel: channelType,
+      channel_id: channel.id,
+      channel_name: channel.name,
+      channel_enabled: Boolean(channel.enabled),
+      channel_status: channel.status,
       chat_id: chatId,
       since_ms: typeof sinceMs === 'number' ? sinceMs : undefined,
       direction,
       messages,
+      ...(messages.length === 0 && (channel.status === 'error' || channel.enabled === false)
+        ? {
+            warning:
+              channel.enabled === false
+                ? `Channel "${channelType}" is configured but disabled. Enable it in Settings > Channels.`
+                : `Channel "${channelType}" is configured but currently in error. Check Settings > Channels for connection issues.`,
+          }
+        : {}),
     };
 
     this.daemon.logEvent(this.taskId, 'tool_result', {

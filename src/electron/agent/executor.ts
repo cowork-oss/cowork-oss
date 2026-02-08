@@ -3345,10 +3345,17 @@ VERIFICATION STEP (REQUIRED):
    - Prefer task_history over filesystem exploration or log scraping.
 
 7. GOOGLE WORKSPACE (Gmail/Calendar/Drive):
-   - For Gmail/email/inbox requests, use gmail_action.
-   - For scheduling/meetings/invites requests, use calendar_action.
-   - For Drive file requests, use google_drive_action.
-   - If these tools fail with an auth/integration error (disabled, 401, reconnect required), DO NOT fall back to CLI workarounds for non-technical users. Ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
+   - Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+   - If Google Workspace tools are unavailable:
+     - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
+     - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
+     - Be explicit about limitations:
+       - channel_* reflects only what the Email channel has ingested, not the full Gmail inbox.
+       - email_imap_unread supports unread state via IMAP, but does not support Gmail labels/threads like the Gmail API.
+   - Only if BOTH Google Workspace tools are unavailable AND email_imap_unread is unavailable or fails due to missing config, ask the user to connect one of them:
+     - Settings > Integrations > Google Workspace (best for full Gmail features: threads/labels/search/unread)
+     - Settings > Channels > Email (IMAP/SMTP; supports unread via email_imap_unread)
+   - Do NOT fall back to CLI workarounds (gog/himalaya/shell email clients) unless the user explicitly requests a CLI approach.
 
 Format your plan as a JSON object with this structure:
 {
@@ -3886,9 +3893,16 @@ SCHEDULING & REMINDERS:
 - When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.
 
 GOOGLE WORKSPACE (Gmail/Calendar/Drive):
-- Prefer gmail_action, calendar_action, and google_drive_action for Google Workspace requests.
-- If these tools fail with an auth/integration error (disabled, 401, reconnect required), stop and ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
-- For non-technical users, do NOT suggest CLI workarounds.
+- Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+- If Google Workspace tools are unavailable:
+  - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
+  - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
+  - Be explicit about limitations:
+    - channel_* reflects only what the Email channel has ingested, not the full Gmail inbox.
+    - email_imap_unread supports unread state via IMAP, but does not support Gmail labels/threads like the Gmail API.
+- If the user explicitly needs full Gmail features (threads/labels/search) and Google Workspace tools are unavailable, ask them to enable it in Settings > Integrations > Google Workspace.
+- If gmail_action is available but fails with an auth/reconnect error (401, reconnect required), ask the user to reconnect Google Workspace in Settings.
+- Do NOT suggest CLI workarounds (gog/himalaya/shell email clients) unless the user explicitly requests a CLI approach.
 
 TASK / CONVERSATION HISTORY:
 - Use the task_history tool to answer questions like "What did we talk about yesterday?", "What did I ask earlier today?", or "Show my recent tasks".
@@ -4112,7 +4126,26 @@ TASK / CONVERSATION HISTORY:
 
         // If we hit an integration/auth setup error on a previous iteration, stop here.
         // We already have enough info to guide the user; do not keep calling tools.
+        // But first, add error tool_results for any tool_use blocks in this response
+        // to keep the message history valid for the API.
         if (pauseAfterNextAssistantMessage) {
+          const pauseToolResults: LLMToolResult[] = [];
+          for (const block of response.content || []) {
+            if (block.type === 'tool_use') {
+              pauseToolResults.push({
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: JSON.stringify({
+                  error: pauseAfterNextAssistantMessageReason || 'Task paused awaiting user action',
+                  action_required: true,
+                }),
+                is_error: true,
+              });
+            }
+          }
+          if (pauseToolResults.length > 0) {
+            messages.push({ role: 'user', content: pauseToolResults });
+          }
           awaitingUserInput = true;
           awaitingUserInputReason = pauseAfterNextAssistantMessageReason || 'Awaiting user input';
           continueLoop = false;
@@ -4251,6 +4284,14 @@ TASK / CONVERSATION HISTORY:
             // Check for cancellation or completion before executing tool
             if (this.cancelled || this.taskCompleted) {
               console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: this.cancelled ? 'Task was cancelled' : 'Task already completed',
+                }),
+                is_error: true,
+              });
               break;
             }
 
@@ -4855,9 +4896,16 @@ SCHEDULING & REMINDERS:
 - When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.
 
 GOOGLE WORKSPACE (Gmail/Calendar/Drive):
-- Prefer gmail_action, calendar_action, and google_drive_action for Google Workspace requests.
-- If these tools fail with an auth/integration error (disabled, 401, reconnect required), stop and ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
-- For non-technical users, do NOT suggest CLI workarounds.
+- Use gmail_action/calendar_action/google_drive_action ONLY when those tools are available (Google Workspace integration enabled).
+- If Google Workspace tools are unavailable:
+  - For inbox/unread summaries, use email_imap_unread when available (direct IMAP mailbox access).
+  - For emails that have already been ingested into the local gateway message log, use channel_list_chats/channel_history with channel "email".
+  - Be explicit about limitations:
+    - channel_* reflects only what the Email channel has ingested, not the full Gmail inbox.
+    - email_imap_unread supports unread state via IMAP, but does not support Gmail labels/threads like the Gmail API.
+- If the user explicitly needs full Gmail features (threads/labels/search) and Google Workspace tools are unavailable, ask them to enable it in Settings > Integrations > Google Workspace.
+- If gmail_action is available but fails with an auth/reconnect error (401, reconnect required), ask the user to reconnect Google Workspace in Settings.
+- Do NOT suggest CLI workarounds (gog/himalaya/shell email clients) unless the user explicitly requests a CLI approach.
 
 TASK / CONVERSATION HISTORY:
 - Use the task_history tool to answer questions like "What did we talk about yesterday?", "What did I ask earlier today?", or "Show my recent tasks".
@@ -5125,6 +5173,14 @@ TASK / CONVERSATION HISTORY:
             // Check for cancellation or completion before executing tool
             if (this.cancelled || this.taskCompleted) {
               console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: content.id,
+                content: JSON.stringify({
+                  error: this.cancelled ? 'Task was cancelled' : 'Task already completed',
+                }),
+                is_error: true,
+              });
               break;
             }
 
