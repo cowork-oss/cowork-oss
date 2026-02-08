@@ -1530,6 +1530,12 @@ export class TaskExecutor {
       return normalizedSettingsTimeout ?? 120 * 1000;
     }
 
+    if (toolName === 'generate_image') {
+      // Remote image generation can take longer than typical tool calls (model latency + image download).
+      // Keep this comfortably above the default 30s while still bounded by the step timeout.
+      return normalizedSettingsTimeout ?? clampToStepTimeout(180 * 1000);
+    }
+
     return normalizedSettingsTimeout ?? TOOL_TIMEOUT_MS;
   }
 

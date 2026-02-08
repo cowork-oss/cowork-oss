@@ -17,6 +17,7 @@ import { VisionTools } from './vision-tools';
 import { SystemTools } from './system-tools';
 import { CronTools } from './cron-tools';
 import { CanvasTools } from './canvas-tools';
+import { VisualTools } from './visual-tools';
 import { MentionTools } from './mention-tools';
 import { XTools } from './x-tools';
 import { NotionTools } from './notion-tools';
@@ -62,6 +63,7 @@ export class ToolRegistry {
   private systemTools: SystemTools;
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
+  private visualTools: VisualTools;
   private mentionTools: MentionTools;
   private xTools: XTools;
   private notionTools: NotionTools;
@@ -102,6 +104,7 @@ export class ToolRegistry {
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
+    this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
     this.xTools = new XTools(workspace, daemon, taskId);
     this.notionTools = new NotionTools(workspace, daemon, taskId);
@@ -177,6 +180,7 @@ export class ToolRegistry {
     this.systemTools.setWorkspace(workspace);
     this.cronTools.setWorkspace(workspace);
     this.canvasTools.setWorkspace(workspace);
+    this.visualTools.setWorkspace(workspace);
     this.xTools.setWorkspace(workspace);
     this.notionTools.setWorkspace(workspace);
     this.boxTools.setWorkspace(workspace);
@@ -331,6 +335,9 @@ export class ToolRegistry {
 
     // Always add canvas tools (enables visual workspace)
     allTools.push(...CanvasTools.getToolDefinitions());
+
+    // Visual annotator tools (agentic image iteration loop)
+    allTools.push(...VisualTools.getToolDefinitions());
 
     // Always add mention tools (enables multi-agent collaboration)
     allTools.push(...MentionTools.getToolDefinitions());
@@ -736,11 +743,11 @@ Shell Commands:
 
     descriptions += `
 
-Image Generation (Nano Banana):
-- generate_image: Generate images from text descriptions using AI
-  - nano-banana: Fast generation for quick iterations
-  - nano-banana-pro: High-quality generation for production use
-  - Requires Gemini API key; the tool will prompt setup guidance if missing.`;
+Image Generation:
+- generate_image: Generate images from text descriptions using an image-capable model.
+  - Uses the best configured image provider automatically (Azure OpenAI / OpenAI / Gemini), independent of the active chat model.
+  - If multiple image providers are configured, it will try the default first and use others as fallbacks unless explicitly overridden.
+  - If no image provider is configured, the tool returns setup guidance.`;
 
     descriptions += `
 
@@ -785,6 +792,11 @@ Live Canvas (Visual Workspace):
 - canvas_snapshot: Take a screenshot of the canvas
 - canvas_list: List all active canvas sessions
 IMPORTANT: When using canvas_push, you MUST provide the 'content' parameter with the full HTML string to display.
+
+Agentic Image Iteration (Visual Annotator):
+- visual_open_annotator: Open an image annotation UI in Live Canvas for a workspace image
+- visual_update_annotator: Update an existing annotator session with a new image iteration
+The annotator sends [Canvas Interaction] messages back to the running task with structured JSON feedback.
 
 ${this.channelTools ? `
 Channel Message Log (Local Gateway):
@@ -936,6 +948,10 @@ ${skillDescriptions}`;
     if (name === 'canvas_eval') return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === 'canvas_snapshot') return await this.canvasTools.takeSnapshot(input.session_id);
     if (name === 'canvas_list') return this.canvasTools.listSessions();
+
+    // Visual annotator tools
+    if (name === 'visual_open_annotator') return await this.visualTools.openImageAnnotator(input);
+    if (name === 'visual_update_annotator') return await this.visualTools.updateImageAnnotator(input);
 
     // Channel history tools
     if (name === 'channel_list_chats' || name === 'channel_history') {

@@ -1,15 +1,19 @@
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
-import { ImageGenerator, ImageModel, ImageSize, ImageGenerationResult } from '../skills/image-generator';
+import { ImageGenerator, ImageModel, ImageSize, ImageGenerationResult, ImageProvider } from '../skills/image-generator';
 import { LLMTool } from '../llm/types';
 
-/**
- * ImageTools - Tools for AI image generation using Nano Banana models
- *
- * Provides two image generation models:
- * - Nano Banana: Fast generation using Gemini 2.5 Flash Image
- * - Nano Banana Pro: High-quality generation using Gemini 3 Pro
- */
+ /**
+  * ImageTools - Tools for AI image generation
+  *
+  * Supports multiple backends depending on what's configured in Settings:
+  * - Gemini (image generation)
+  * - OpenAI (gpt-image-* / dall-e-*)
+  * - Azure OpenAI (deployment-based)
+  *
+  * If multiple are configured, the tool prefers the configured default provider,
+  * then falls back to the others unless explicitly overridden.
+  */
 export class ImageTools {
   private imageGenerator: ImageGenerator;
 
@@ -35,6 +39,7 @@ export class ImageTools {
    */
   async generateImage(input: {
     prompt: string;
+    provider?: ImageProvider | 'auto';
     model?: ImageModel;
     filename?: string;
     imageSize?: ImageSize;
@@ -46,7 +51,8 @@ export class ImageTools {
 
     const result = await this.imageGenerator.generate({
       prompt: input.prompt,
-      model: input.model || 'nano-banana-pro',
+      provider: input.provider || 'auto',
+      model: input.model,
       filename: input.filename,
       imageSize: input.imageSize || '1K',
       numberOfImages: input.numberOfImages || 1,
@@ -61,6 +67,7 @@ export class ImageTools {
           mimeType: image.mimeType,
           size: image.size,
           model: result.model,
+          provider: result.provider,
         });
       }
     } else {
@@ -68,12 +75,8 @@ export class ImageTools {
         action: 'generate_image',
         error: result.error,
       };
-      if (result.error?.includes('Gemini API key not configured')) {
-        payload.actionHint = {
-          type: 'open_settings',
-          label: 'Set up Gemini API key',
-          target: 'gemini',
-        };
+      if (result.actionHint) {
+        payload.actionHint = result.actionHint;
       }
       this.daemon.logEvent(this.taskId, 'error', {
         ...payload,
@@ -97,9 +100,11 @@ export class ImageTools {
     return [
       {
         name: 'generate_image',
-        description: `Generate an image from a text description using AI. Two models are available:
-- nano-banana: Fast generation using Gemini 2.5 Flash
-- nano-banana-pro: High-quality generation using Gemini 3 Pro (default)
+        description: `Generate an image from a text description using AI. CoWork OS will pick the best configured provider by default (Gemini/OpenAI/Azure OpenAI), unless you specify a provider/model.
+
+Providers/models:
+- OpenAI: gpt-image-1, gpt-image-1.5, dall-e-3, dall-e-2 (also accepts "gpt-1.5" alias)
+- Azure OpenAI: model maps to a deployment name (configured in Settings)
 
 The generated images are saved to the workspace folder.`,
         input_schema: {
@@ -109,10 +114,14 @@ The generated images are saved to the workspace folder.`,
               type: 'string',
               description: 'Detailed text description of the image to generate. Be specific about subject, style, colors, composition, lighting, etc.',
             },
+            provider: {
+              type: 'string',
+              enum: ['auto', 'gemini', 'openai', 'azure'],
+              description: 'Optional provider override. "auto" uses the configured default with fallbacks (default: auto).',
+            },
             model: {
               type: 'string',
-              enum: ['nano-banana', 'nano-banana-pro'],
-              description: 'The model to use. "nano-banana" for fast generation, "nano-banana-pro" for high quality (default: nano-banana-pro)',
+              description: 'Optional model override. Examples: "gpt-image-1.5", "dall-e-3", or an Azure deployment name.',
             },
             filename: {
               type: 'string',
