@@ -4,12 +4,17 @@ import type {
   AgentTeamItem,
   AgentTeamMember,
   AgentTeamRun,
+  AgentPerformanceReview,
+  AgentReviewGenerateRequest,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
   CreateAgentTeamRequest,
   CreateAgentTeamRunRequest,
   LLMProviderType,
   MemoryFeaturesSettings,
+  WorkspaceKitInitRequest,
+  WorkspaceKitProjectCreateRequest,
+  WorkspaceKitStatus,
   UpdateAgentTeamItemRequest,
   UpdateAgentTeamMemberRequest,
   UpdateAgentTeamRequest,
@@ -311,6 +316,11 @@ const IPC_CHANNELS = {
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
   MEMORY_FEATURES_SAVE_SETTINGS: 'memoryFeatures:saveSettings',
 
+  // Workspace Kit (.cowork)
+  KIT_GET_STATUS: 'kit:getStatus',
+  KIT_INIT: 'kit:init',
+  KIT_PROJECT_CREATE: 'kit:projectCreate',
+
   // Migration Status (for showing one-time notifications after app rename)
   MIGRATION_GET_STATUS: 'migration:getStatus',
   MIGRATION_DISMISS_NOTIFICATION: 'migration:dismissNotification',
@@ -436,6 +446,11 @@ const IPC_CHANNELS = {
   STANDUP_GET_LATEST: 'standup:getLatest',
   STANDUP_LIST: 'standup:list',
   STANDUP_DELIVER: 'standup:deliver',
+  // Mission Control - Agent Performance Reviews
+  REVIEW_GENERATE: 'review:generate',
+  REVIEW_GET_LATEST: 'review:getLatest',
+  REVIEW_LIST: 'review:list',
+  REVIEW_DELETE: 'review:delete',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -2041,6 +2056,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, settings),
 
+  // Workspace Kit (.cowork) APIs
+  getWorkspaceKitStatus: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.KIT_GET_STATUS, workspaceId) as Promise<WorkspaceKitStatus>,
+  initWorkspaceKit: (request: WorkspaceKitInitRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.KIT_INIT, request) as Promise<WorkspaceKitStatus>,
+  createWorkspaceKitProject: (request: WorkspaceKitProjectCreateRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.KIT_PROJECT_CREATE, request) as Promise<{ success: boolean; projectId: string }>,
+
   // ChatGPT Import APIs
   importChatGPT: (options: ChatGPTImportOptions) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT, options),
@@ -2246,6 +2269,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.STANDUP_LIST, workspaceId, limit),
   deliverStandupReport: (reportId: string, channelType: string, channelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.STANDUP_DELIVER, reportId, channelType, channelId),
+
+  // Agent Performance Reviews
+  generateAgentReview: (request: AgentReviewGenerateRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GENERATE, request),
+  getLatestAgentReview: (workspaceId: string, agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_LATEST, workspaceId, agentRoleId),
+  listAgentReviews: (query: { workspaceId: string; agentRoleId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_LIST, query),
+  deleteAgentReview: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DELETE, id),
 
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
@@ -2972,6 +3005,11 @@ export interface ElectronAPI {
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
 
+  // Workspace Kit (.cowork)
+  getWorkspaceKitStatus: (workspaceId: string) => Promise<WorkspaceKitStatus>;
+  initWorkspaceKit: (request: WorkspaceKitInitRequest) => Promise<WorkspaceKitStatus>;
+  createWorkspaceKitProject: (request: WorkspaceKitProjectCreateRequest) => Promise<{ success: boolean; projectId: string }>;
+
   // ChatGPT Import
   importChatGPT: (options: ChatGPTImportOptions) => Promise<ChatGPTImportResult>;
   onChatGPTImportProgress: (callback: (progress: ChatGPTImportProgress) => void) => () => void;
@@ -3086,6 +3124,11 @@ export interface ElectronAPI {
   getLatestStandupReport: (workspaceId: string) => Promise<StandupReport | undefined>;
   listStandupReports: (workspaceId: string, limit?: number) => Promise<StandupReport[]>;
   deliverStandupReport: (reportId: string, channelType: string, channelId: string) => Promise<void>;
+  // Mission Control - Agent Performance Reviews
+  generateAgentReview: (request: AgentReviewGenerateRequest) => Promise<AgentPerformanceReview>;
+  getLatestAgentReview: (workspaceId: string, agentRoleId: string) => Promise<AgentPerformanceReview | undefined>;
+  listAgentReviews: (query: { workspaceId: string; agentRoleId?: string; limit?: number }) => Promise<AgentPerformanceReview[]>;
+  deleteAgentReview: (id: string) => Promise<{ success: boolean }>;
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<any>;
   setTaskPriority: (taskId: string, priority: number) => Promise<any>;

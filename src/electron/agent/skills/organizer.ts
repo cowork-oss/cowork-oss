@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
+import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 
 /**
  * FolderOrganizer organizes files in folders
@@ -29,12 +30,28 @@ export class FolderOrganizer {
     return resolved;
   }
 
+  private async enforceProjectAccess(absolutePath: string): Promise<void> {
+    const relPosix = getWorkspaceRelativePosixPath(this.workspace.path, absolutePath);
+    if (relPosix === null) return;
+    const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
+    if (!projectId) return;
+
+    const taskGetter = (this.daemon as any)?.getTask;
+    const task = typeof taskGetter === 'function' ? taskGetter.call(this.daemon, this.taskId) : null;
+    const agentRoleId = task?.assignedAgentRoleId || null;
+    const res = await checkProjectAccess({ workspacePath: this.workspace.path, projectId, agentRoleId });
+    if (!res.allowed) {
+      throw new Error(res.reason || `Access denied for project "${projectId}"`);
+    }
+  }
+
   async organize(
     relativePath: string,
     strategy: 'by_type' | 'by_date' | 'custom',
     rules?: any
   ): Promise<number> {
     const fullPath = this.validatePath(relativePath);
+    await this.enforceProjectAccess(fullPath);
 
     switch (strategy) {
       case 'by_type':

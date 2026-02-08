@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
+import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 import { LLMTool } from '../llm/types';
 
 /**
@@ -91,11 +92,28 @@ export class EditTools {
       }
 
       // Resolve path
-      const fullPath = path.resolve(this.workspace.path, file_path);
+      const workspaceRoot = path.resolve(this.workspace.path);
+      const fullPath = path.resolve(workspaceRoot, file_path);
 
       // Security check - must be within workspace
-      if (!fullPath.startsWith(this.workspace.path)) {
+      const relToWorkspace = path.relative(workspaceRoot, fullPath);
+      if (relToWorkspace.startsWith('..') || path.isAbsolute(relToWorkspace)) {
         throw new Error('File path must be within workspace');
+      }
+
+      // Enforce per-project access for `.cowork/projects/*`
+      const relPosix = getWorkspaceRelativePosixPath(workspaceRoot, fullPath);
+      if (relPosix !== null) {
+        const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
+        if (projectId) {
+          const taskGetter = (this.daemon as any)?.getTask;
+          const task = typeof taskGetter === 'function' ? taskGetter.call(this.daemon, this.taskId) : null;
+          const agentRoleId = task?.assignedAgentRoleId || null;
+          const res = await checkProjectAccess({ workspacePath: workspaceRoot, projectId, agentRoleId });
+          if (!res.allowed) {
+            throw new Error(res.reason || `Access denied for project "${projectId}"`);
+          }
+        }
       }
 
       // Check file exists

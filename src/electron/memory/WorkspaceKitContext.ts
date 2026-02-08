@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { InputSanitizer } from '../agent/security';
+import { checkProjectAccessFromMarkdown } from '../security/project-access';
 import { redactSensitiveMarkdownContent } from './MarkdownMemoryIndexService';
 
 type ExtractedSection = {
@@ -237,6 +238,98 @@ function buildMapSections(workspacePath: string): ExtractedSection[] {
   return sections;
 }
 
+function scoreTextOverlap(a: string, b: string): number {
+  const tokensA = new Set((a.toLowerCase().match(/[a-z0-9]{3,}/g) || []).slice(0, 200));
+  const tokensB = new Set((b.toLowerCase().match(/[a-z0-9]{3,}/g) || []).slice(0, 400));
+  let score = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) score += 1;
+  }
+  return score;
+}
+
+function buildProjectContextSections(workspacePath: string, taskPrompt: string, agentRoleId: string | null): ExtractedSection[] {
+  const sections: ExtractedSection[] = [];
+
+  const projectsDirRel = path.join(KIT_DIRNAME, 'projects');
+  const projectsDirAbs = safeResolveWithinWorkspace(workspacePath, projectsDirRel);
+  if (!projectsDirAbs) return sections;
+
+  try {
+    if (!fs.existsSync(projectsDirAbs) || !fs.statSync(projectsDirAbs).isDirectory()) return sections;
+  } catch {
+    return sections;
+  }
+
+  type Candidate = { name: string; score: number; contextRel: string; accessRel: string };
+  const candidates: Candidate[] = [];
+
+  try {
+    const dirents = fs.readdirSync(projectsDirAbs, { withFileTypes: true });
+    for (const d of dirents) {
+      if (!d.isDirectory()) continue;
+      const name = d.name;
+      if (!name || name.startsWith('.')) continue;
+
+      const contextRel = path.join(projectsDirRel, name, 'CONTEXT.md');
+      const accessRel = path.join(projectsDirRel, name, 'ACCESS.md');
+
+      const contextAbs = safeResolveWithinWorkspace(workspacePath, contextRel);
+      if (!contextAbs) continue;
+      const raw = readFilePrefix(contextAbs, MAX_FILE_BYTES);
+      if (!raw) continue;
+
+      // Prefer matches on directory name; fall back to content overlap.
+      const nameScore = scoreTextOverlap(taskPrompt, name.replace(/[-_]/g, ' '));
+      const contentScore = scoreTextOverlap(taskPrompt, raw.slice(0, 6000));
+      const score = nameScore * 3 + contentScore;
+
+      candidates.push({ name, score, contextRel, accessRel });
+    }
+  } catch {
+    return sections;
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const selected = candidates.filter((c) => c.score > 0).slice(0, 2);
+  if (selected.length === 0) return sections;
+
+  for (const c of selected) {
+    const contextAbs = safeResolveWithinWorkspace(workspacePath, c.contextRel);
+    if (!contextAbs) continue;
+
+    const accessAbs = safeResolveWithinWorkspace(workspacePath, c.accessRel);
+    const accessRaw = accessAbs ? readFilePrefix(accessAbs, Math.min(MAX_FILE_BYTES, 24 * 1024)) : null;
+    const accessText = accessRaw ? sanitizeForInjection(clampSection(accessRaw, 2000)) : '';
+
+    if (accessRaw && agentRoleId) {
+      const res = checkProjectAccessFromMarkdown({ markdown: accessRaw, agentRoleId });
+      if (!res.allowed) continue;
+    }
+
+    const contextRaw = readFilePrefix(contextAbs, MAX_FILE_BYTES) || '';
+    const contextText = sanitizeForInjection(clampSection(contextRaw, MAX_SECTION_CHARS));
+
+    const combined = [
+      accessText ? `#### Access (${c.accessRel.replace(/\\\\/g, '/')})\n${accessText}` : '',
+      `#### Context (${c.contextRel.replace(/\\\\/g, '/')})\n${contextText}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+
+    if (!combined) continue;
+
+    sections.push({
+      title: `Project: ${c.name}`,
+      relPath: c.contextRel.replace(/\\/g, '/'),
+      content: combined,
+    });
+  }
+
+  return sections;
+}
+
 /**
  * Build a concise workspace "context pack" from `.cowork/` files.
  * Intended for system prompt injection (sanitized and size-capped).
@@ -244,9 +337,11 @@ function buildMapSections(workspacePath: string): ExtractedSection[] {
 export function buildWorkspaceKitContext(
   workspacePath: string,
   taskPrompt: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  opts?: { agentRoleId?: string | null }
 ): string {
   const collectedSections: ExtractedSection[] = [];
+  const agentRoleId = typeof opts?.agentRoleId === 'string' ? opts?.agentRoleId : null;
 
   // Map files are independent of kit dir existence.
   collectedSections.push(...buildMapSections(workspacePath));
@@ -256,6 +351,7 @@ export function buildWorkspaceKitContext(
     try {
       if (fs.existsSync(kitDir) && fs.statSync(kitDir).isDirectory()) {
         collectedSections.push(...buildKitSections(workspacePath, taskPrompt, now));
+        collectedSections.push(...buildProjectContextSections(workspacePath, taskPrompt, agentRoleId));
       }
     } catch {
       // ignore

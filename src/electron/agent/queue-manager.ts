@@ -155,8 +155,10 @@ export class TaskQueueManager {
     // Sub-agents bypass concurrency limits to prevent deadlock
     // (parent would wait forever for sub-agents stuck in queue)
     const isSubAgent = !!task.parentTaskId;
+    const bypassQueue = task.agentConfig?.bypassQueue;
+    const shouldBypassQueue = isSubAgent && bypassQueue !== false;
 
-    if (isSubAgent) {
+    if (shouldBypassQueue) {
       console.log(`[TaskQueueManager] Starting sub-agent immediately (bypasses concurrency limit)`);
       await this.startTask(task);
     } else if (this.canStartImmediately()) {

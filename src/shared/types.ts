@@ -32,6 +32,34 @@ export interface MemoryFeaturesSettings {
   heartbeatMaintenanceEnabled: boolean;
 }
 
+// Workspace Kit (.cowork) helpers (workspace-scoped, file-based context)
+export interface WorkspaceKitFileStatus {
+  relPath: string;
+  exists: boolean;
+  sizeBytes?: number;
+  modifiedAt?: number;
+}
+
+export interface WorkspaceKitStatus {
+  workspaceId: string;
+  workspacePath?: string;
+  hasKitDir: boolean;
+  files: WorkspaceKitFileStatus[];
+  missingCount: number;
+}
+
+export type WorkspaceKitInitMode = 'missing' | 'overwrite';
+
+export interface WorkspaceKitInitRequest {
+  workspaceId: string;
+  mode?: WorkspaceKitInitMode;
+}
+
+export interface WorkspaceKitProjectCreateRequest {
+  workspaceId: string;
+  projectId: string;
+}
+
 export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'cyan', label: 'Cyan' },
   { id: 'blue', label: 'Blue' },
@@ -426,6 +454,12 @@ export interface AgentConfig {
   maxTokens?: number;
   /** Whether to retain memory/context after completion (default: false for sub-agents) */
   retainMemory?: boolean;
+  /**
+   * Whether to bypass the global task queue concurrency limit.
+   * Default behavior: sub-agents (tasks with parentTaskId) bypass to avoid deadlock.
+   * Set this to false to force queueing even for sub-agents.
+   */
+  bypassQueue?: boolean;
   /** Whether this task may pause and wait for user input (default: true) */
   allowUserInput?: boolean;
 }
@@ -694,6 +728,30 @@ export type AgentAutonomyLevel = 'intern' | 'specialist' | 'lead';
  * Heartbeat status for tracking agent wake cycles
  */
 export type HeartbeatStatus = 'idle' | 'running' | 'sleeping' | 'error';
+
+// ============ Agent Performance Reviews (Mission Control) ============
+
+export type AgentReviewRating = 1 | 2 | 3 | 4 | 5;
+
+export interface AgentPerformanceReview {
+  id: string;
+  workspaceId: string;
+  agentRoleId: string;
+  periodStart: number; // epoch ms
+  periodEnd: number;   // epoch ms
+  rating: AgentReviewRating;
+  summary: string;
+  metrics?: Record<string, number>;
+  recommendedAutonomyLevel?: AgentAutonomyLevel;
+  recommendationRationale?: string;
+  createdAt: number;
+}
+
+export interface AgentReviewGenerateRequest {
+  workspaceId: string;
+  agentRoleId: string;
+  periodDays?: number; // default: 7
+}
 
 /**
  * Tool restriction configuration for an agent role
@@ -1471,6 +1529,41 @@ export const IPC_CHANNELS = {
   STANDUP_GET_LATEST: 'standup:getLatest',
   STANDUP_LIST: 'standup:list',
   STANDUP_DELIVER: 'standup:deliver',
+
+  // Mission Control - Agent Performance Reviews
+  REVIEW_GENERATE: 'review:generate',
+  REVIEW_GET_LATEST: 'review:getLatest',
+  REVIEW_LIST: 'review:list',
+  REVIEW_DELETE: 'review:delete',
+
+  // Mission Control - Agent Teams
+  TEAM_LIST: 'team:list',
+  TEAM_GET: 'team:get',
+  TEAM_CREATE: 'team:create',
+  TEAM_UPDATE: 'team:update',
+  TEAM_DELETE: 'team:delete',
+  TEAM_MEMBER_ADD: 'teamMember:add',
+  TEAM_MEMBER_LIST: 'teamMember:list',
+  TEAM_MEMBER_UPDATE: 'teamMember:update',
+  TEAM_MEMBER_REMOVE: 'teamMember:remove',
+  TEAM_MEMBER_REORDER: 'teamMember:reorder',
+  TEAM_RUN_CREATE: 'teamRun:create',
+  TEAM_RUN_GET: 'teamRun:get',
+  TEAM_RUN_LIST: 'teamRun:list',
+  TEAM_RUN_CANCEL: 'teamRun:cancel',
+  TEAM_RUN_PAUSE: 'teamRun:pause',
+  TEAM_RUN_RESUME: 'teamRun:resume',
+  TEAM_ITEM_LIST: 'teamItem:list',
+  TEAM_ITEM_CREATE: 'teamItem:create',
+  TEAM_ITEM_UPDATE: 'teamItem:update',
+  TEAM_ITEM_DELETE: 'teamItem:delete',
+  TEAM_ITEM_MOVE: 'teamItem:move',
+  TEAM_RUN_EVENT: 'teamRun:event',
+
+  // Workspace Kit (.cowork)
+  KIT_GET_STATUS: 'kit:getStatus',
+  KIT_INIT: 'kit:init',
+  KIT_PROJECT_CREATE: 'kit:projectCreate',
 
   // Task Board (Kanban)
   TASK_MOVE_COLUMN: 'task:moveColumn',

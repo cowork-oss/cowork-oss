@@ -3,6 +3,7 @@ import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
+import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 import { LLMTool } from '../llm/types';
 
 /**
@@ -151,8 +152,18 @@ export class GrepTools {
         throw new Error(`Path does not exist: ${searchPath || '.'}`);
       }
 
+      const taskGetter = (this.daemon as any)?.getTask;
+      const task = typeof taskGetter === 'function' ? taskGetter.call(this.daemon, this.taskId) : null;
+      const agentRoleId = task?.assignedAgentRoleId || null;
+      const projectAccessCache = new Map<string, boolean>();
+
+      // If the user tries to search directly within a denied project, block early.
+      if (await this.isDeniedByProjectAccess(basePath, agentRoleId, projectAccessCache)) {
+        throw new Error('Access denied by project access rules');
+      }
+
       // Find files to search
-      const files = await this.findFilesToSearch(basePath, globPattern);
+      const files = await this.findFilesToSearch(basePath, globPattern, agentRoleId, projectAccessCache);
       const matches: Array<{
         file: string;
         line?: number;
@@ -275,11 +286,16 @@ export class GrepTools {
   /**
    * Find files to search based on path and glob pattern
    */
-  private async findFilesToSearch(basePath: string, globPattern?: string): Promise<string[]> {
+  private async findFilesToSearch(
+    basePath: string,
+    globPattern: string | undefined,
+    agentRoleId: string | null,
+    projectAccessCache: Map<string, boolean>
+  ): Promise<string[]> {
     const files: string[] = [];
     const globRegex = globPattern ? this.globToRegex(globPattern) : null;
 
-    await this.walkDirectory(basePath, basePath, files, globRegex);
+    await this.walkDirectory(basePath, basePath, files, globRegex, agentRoleId, projectAccessCache);
 
     return files;
   }
@@ -292,10 +308,17 @@ export class GrepTools {
     basePath: string,
     files: string[],
     globRegex: RegExp | null,
+    agentRoleId: string | null,
+    projectAccessCache: Map<string, boolean>,
     depth: number = 0
   ): Promise<void> {
     // Limit recursion depth
     if (depth > 50) return;
+
+    // Enforce per-project access for `.cowork/projects/*`
+    if (await this.isDeniedByProjectAccess(currentPath, agentRoleId, projectAccessCache)) {
+      return;
+    }
 
     // Skip common non-code directories
     const dirName = path.basename(currentPath);
@@ -327,8 +350,12 @@ export class GrepTools {
         const relativePath = path.relative(basePath, fullPath);
 
         if (entry.isDirectory()) {
-          await this.walkDirectory(fullPath, basePath, files, globRegex, depth + 1);
+          await this.walkDirectory(fullPath, basePath, files, globRegex, agentRoleId, projectAccessCache, depth + 1);
         } else if (entry.isFile()) {
+          if (await this.isDeniedByProjectAccess(fullPath, agentRoleId, projectAccessCache)) {
+            continue;
+          }
+
           // Skip binary and large files
           if (this.isBinaryFile(entry.name)) continue;
 
@@ -354,6 +381,25 @@ export class GrepTools {
     } catch {
       // Skip directories we can't read
     }
+  }
+
+  private async isDeniedByProjectAccess(
+    absolutePath: string,
+    agentRoleId: string | null,
+    cache: Map<string, boolean>
+  ): Promise<boolean> {
+    if (!agentRoleId) return false;
+    const relPosix = getWorkspaceRelativePosixPath(this.workspace.path, absolutePath);
+    if (relPosix === null) return false;
+    const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
+    if (!projectId) return false;
+
+    const cached = cache.get(projectId);
+    if (typeof cached === 'boolean') return !cached;
+
+    const res = await checkProjectAccess({ workspacePath: this.workspace.path, projectId, agentRoleId });
+    cache.set(projectId, res.allowed);
+    return !res.allowed;
   }
 
   /**

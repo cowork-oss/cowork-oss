@@ -27,10 +27,15 @@ import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { ActivityRepository } from '../activity/ActivityRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { extractMentionedRoles } from '../agents/mentions';
+import { AgentTeamRepository } from '../agents/AgentTeamRepository';
+import { AgentTeamMemberRepository } from '../agents/AgentTeamMemberRepository';
+import { AgentTeamRunRepository } from '../agents/AgentTeamRunRepository';
+import { AgentTeamItemRepository } from '../agents/AgentTeamItemRepository';
+import { AgentTeamOrchestrator } from '../agents/AgentTeamOrchestrator';
 	import { TaskLabelRepository } from '../database/TaskLabelRepository';
 	import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 	import { ContextPolicyManager } from '../gateway/context-policy';
-	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery } from '../../shared/types';
+	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery, WorkspaceKitStatus, WorkspaceKitInitRequest, WorkspaceKitProjectCreateRequest } from '../../shared/types';
 	import * as os from 'os';
 	import { AgentDaemon } from '../agent/daemon';
 import {
@@ -126,6 +131,7 @@ import { MemoryService } from '../memory/MemoryService';
 import type { MemorySettings } from '../database/repositories';
 import { VoiceSettingsManager } from '../voice/voice-settings-manager';
 import { getVoiceService } from '../voice/VoiceService';
+import { AgentPerformanceReviewService } from '../reports/AgentPerformanceReviewService';
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -168,6 +174,25 @@ rateLimiter.configure(IPC_CHANNELS.SEARCH_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expe
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.GUARDRAIL_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_CREATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_UPDATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_DELETE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_MEMBER_ADD, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_MEMBER_UPDATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_MEMBER_REMOVE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_MEMBER_REORDER, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_CREATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_RESUME, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_PAUSE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_RUN_CANCEL, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_CREATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_UPDATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_DELETE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_MOVE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.REVIEW_GENERATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.REVIEW_DELETE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
 
 // Helper function to get the main window
 function getMainWindow(): BrowserWindow | null {
@@ -190,9 +215,22 @@ export async function setupIpcHandlers(
   const agentRoleRepo = new AgentRoleRepository(db);
   const activityRepo = new ActivityRepository(db);
   const mentionRepo = new MentionRepository(db);
+  const teamRepo = new AgentTeamRepository(db);
+  const teamMemberRepo = new AgentTeamMemberRepository(db);
+  const teamRunRepo = new AgentTeamRunRepository(db);
+  const teamItemRepo = new AgentTeamItemRepository(db);
+  const reviewService = new AgentPerformanceReviewService(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
   const contextPolicyManager = new ContextPolicyManager(db);
+
+  const teamOrchestrator = new AgentTeamOrchestrator({
+    getDatabase: () => db,
+    getTaskById: (taskId: string) => agentDaemon.getTaskById(taskId),
+    createChildTask: (params) => agentDaemon.createChildTask(params as any),
+    cancelTask: (taskId: string) => agentDaemon.cancelTask(taskId),
+  });
+  agentDaemon.setTeamOrchestrator(teamOrchestrator);
 
   // Seed default agent roles if none exist
   agentRoleRepo.seedDefaults();
@@ -2350,6 +2388,314 @@ export async function setupIpcHandlers(
     return mention;
   });
 
+  // Agent Teams (Mission Control)
+  const emitTeamEvent = (event: any) => {
+    getMainWindow()?.webContents.send(IPC_CHANNELS.TEAM_RUN_EVENT, event);
+  };
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_LIST, async (_, workspaceId: string, includeInactive?: boolean) => {
+    const validated = validateInput(UUIDSchema, workspaceId, 'workspace ID');
+    return teamRepo.listByWorkspace(validated, includeInactive ?? false);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_GET, async (_, id: string) => {
+    const validated = validateInput(UUIDSchema, id, 'team ID');
+    return teamRepo.findById(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_CREATE);
+    const workspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    const leadAgentRoleId = validateInput(UUIDSchema, request.leadAgentRoleId, 'lead agent role ID');
+    const name = typeof request.name === 'string' ? request.name.trim() : '';
+    if (!name) throw new Error('Team name is required');
+    if (!agentRoleRepo.findById(leadAgentRoleId)) {
+      throw new Error('Lead agent role not found');
+    }
+    const created = teamRepo.create({
+      workspaceId,
+      name,
+      description: typeof request.description === 'string' ? request.description.trim() : undefined,
+      leadAgentRoleId,
+      maxParallelAgents: typeof request.maxParallelAgents === 'number' ? request.maxParallelAgents : undefined,
+      defaultModelPreference: typeof request.defaultModelPreference === 'string' ? request.defaultModelPreference : undefined,
+      defaultPersonality: typeof request.defaultPersonality === 'string' ? request.defaultPersonality : undefined,
+      isActive: request.isActive !== undefined ? !!request.isActive : undefined,
+    });
+    emitTeamEvent({ type: 'team_created', timestamp: Date.now(), team: created });
+    return created;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_UPDATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_UPDATE);
+    const id = validateInput(UUIDSchema, request.id, 'team ID');
+    const updates: any = { id };
+    if (request.name !== undefined) {
+      const name = typeof request.name === 'string' ? request.name.trim() : '';
+      if (!name) throw new Error('Team name cannot be empty');
+      updates.name = name;
+    }
+    if (request.description !== undefined) {
+      updates.description = request.description === null ? null : (typeof request.description === 'string' ? request.description.trim() : null);
+    }
+    if (request.leadAgentRoleId !== undefined) {
+      const leadId = validateInput(UUIDSchema, request.leadAgentRoleId, 'lead agent role ID');
+      if (!agentRoleRepo.findById(leadId)) throw new Error('Lead agent role not found');
+      updates.leadAgentRoleId = leadId;
+    }
+    if (request.maxParallelAgents !== undefined) updates.maxParallelAgents = request.maxParallelAgents;
+    if (request.defaultModelPreference !== undefined) updates.defaultModelPreference = request.defaultModelPreference;
+    if (request.defaultPersonality !== undefined) updates.defaultPersonality = request.defaultPersonality;
+    if (request.isActive !== undefined) updates.isActive = !!request.isActive;
+    const updated = teamRepo.update(updates);
+    if (updated) {
+      emitTeamEvent({ type: 'team_updated', timestamp: Date.now(), team: updated });
+    }
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'team ID');
+    const success = teamRepo.delete(validated);
+    if (success) {
+      emitTeamEvent({ type: 'team_deleted', timestamp: Date.now(), teamId: validated });
+    }
+    return { success };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_LIST, async (_, teamId: string) => {
+    const validated = validateInput(UUIDSchema, teamId, 'team ID');
+    return teamMemberRepo.listByTeam(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_ADD, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_ADD);
+    const teamId = validateInput(UUIDSchema, request.teamId, 'team ID');
+    const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, 'agent role ID');
+    if (!agentRoleRepo.findById(agentRoleId)) throw new Error('Agent role not found');
+    const member = teamMemberRepo.add({
+      teamId,
+      agentRoleId,
+      memberOrder: typeof request.memberOrder === 'number' ? request.memberOrder : undefined,
+      isRequired: request.isRequired !== undefined ? !!request.isRequired : undefined,
+      roleGuidance: typeof request.roleGuidance === 'string' ? request.roleGuidance : undefined,
+    });
+    emitTeamEvent({ type: 'team_member_added', timestamp: Date.now(), member });
+    return member;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_UPDATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_UPDATE);
+    const id = validateInput(UUIDSchema, request.id, 'team member ID');
+    const updated = teamMemberRepo.update({
+      id,
+      memberOrder: typeof request.memberOrder === 'number' ? request.memberOrder : undefined,
+      isRequired: request.isRequired !== undefined ? !!request.isRequired : undefined,
+      roleGuidance: request.roleGuidance === null ? null : (typeof request.roleGuidance === 'string' ? request.roleGuidance : undefined),
+    });
+    if (updated) {
+      emitTeamEvent({ type: 'team_member_updated', timestamp: Date.now(), member: updated });
+    }
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_REMOVE, async (_, data: { teamId: string; agentRoleId: string }) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_REMOVE);
+    const teamId = validateInput(UUIDSchema, data.teamId, 'team ID');
+    const agentRoleId = validateInput(UUIDSchema, data.agentRoleId, 'agent role ID');
+    const success = teamMemberRepo.removeByTeamAndRole(teamId, agentRoleId);
+    if (success) {
+      emitTeamEvent({ type: 'team_member_removed', timestamp: Date.now(), teamId, agentRoleId });
+    }
+    return { success };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_REORDER, async (_, data: { teamId: string; orderedMemberIds: string[] }) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_REORDER);
+    const teamId = validateInput(UUIDSchema, data.teamId, 'team ID');
+    const ordered = Array.isArray(data.orderedMemberIds) ? data.orderedMemberIds : [];
+    const normalized = ordered.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean);
+    const updated = teamMemberRepo.reorder(teamId, normalized);
+    emitTeamEvent({ type: 'team_members_reordered', timestamp: Date.now(), teamId, members: updated });
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_LIST, async (_, query: any) => {
+    const teamId = validateInput(UUIDSchema, query.teamId, 'team ID');
+    const limit = typeof query.limit === 'number' ? query.limit : undefined;
+    return teamRunRepo.listByTeam(teamId, limit);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_GET, async (_, id: string) => {
+    const validated = validateInput(UUIDSchema, id, 'team run ID');
+    return teamRunRepo.findById(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_RUN_CREATE);
+    const teamId = validateInput(UUIDSchema, request.teamId, 'team ID');
+    const rootTaskId = validateInput(UUIDSchema, request.rootTaskId, 'root task ID');
+    const rootTask = taskRepo.findById(rootTaskId);
+    if (!rootTask) throw new Error('Root task not found');
+    const created = teamRunRepo.create({
+      teamId,
+      rootTaskId,
+      status: request.status,
+      startedAt: request.startedAt,
+    });
+    emitTeamEvent({ type: 'team_run_created', timestamp: Date.now(), run: created });
+    if (created.status === 'running') {
+      void teamOrchestrator.tickRun(created.id, 'run_created');
+    }
+    return created;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_RESUME, async (_, runId: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_RUN_RESUME);
+    const validated = validateInput(UUIDSchema, runId, 'team run ID');
+    const updated = teamRunRepo.update(validated, { status: 'running' });
+    if (updated) {
+      emitTeamEvent({ type: 'team_run_updated', timestamp: Date.now(), run: updated });
+      void teamOrchestrator.tickRun(updated.id, 'resume');
+    }
+    return { success: !!updated };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_PAUSE, async (_, runId: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_RUN_PAUSE);
+    const validated = validateInput(UUIDSchema, runId, 'team run ID');
+    const updated = teamRunRepo.update(validated, { status: 'paused' });
+    if (updated) {
+      emitTeamEvent({ type: 'team_run_updated', timestamp: Date.now(), run: updated });
+    }
+    return { success: !!updated };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_RUN_CANCEL, async (_, runId: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_RUN_CANCEL);
+    const validated = validateInput(UUIDSchema, runId, 'team run ID');
+    await teamOrchestrator.cancelRun(validated);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_LIST, async (_, teamRunId: string) => {
+    const validated = validateInput(UUIDSchema, teamRunId, 'team run ID');
+    return teamItemRepo.listByRun(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_ITEM_CREATE);
+    const teamRunId = validateInput(UUIDSchema, request.teamRunId, 'team run ID');
+    const title = typeof request.title === 'string' ? request.title.trim() : '';
+    if (!title) throw new Error('Item title is required');
+    const created = teamItemRepo.create({
+      teamRunId,
+      parentItemId: request.parentItemId || undefined,
+      title,
+      description: typeof request.description === 'string' ? request.description : undefined,
+      ownerAgentRoleId: request.ownerAgentRoleId ? validateInput(UUIDSchema, request.ownerAgentRoleId, 'owner agent role ID') : undefined,
+      sourceTaskId: request.sourceTaskId ? validateInput(UUIDSchema, request.sourceTaskId, 'source task ID') : undefined,
+      status: request.status,
+      sortOrder: typeof request.sortOrder === 'number' ? request.sortOrder : undefined,
+    });
+    emitTeamEvent({ type: 'team_item_created', timestamp: Date.now(), item: created });
+    const run = teamRunRepo.findById(teamRunId);
+    if (run?.status === 'running') {
+      void teamOrchestrator.tickRun(teamRunId, 'item_created');
+    }
+    return created;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_UPDATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_ITEM_UPDATE);
+    const id = validateInput(UUIDSchema, request.id, 'team item ID');
+    const updated = teamItemRepo.update({
+      id,
+      parentItemId: request.parentItemId,
+      title: request.title,
+      description: request.description,
+      ownerAgentRoleId: request.ownerAgentRoleId,
+      sourceTaskId: request.sourceTaskId,
+      status: request.status,
+      resultSummary: request.resultSummary,
+      sortOrder: request.sortOrder,
+    });
+    if (updated) {
+      emitTeamEvent({ type: 'team_item_updated', timestamp: Date.now(), teamRunId: updated.teamRunId, item: updated });
+      const run = teamRunRepo.findById(updated.teamRunId);
+      if (run?.status === 'running') {
+        void teamOrchestrator.tickRun(updated.teamRunId, 'item_updated');
+      }
+    }
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_ITEM_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'team item ID');
+    const existing = teamItemRepo.findById(validated);
+    const success = teamItemRepo.delete(validated);
+    if (success && existing) {
+      emitTeamEvent({ type: 'team_item_deleted', timestamp: Date.now(), teamRunId: existing.teamRunId, itemId: validated });
+      const run = teamRunRepo.findById(existing.teamRunId);
+      if (run?.status === 'running') {
+        void teamOrchestrator.tickRun(existing.teamRunId, 'item_deleted');
+      }
+    }
+    return { success };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_MOVE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TEAM_ITEM_MOVE);
+    const id = validateInput(UUIDSchema, request.id, 'team item ID');
+    const updated = teamItemRepo.update({
+      id,
+      parentItemId: request.parentItemId,
+      sortOrder: request.sortOrder,
+    });
+    if (updated) {
+      emitTeamEvent({ type: 'team_item_moved', timestamp: Date.now(), item: updated });
+      const run = teamRunRepo.findById(updated.teamRunId);
+      if (run?.status === 'running') {
+        void teamOrchestrator.tickRun(updated.teamRunId, 'item_moved');
+      }
+    }
+    return updated;
+  });
+
+  // Agent Performance Reviews (Mission Control)
+  ipcMain.handle(IPC_CHANNELS.REVIEW_GENERATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.REVIEW_GENERATE);
+    const workspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, 'agent role ID');
+    if (!agentRoleRepo.findById(agentRoleId)) {
+      throw new Error('Agent role not found');
+    }
+    const periodDays = request.periodDays !== undefined ? Number(request.periodDays) : undefined;
+    return reviewService.generate({ workspaceId, agentRoleId, periodDays });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REVIEW_GET_LATEST, async (_, workspaceId: string, agentRoleId: string) => {
+    const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, 'workspace ID');
+    const validatedRoleId = validateInput(UUIDSchema, agentRoleId, 'agent role ID');
+    return reviewService.getLatest(validatedWorkspaceId, validatedRoleId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REVIEW_LIST, async (_, query: any) => {
+    const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, 'workspace ID');
+    const agentRoleId = query.agentRoleId ? validateInput(UUIDSchema, query.agentRoleId, 'agent role ID') : undefined;
+    const limit = query.limit !== undefined ? Number(query.limit) : undefined;
+    return reviewService.list(validatedWorkspaceId, agentRoleId, limit);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REVIEW_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.REVIEW_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'review ID');
+    const success = reviewService.delete(validated);
+    return { success };
+  });
+
   // Task Board handlers
   ipcMain.handle(IPC_CHANNELS.TASK_MOVE_COLUMN, async (_, taskId: string, column: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_MOVE_COLUMN);
@@ -2582,6 +2928,9 @@ export async function setupIpcHandlers(
 
   // Hooks (Webhooks & Gmail Pub/Sub) handlers
   await setupHooksHandlers(agentDaemon);
+
+  // Workspace kit (.cowork) handlers
+  setupKitHandlers(workspaceRepo);
 
   // Memory system handlers
   setupMemoryHandlers();
@@ -3360,6 +3709,261 @@ function broadcastPersonalitySettingsChanged(settings: any): void {
   } catch (err) {
     console.error('[Personality] Failed to broadcast settings changed:', err);
   }
+}
+
+/**
+ * Set up Workspace Kit (.cowork) IPC handlers
+ */
+function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
+  const kitDirName = '.cowork';
+
+  const getLocalDateStamp = (now: Date): string => {
+    const yyyy = String(now.getFullYear());
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getWorkspacePath = (workspaceId: string): string => {
+    const ws = workspaceRepo.findById(workspaceId);
+    if (!ws) throw new Error('Workspace not found');
+    if (!ws.path) throw new Error('Workspace path not set');
+    return ws.path;
+  };
+
+  const computeStatus = async (workspaceId: string): Promise<WorkspaceKitStatus> => {
+    const workspacePath = getWorkspacePath(workspaceId);
+    const kitRoot = path.join(workspacePath, kitDirName);
+
+    const required: string[] = [
+      path.join(kitDirName, 'AGENTS.md'),
+      path.join(kitDirName, 'MEMORY.md'),
+      path.join(kitDirName, 'USER.md'),
+      path.join(kitDirName, 'SOUL.md'),
+      path.join(kitDirName, 'IDENTITY.md'),
+      path.join(kitDirName, 'TOOLS.md'),
+      path.join(kitDirName, 'HEARTBEAT.md'),
+      path.join(kitDirName, 'memory'),
+      path.join(kitDirName, 'projects'),
+      path.join(kitDirName, 'agents'),
+    ];
+
+    const hasKitDir = (() => {
+      try {
+        return fsSync.existsSync(kitRoot);
+      } catch {
+        return false;
+      }
+    })();
+
+    const files: WorkspaceKitStatus['files'] = [];
+    let missingCount = 0;
+
+    for (const relPath of required) {
+      const absPath = path.join(workspacePath, relPath);
+      try {
+        const stat = await fs.stat(absPath);
+        files.push({
+          relPath,
+          exists: true,
+          sizeBytes: stat.isFile() ? stat.size : undefined,
+          modifiedAt: stat.mtimeMs,
+        });
+      } catch {
+        missingCount += 1;
+        files.push({ relPath, exists: false });
+      }
+    }
+
+    return { workspaceId, workspacePath, hasKitDir, files, missingCount };
+  };
+
+  const templatesForInit = (now: Date): Array<{ relPath: string; content: string }> => {
+    const stamp = getLocalDateStamp(now);
+    return [
+      {
+        relPath: path.join(kitDirName, 'AGENTS.md'),
+        content:
+          `# Workspace Rules\n\n` +
+          `## Coordination\n` +
+          `- Keep durable context in .cowork/MEMORY.md\n` +
+          `- For project work, log in .cowork/projects/<project>/CONTEXT.md\n` +
+          `- Prefer small, well-scoped changes and leave clear notes\n\n` +
+          `## Quality Bar\n` +
+          `- Be explicit about assumptions and constraints\n` +
+          `- Avoid duplicate work: check existing files and recent tasks first\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'USER.md'),
+        content:
+          `# User Profile\n\n` +
+          `- Name:\n` +
+          `- Preferences:\n` +
+          `- Timezone:\n` +
+          `- Communication style:\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'SOUL.md'),
+        content:
+          `# Assistant Style\n\n` +
+          `- North star:\n` +
+          `- Core principles:\n` +
+          `- Strengths:\n` +
+          `- Avoids:\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'IDENTITY.md'),
+        content:
+          `# Assistant Identity\n\n` +
+          `- Role:\n` +
+          `- Operating assumptions:\n` +
+          `- Boundaries:\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'TOOLS.md'),
+        content:
+          `# Local Setup Notes\n\n` +
+          `## Environment\n` +
+          `- Node version:\n` +
+          `- Package manager:\n` +
+          `- Common commands:\n\n` +
+          `## Secrets\n` +
+          `- Store secrets in env vars; do not commit them\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'MEMORY.md'),
+        content:
+          `# Long-Term Memory\n\n` +
+          `## Principles\n` +
+          `- (add durable rules and lessons here)\n\n` +
+          `## Preferences\n` +
+          `- (add preferred defaults and conventions here)\n\n` +
+          `## Known Constraints\n` +
+          `- (add constraints and guardrails here)\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'HEARTBEAT.md'),
+        content:
+          `# Recurring Checks\n\n` +
+          `## Daily\n` +
+          `- Review open loops and next actions\n` +
+          `- Summarize key decisions into .cowork/MEMORY.md\n\n` +
+          `## Weekly\n` +
+          `- Review team performance and update autonomy levels if needed\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'projects', 'README.md'),
+        content:
+          `# Project Contexts\n\n` +
+          `Each project folder can contain:\n` +
+          `- ACCESS.md: access rules (## Allow / ## Deny with agent role ids; deny wins)\n` +
+          `- CONTEXT.md: durable working context and decisions\n` +
+          `- research/: supporting documents\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'agents', 'README.md'),
+        content:
+          `# Agent Notes\n\n` +
+          `Optional workspace-local notes about agent roles, working agreements, and conventions.\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'memory', `${stamp}.md`),
+        content:
+          `# Daily Log (${stamp})\n\n` +
+          `## Open Loops\n\n` +
+          `## Next Actions\n\n` +
+          `## Decisions\n`,
+      },
+    ];
+  };
+
+  const writeTemplate = async (workspacePath: string, relPath: string, content: string, mode: 'missing' | 'overwrite') => {
+    const absPath = path.join(workspacePath, relPath);
+    const dir = path.dirname(absPath);
+    await fs.mkdir(dir, { recursive: true });
+
+    if (mode === 'missing') {
+      try {
+        await fs.stat(absPath);
+        return;
+      } catch {
+        // continue
+      }
+    }
+
+    await fs.writeFile(absPath, content, 'utf8');
+  };
+
+  const ensureDir = async (workspacePath: string, relPath: string) => {
+    const absPath = path.join(workspacePath, relPath);
+    await fs.mkdir(absPath, { recursive: true });
+  };
+
+  ipcMain.handle(IPC_CHANNELS.KIT_GET_STATUS, async (_event, workspaceId: string) => {
+    try {
+      return await computeStatus(workspaceId);
+    } catch (error: any) {
+      return {
+        workspaceId,
+        hasKitDir: false,
+        files: [],
+        missingCount: 0,
+        error: error?.message || 'Failed to load kit status',
+      } as any;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.KIT_INIT, async (_event, request: WorkspaceKitInitRequest) => {
+    checkRateLimit(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
+    const mode = request?.mode === 'overwrite' ? 'overwrite' : 'missing';
+    const workspacePath = getWorkspacePath(request.workspaceId);
+
+    await ensureDir(workspacePath, path.join(kitDirName, 'memory'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'projects'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'agents'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'uploads'));
+
+    const now = new Date();
+    const templates = templatesForInit(now);
+    for (const t of templates) {
+      await writeTemplate(workspacePath, t.relPath, t.content, mode);
+    }
+
+    return await computeStatus(request.workspaceId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.KIT_PROJECT_CREATE, async (_event, request: WorkspaceKitProjectCreateRequest) => {
+    checkRateLimit(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
+    const workspacePath = getWorkspacePath(request.workspaceId);
+
+    const rawId = (request.projectId || '').trim();
+    if (!rawId) throw new Error('Project id is required');
+    if (rawId.includes('..') || rawId.includes('/') || rawId.includes('\\')) {
+      throw new Error('Invalid project id');
+    }
+    if (!/^[a-zA-Z0-9._-]{1,80}$/.test(rawId)) {
+      throw new Error('Invalid project id');
+    }
+
+    const projectRootRel = path.join(kitDirName, 'projects', rawId);
+    await ensureDir(workspacePath, projectRootRel);
+    await ensureDir(workspacePath, path.join(projectRootRel, 'research'));
+
+    await writeTemplate(
+      workspacePath,
+      path.join(projectRootRel, 'ACCESS.md'),
+      `# Access\n\n## Allow\n- all\n\n## Deny\n- \n`,
+      'missing'
+    );
+    await writeTemplate(
+      workspacePath,
+      path.join(projectRootRel, 'CONTEXT.md'),
+      `# Context\n\nLast updated by:\n\n## Goals\n\n## Constraints\n\n## Decisions\n\n## Notes\n`,
+      'missing'
+    );
+
+    return { success: true, projectId: rawId };
+  });
 }
 
 /**

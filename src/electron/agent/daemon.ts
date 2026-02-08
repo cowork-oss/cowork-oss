@@ -22,6 +22,7 @@ import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
 import { MemoryService } from '../memory/MemoryService';
+import type { AgentTeamOrchestrator } from '../agents/AgentTeamOrchestrator';
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 10; // Maximum number of completed task executors to keep in memory
@@ -50,6 +51,7 @@ export class AgentDaemon extends EventEmitter {
   private activityRepo: ActivityRepository;
   private agentRoleRepo: AgentRoleRepository;
   private mentionRepo: MentionRepository;
+  private teamOrchestrator: AgentTeamOrchestrator | null = null;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, { taskId: string; resolve: (value: boolean) => void; reject: (reason?: unknown) => void; resolved: boolean; timeoutHandle: ReturnType<typeof setTimeout> }> = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
@@ -88,6 +90,10 @@ export class AgentDaemon extends EventEmitter {
 
   getDatabase(): Database.Database {
     return this.dbManager.getDatabase();
+  }
+
+  setTeamOrchestrator(orchestrator: AgentTeamOrchestrator | null): void {
+    this.teamOrchestrator = orchestrator;
   }
 
   /**
@@ -638,6 +644,9 @@ export class AgentDaemon extends EventEmitter {
       this.logEvent(taskId, 'task_cancelled', {
         message: 'Task removed from queue',
       });
+      if (this.teamOrchestrator) {
+        void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+      }
       return;
     }
 
@@ -650,6 +659,9 @@ export class AgentDaemon extends EventEmitter {
 
     // Persist cancellation for running tasks too (important for remote clients querying task status).
     this.taskRepo.update(taskId, { status: 'cancelled', completedAt: Date.now() });
+    if (this.teamOrchestrator) {
+      void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+    }
 
     // Always notify queue manager to remove from running set
     // (handles orphaned tasks that are in runningTaskIds but have no executor)
@@ -1232,9 +1244,13 @@ export class AgentDaemon extends EventEmitter {
    * Update task status
    */
   updateTaskStatus(taskId: string, status: Task['status']): void {
+    const existing = this.taskRepo.findById(taskId);
     this.taskRepo.update(taskId, { status });
     if (status === 'completed' || status === 'failed' || status === 'cancelled') {
       this.clearRetryState(taskId);
+      if (this.teamOrchestrator && existing?.status !== status) {
+        void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+      }
     }
   }
 
@@ -1462,7 +1478,14 @@ export class AgentDaemon extends EventEmitter {
    * Update task fields (for Goal Mode attempt tracking, etc.)
    */
   updateTask(taskId: string, updates: Partial<Pick<Task, 'currentAttempt' | 'status' | 'error' | 'completedAt'>>): void {
+    const existing = this.taskRepo.findById(taskId);
     this.taskRepo.update(taskId, updates);
+    if (updates.status === 'completed' || updates.status === 'failed' || updates.status === 'cancelled') {
+      this.clearRetryState(taskId);
+      if (this.teamOrchestrator && existing?.status !== updates.status) {
+        void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+      }
+    }
   }
 
   private clearRetryState(taskId: string): void {
@@ -1500,6 +1523,9 @@ export class AgentDaemon extends EventEmitter {
       message: 'Task completed successfully',
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
     });
+    if (this.teamOrchestrator) {
+      void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
+    }
     // Notify queue manager so it can start next task
     this.queueManager.onTaskFinished(taskId);
   }

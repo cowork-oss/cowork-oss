@@ -41,6 +41,7 @@ import { BuiltinToolsSettingsManager } from './builtin-settings';
 import { getCustomSkillLoader } from '../custom-skill-loader';
 import { PersonalityManager } from '../../settings/personality-manager';
 import { PersonalityId, PersonaId, PERSONALITY_DEFINITIONS, PERSONA_DEFINITIONS } from '../../../shared/types';
+import { resolveModelPreferenceToModelKey, resolvePersonalityPreference } from '../../../shared/agent-preferences';
 
 /**
  * ToolRegistry manages all available tools and their execution
@@ -3505,42 +3506,6 @@ ${skillDescriptions}`;
     return currentTask?.depth ?? 0;
   }
 
-  /**
-   * Resolve model preference to a specific model key
-   */
-  private resolveModelPreference(preference: string | undefined): string {
-    switch (preference) {
-      case 'same':
-        // Use the current global settings - daemon will handle this
-        return '';
-      case 'cheaper':
-      case 'haiku':
-        return 'haiku-4-5';
-      case 'smarter':
-      case 'opus':
-        return 'opus-4-5';
-      case 'sonnet':
-        return 'sonnet-4-5';
-      default:
-        // Default to cheaper model for sub-agents
-        return 'haiku-4-5';
-    }
-  }
-
-  /**
-   * Resolve personality preference
-   */
-  private resolvePersonality(preference: string | undefined): PersonalityId | undefined {
-    if (!preference || preference === 'same') {
-      return undefined; // Inherit from parent
-    }
-    const validPersonalities: PersonalityId[] = ['professional', 'friendly', 'concise', 'creative', 'technical', 'casual'];
-    if (validPersonalities.includes(preference as PersonalityId)) {
-      return preference as PersonalityId;
-    }
-    return 'concise'; // Default for sub-agents
-  }
-
   private async resolveDescendantTask(taskIdInput: unknown): Promise<
     | { ok: true; taskId: string; task: Task }
     | { ok: false; taskId?: string; error: 'TASK_ID_REQUIRED' | 'TASK_NOT_FOUND' | 'FORBIDDEN'; message: string }
@@ -3611,8 +3576,15 @@ ${skillDescriptions}`;
     }
 
     // Resolve model and personality
-    const modelKey = this.resolveModelPreference(model_preference);
-    const personalityId = this.resolvePersonality(personality);
+    const modelPref = typeof model_preference === 'string' ? model_preference.trim().toLowerCase() : '';
+    const personalityPref = typeof personality === 'string' ? personality.trim().toLowerCase() : '';
+
+    // Default behavior for tool-spawned sub-agents: cheaper model + concise personality,
+    // unless the caller explicitly asks to inherit ("same").
+    const modelKey = modelPref === 'same' ? undefined : (resolveModelPreferenceToModelKey(model_preference) ?? 'haiku-4-5');
+    const personalityId: PersonalityId | undefined = personalityPref === 'same'
+      ? undefined
+      : (resolvePersonalityPreference(personality) ?? 'concise');
 
     // Build agent config
     const agentConfig: AgentConfig = {
@@ -3620,12 +3592,8 @@ ${skillDescriptions}`;
       retainMemory: false, // Sub-agents don't retain memory
     };
 
-    if (modelKey) {
-      agentConfig.modelKey = modelKey;
-    }
-    if (personalityId) {
-      agentConfig.personalityId = personalityId;
-    }
+    if (modelKey) agentConfig.modelKey = modelKey;
+    if (personalityId) agentConfig.personalityId = personalityId;
 
     // Generate title if not provided
     const taskTitle = title || `Sub-task: ${prompt.substring(0, 50)}${prompt.length > 50 ? '...' : ''}`;

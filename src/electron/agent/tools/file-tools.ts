@@ -4,6 +4,7 @@ import { shell } from 'electron';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
+import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 import mammoth from 'mammoth';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParseModule = require('pdf-parse');
@@ -167,6 +168,21 @@ export class FileTools {
     }
   }
 
+  private async enforceProjectAccess(absolutePath: string): Promise<void> {
+    const relPosix = getWorkspaceRelativePosixPath(this.workspace.path, absolutePath);
+    if (relPosix === null) return;
+    const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
+    if (!projectId) return;
+
+    const taskGetter = (this.daemon as any)?.getTask;
+    const task = typeof taskGetter === 'function' ? taskGetter.call(this.daemon, this.taskId) : null;
+    const agentRoleId = task?.assignedAgentRoleId || null;
+    const res = await checkProjectAccess({ workspacePath: this.workspace.path, projectId, agentRoleId });
+    if (!res.allowed) {
+      throw new Error(res.reason || `Access denied for project "${projectId}"`);
+    }
+  }
+
   /**
    * Read file contents (with size limit to prevent context overflow)
    * Supports plain text, DOCX, and PDF files
@@ -182,6 +198,7 @@ export class FileTools {
     let ext = path.extname(fullPath).toLowerCase();
 
     try {
+      await this.enforceProjectAccess(fullPath);
       let stats: { size: number };
       try {
         stats = await fs.stat(fullPath);
@@ -191,6 +208,7 @@ export class FileTools {
           if (fallbackPath && fallbackPath !== fullPath) {
             fullPath = fallbackPath;
             ext = path.extname(fullPath).toLowerCase();
+            await this.enforceProjectAccess(fullPath);
             stats = await fs.stat(fullPath);
           } else {
             throw error;
@@ -392,6 +410,7 @@ export class FileTools {
 
     this.checkPermission('write');
     const fullPath = this.resolvePath(relativePath, 'write');
+    await this.enforceProjectAccess(fullPath);
 
     // Check file size against guardrail limits
     const contentSizeBytes = Buffer.byteLength(content, 'utf-8');
@@ -438,6 +457,7 @@ export class FileTools {
 
     this.checkPermission('read');
     const fullPath = this.resolvePath(pathToUse, 'read');
+    await this.enforceProjectAccess(fullPath);
 
     try {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -491,6 +511,7 @@ export class FileTools {
 
     this.checkPermission('read');
     const fullPath = this.resolvePath(pathToUse, 'read');
+    await this.enforceProjectAccess(fullPath);
 
     try {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -550,6 +571,7 @@ export class FileTools {
 
     this.checkPermission('read');
     const fullPath = this.resolvePath(relativePath, 'read');
+    await this.enforceProjectAccess(fullPath);
 
     try {
       const stats = await fs.stat(fullPath);
@@ -583,6 +605,8 @@ export class FileTools {
     this.checkPermission('write');
     const oldFullPath = this.resolvePath(oldPath, 'write');
     const newFullPath = this.resolvePath(newPath, 'write');
+    await this.enforceProjectAccess(oldFullPath);
+    await this.enforceProjectAccess(newFullPath);
 
     try {
       // Ensure target directory exists
@@ -618,6 +642,8 @@ export class FileTools {
     this.checkPermission('write');
     const sourceFullPath = this.resolvePath(sourcePath, 'read');
     const destFullPath = this.resolvePath(destPath, 'write');
+    await this.enforceProjectAccess(sourceFullPath);
+    await this.enforceProjectAccess(destFullPath);
 
     try {
       // Ensure target directory exists
@@ -653,6 +679,7 @@ export class FileTools {
     }
 
     const fullPath = this.resolvePath(relativePath, 'delete');
+    await this.enforceProjectAccess(fullPath);
 
     // Request user approval
     const approved = await this.daemon.requestApproval(
@@ -725,6 +752,7 @@ export class FileTools {
 
     this.checkPermission('write');
     const fullPath = this.resolvePath(relativePath, 'write');
+    await this.enforceProjectAccess(fullPath);
 
     try {
       await fs.mkdir(fullPath, { recursive: true });
@@ -758,6 +786,7 @@ export class FileTools {
 
     this.checkPermission('read');
     const fullPath = this.resolvePath(relativePath, 'read');
+    await this.enforceProjectAccess(fullPath);
     const matches: Array<{ path: string; type: 'filename' | 'content' }> = [];
     let filesSearched = 0;
     const maxFilesToSearch = 500; // Limit files to search for performance
@@ -784,6 +813,13 @@ export class FileTools {
 
         // Skip hidden files/directories and node_modules
         if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+          continue;
+        }
+
+        // Enforce per-project access (skip denied projects entirely).
+        try {
+          await this.enforceProjectAccess(entryPath);
+        } catch {
           continue;
         }
 

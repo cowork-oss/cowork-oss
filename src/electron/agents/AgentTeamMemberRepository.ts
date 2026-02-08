@@ -146,6 +146,35 @@ export class AgentTeamMemberRepository {
     return result.changes;
   }
 
+  /**
+   * Reorder members for a team by setting member_order based on the provided IDs.
+   * Returns the updated list ordered by member_order.
+   */
+  reorder(teamId: string, orderedMemberIds: string[]): AgentTeamMember[] {
+    const current = this.listByTeam(teamId);
+    if (current.length === 0) return [];
+
+    const byId = new Map(current.map((m) => [m.id, m]));
+    const filtered = orderedMemberIds.filter((id) => byId.has(id));
+
+    // Preserve any missing members at the end in their existing order.
+    const missing = current.filter((m) => !filtered.includes(m.id)).map((m) => m.id);
+    const finalOrder = [...filtered, ...missing];
+
+    const tx = this.db.transaction(() => {
+      const stmt = this.db.prepare(
+        'UPDATE agent_team_members SET member_order = ? WHERE id = ? AND team_id = ?'
+      );
+      finalOrder.forEach((id, index) => {
+        // Use gaps to allow future inserts without full reindex.
+        stmt.run((index + 1) * 10, id, teamId);
+      });
+    });
+
+    tx();
+    return this.listByTeam(teamId);
+  }
+
   private mapRowToMember(row: any): AgentTeamMember {
     return {
       id: row.id,
@@ -158,4 +187,3 @@ export class AgentTeamMemberRepository {
     };
   }
 }
-

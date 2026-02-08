@@ -14,6 +14,8 @@ import { ActivityFeed } from './ActivityFeed';
 import { MentionInput } from './MentionInput';
 import { MentionList } from './MentionList';
 import { StandupReportViewer } from './StandupReportViewer';
+import { AgentTeamsPanel } from './AgentTeamsPanel';
+import { AgentPerformanceReviewViewer } from './AgentPerformanceReviewViewer';
 import { useAgentContext } from '../hooks/useAgentContext';
 import type { UiCopyKey } from '../utils/agentMessages';
 
@@ -74,6 +76,8 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
   const [commentText, setCommentText] = useState('');
   const [postingComment, setPostingComment] = useState(false);
   const [standupOpen, setStandupOpen] = useState(false);
+  const [teamsOpen, setTeamsOpen] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
@@ -700,6 +704,20 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
           </button>
           <button
             className="mc-standup-btn"
+            onClick={() => setTeamsOpen(true)}
+            disabled={!selectedWorkspace}
+          >
+            Teams
+          </button>
+          <button
+            className="mc-standup-btn"
+            onClick={() => setReviewsOpen(true)}
+            disabled={!selectedWorkspace}
+          >
+            Reviews
+          </button>
+          <button
+            className="mc-standup-btn"
             onClick={() => setStandupOpen(true)}
             disabled={!selectedWorkspace}
           >
@@ -1060,6 +1078,38 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
             <StandupReportViewer
               workspaceId={selectedWorkspace.id}
               onClose={() => setStandupOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {teamsOpen && selectedWorkspaceId && (
+        <div className="mc-editor-overlay">
+          <div className="mc-editor-modal mc-standup-modal">
+            <AgentTeamsPanel
+              workspaceId={selectedWorkspaceId}
+              agents={agents}
+              tasks={tasks}
+              onOpenTask={(taskId) => {
+                setSelectedTaskId(taskId);
+                setRightTab('task');
+                setTeamsOpen(false);
+              }}
+            />
+            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="mc-refresh-btn" onClick={() => setTeamsOpen(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewsOpen && selectedWorkspaceId && (
+        <div className="mc-editor-overlay">
+          <div className="mc-editor-modal mc-standup-modal">
+            <AgentPerformanceReviewViewer
+              workspaceId={selectedWorkspaceId}
+              agents={agents}
+              onClose={() => setReviewsOpen(false)}
             />
           </div>
         </div>

@@ -86,6 +86,8 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
   const [newTeamDescription, setNewTeamDescription] = useState('');
   const [newTeamLeadRoleId, setNewTeamLeadRoleId] = useState<string>('');
   const [newTeamMaxParallel, setNewTeamMaxParallel] = useState<number>(4);
+  const [newTeamDefaultModelPreference, setNewTeamDefaultModelPreference] = useState<string>('cheaper');
+  const [newTeamDefaultPersonality, setNewTeamDefaultPersonality] = useState<string>('concise');
 
   // Selected Team edit draft (simple inline editing)
   const selectedTeam = useMemo(
@@ -97,6 +99,8 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
     description: string;
     leadAgentRoleId: string;
     maxParallelAgents: number;
+    defaultModelPreference: string;
+    defaultPersonality: string;
     isActive: boolean;
   } | null>(null);
 
@@ -216,6 +220,8 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       description: selectedTeam.description || '',
       leadAgentRoleId: selectedTeam.leadAgentRoleId,
       maxParallelAgents: selectedTeam.maxParallelAgents || 1,
+      defaultModelPreference: selectedTeam.defaultModelPreference || 'same',
+      defaultPersonality: selectedTeam.defaultPersonality || 'same',
       isActive: selectedTeam.isActive,
     });
   }, [selectedTeamId]);
@@ -340,6 +346,8 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         description: newTeamDescription.trim() || undefined,
         leadAgentRoleId: leadId,
         maxParallelAgents: Math.max(1, Number(newTeamMaxParallel) || 1),
+        defaultModelPreference: newTeamDefaultModelPreference,
+        defaultPersonality: newTeamDefaultPersonality,
         isActive: true,
       });
       setTeams((prev) => {
@@ -352,11 +360,13 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
       setNewTeamDescription('');
       setNewTeamLeadRoleId('');
       setNewTeamMaxParallel(4);
+      setNewTeamDefaultModelPreference('cheaper');
+      setNewTeamDefaultPersonality('concise');
     } catch (err: any) {
       console.error('Failed to create team:', err);
       setError(err?.message || 'Failed to create team');
     }
-  }, [workspaceId, newTeamName, newTeamDescription, newTeamLeadRoleId, newTeamMaxParallel, agents]);
+  }, [workspaceId, newTeamName, newTeamDescription, newTeamLeadRoleId, newTeamMaxParallel, newTeamDefaultModelPreference, newTeamDefaultPersonality, agents]);
 
   const handleSaveTeam = useCallback(async () => {
     if (!selectedTeam || !teamDraft) return;
@@ -368,6 +378,8 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
         description: teamDraft.description.trim() || null,
         leadAgentRoleId: teamDraft.leadAgentRoleId,
         maxParallelAgents: Math.max(1, Number(teamDraft.maxParallelAgents) || 1),
+        defaultModelPreference: teamDraft.defaultModelPreference,
+        defaultPersonality: teamDraft.defaultPersonality,
         isActive: teamDraft.isActive,
       });
       if (updated) {
@@ -757,6 +769,35 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                 onChange={(e) => setNewTeamMaxParallel(Number(e.target.value))}
               />
             </label>
+            <label className="mc-field">
+              <span>Default model</span>
+              <select
+                className="mc-select"
+                value={newTeamDefaultModelPreference}
+                onChange={(e) => setNewTeamDefaultModelPreference(e.target.value)}
+              >
+                <option value="same">Same (inherit)</option>
+                <option value="cheaper">Cheaper (Haiku)</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+            </label>
+            <label className="mc-field">
+              <span>Default personality</span>
+              <select
+                className="mc-select"
+                value={newTeamDefaultPersonality}
+                onChange={(e) => setNewTeamDefaultPersonality(e.target.value)}
+              >
+                <option value="same">Same (inherit)</option>
+                <option value="concise">Concise</option>
+                <option value="professional">Professional</option>
+                <option value="technical">Technical</option>
+                <option value="friendly">Friendly</option>
+                <option value="creative">Creative</option>
+                <option value="casual">Casual</option>
+              </select>
+            </label>
             <button className="mc-btn primary" onClick={() => void handleCreateTeam()}>
               Create team
             </button>
@@ -823,6 +864,35 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                     value={teamDraft.maxParallelAgents}
                     onChange={(e) => setTeamDraft({ ...teamDraft, maxParallelAgents: Number(e.target.value) })}
                   />
+                </label>
+                <label className="mc-field">
+                  <span>Default model</span>
+                  <select
+                    className="mc-select"
+                    value={teamDraft.defaultModelPreference}
+                    onChange={(e) => setTeamDraft({ ...teamDraft, defaultModelPreference: e.target.value })}
+                  >
+                    <option value="same">Same (inherit)</option>
+                    <option value="cheaper">Cheaper (Haiku)</option>
+                    <option value="sonnet">Sonnet</option>
+                    <option value="opus">Opus</option>
+                  </select>
+                </label>
+                <label className="mc-field">
+                  <span>Default personality</span>
+                  <select
+                    className="mc-select"
+                    value={teamDraft.defaultPersonality}
+                    onChange={(e) => setTeamDraft({ ...teamDraft, defaultPersonality: e.target.value })}
+                  >
+                    <option value="same">Same (inherit)</option>
+                    <option value="concise">Concise</option>
+                    <option value="professional">Professional</option>
+                    <option value="technical">Technical</option>
+                    <option value="friendly">Friendly</option>
+                    <option value="creative">Creative</option>
+                    <option value="casual">Casual</option>
+                  </select>
                 </label>
                 <label className="mc-field mc-field-inline">
                   <span>Active</span>

@@ -4,13 +4,14 @@
  * Focus on sub-agent queue bypass behavior to prevent deadlocks.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Task, QueueStatus, TaskStatus } from '../../../shared/types';
+import { describe, it, expect } from 'vitest';
+import type { Task, QueueStatus } from '../../../shared/types';
 
 // Mock helper functions that mirror queue-manager logic
-function shouldBypassQueue(task: Pick<Task, 'parentTaskId'>): boolean {
-  // Sub-agents (tasks with parentTaskId) bypass the concurrency limit
-  return !!task.parentTaskId;
+function shouldBypassQueue(task: Pick<Task, 'parentTaskId' | 'agentConfig'>): boolean {
+  // Sub-agents (tasks with parentTaskId) bypass the concurrency limit by default,
+  // but can opt out to respect the global queue settings.
+  return !!task.parentTaskId && task.agentConfig?.bypassQueue !== false;
 }
 
 function canStartImmediately(runningCount: number, maxConcurrent: number): boolean {
@@ -18,14 +19,14 @@ function canStartImmediately(runningCount: number, maxConcurrent: number): boole
 }
 
 function enqueueLogic(
-  task: Pick<Task, 'id' | 'parentTaskId'>,
+  task: Pick<Task, 'id' | 'parentTaskId' | 'agentConfig'>,
   runningCount: number,
   maxConcurrent: number
 ): 'start_immediately' | 'queue' {
   const isSubAgent = shouldBypassQueue(task);
 
   if (isSubAgent) {
-    // Sub-agents always start immediately to prevent deadlock
+    // Sub-agents start immediately by default to prevent deadlock
     return 'start_immediately';
   } else if (canStartImmediately(runningCount, maxConcurrent)) {
     return 'start_immediately';
@@ -35,7 +36,9 @@ function enqueueLogic(
 }
 
 // Create mock task
-function createMockTask(overrides: Partial<Task> = {}): Pick<Task, 'id' | 'parentTaskId' | 'title' | 'status'> {
+function createMockTask(
+  overrides: Partial<Task> = {}
+): Pick<Task, 'id' | 'parentTaskId' | 'agentConfig' | 'title' | 'status'> {
   return {
     id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     title: 'Test Task',
@@ -80,6 +83,13 @@ describe('TaskQueueManager sub-agent behavior', () => {
       const subAgent = createMockTask({ parentTaskId: 'parent-123' });
       const result = enqueueLogic(subAgent, 10, 5); // 10 running (due to sub-agents), max 5
       expect(result).toBe('start_immediately');
+    });
+
+    it('should allow sub-agents to opt out of bypassing the queue', () => {
+      // When bypassQueue=false, sub-agents should respect the global queue limit.
+      const subAgent = createMockTask({ parentTaskId: 'parent-123', agentConfig: { bypassQueue: false } });
+      const result = enqueueLogic(subAgent, 5, 5); // at limit
+      expect(result).toBe('queue');
     });
 
     it('should prevent deadlock scenario: parent spawns sub-agents at full capacity', () => {

@@ -958,6 +958,124 @@ export class DatabaseManager {
     } catch {
       // Table already exists, ignore
     }
+
+    // ============ Agent Teams (Mission Control) ============
+
+    // Migration: Create agent team tables (teams, members, runs, items)
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_teams (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+          name TEXT NOT NULL,
+          description TEXT,
+          lead_agent_role_id TEXT NOT NULL REFERENCES agent_roles(id),
+          max_parallel_agents INTEGER NOT NULL DEFAULT 4,
+          default_model_preference TEXT,
+          default_personality TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(workspace_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_teams_workspace ON agent_teams(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_teams_active ON agent_teams(workspace_id, is_active);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_team_members (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES agent_teams(id) ON DELETE CASCADE,
+          agent_role_id TEXT NOT NULL REFERENCES agent_roles(id),
+          member_order INTEGER NOT NULL DEFAULT 0,
+          is_required INTEGER NOT NULL DEFAULT 0,
+          role_guidance TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE(team_id, agent_role_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_team_members_team ON agent_team_members(team_id);
+        CREATE INDEX IF NOT EXISTS idx_team_members_role ON agent_team_members(agent_role_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_team_runs (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES agent_teams(id),
+          root_task_id TEXT NOT NULL REFERENCES tasks(id),
+          status TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          error TEXT,
+          summary TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_team_runs_team ON agent_team_runs(team_id);
+        CREATE INDEX IF NOT EXISTS idx_team_runs_root_task ON agent_team_runs(root_task_id);
+        CREATE INDEX IF NOT EXISTS idx_team_runs_status ON agent_team_runs(status);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_team_items (
+          id TEXT PRIMARY KEY,
+          team_run_id TEXT NOT NULL REFERENCES agent_team_runs(id) ON DELETE CASCADE,
+          parent_item_id TEXT REFERENCES agent_team_items(id),
+          title TEXT NOT NULL,
+          description TEXT,
+          owner_agent_role_id TEXT REFERENCES agent_roles(id),
+          source_task_id TEXT REFERENCES tasks(id),
+          status TEXT NOT NULL,
+          result_summary TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_team_items_run ON agent_team_items(team_run_id);
+        CREATE INDEX IF NOT EXISTS idx_team_items_source_task ON agent_team_items(source_task_id);
+        CREATE INDEX IF NOT EXISTS idx_team_items_status ON agent_team_items(status);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // ============ Agent Performance Reviews (Mission Control) ============
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_performance_reviews (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+          agent_role_id TEXT NOT NULL REFERENCES agent_roles(id),
+          period_start INTEGER NOT NULL,
+          period_end INTEGER NOT NULL,
+          rating INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          metrics TEXT,
+          recommended_autonomy_level TEXT,
+          recommendation_rationale TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_reviews_workspace ON agent_performance_reviews(workspace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_reviews_role ON agent_performance_reviews(agent_role_id, created_at DESC);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
   }
 
   private seedDefaultModels() {
