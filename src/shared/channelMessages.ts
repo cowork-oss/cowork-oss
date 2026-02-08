@@ -171,6 +171,11 @@ const CHANNEL_UI_COPY: Record<ChannelUiKey, string> = {
 
 *Basics*
 /workspaces - Select workspace
+/brief [today|tomorrow|week] - Brief (DM only)
+/brief schedule|list|unschedule - Brief scheduling (DM only)
+/schedule - Schedule a task
+/digest [lookback] - Digest recent chat
+/followups [lookback] - Follow-ups/commitments
 /status - Current status
 /newtask - Fresh start
 
@@ -202,6 +207,14 @@ Example: "Add a login form"`,
 
 *Tasks*
 /newtask - Start a fresh task/conversation
+/brief [today|tomorrow|week] - Generate a brief summary (DM only)
+/brief schedule ... - Schedule a recurring brief (DM only)
+/brief list - List scheduled briefs (DM only)
+/brief unschedule [today|tomorrow|week] - Disable scheduled briefs (DM only)
+/schedule help - Scheduling help
+/schedule list - List scheduled tasks for this chat
+/digest - Digest recent chat
+/followups - Extract follow-ups/commitments
 /cancel - Cancel current task
 /retry - Retry the last failed task
 /history - Show recent task history

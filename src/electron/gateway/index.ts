@@ -139,12 +139,16 @@ export class ChannelGateway {
     const lastMessages = new Map<string, string>();
     // Track whether any user-visible assistant messages were sent during a follow-up window.
     const followUpMessagesSent = new Map<string, boolean>();
+    // Track the most recent assistant text emitted during a follow-up window.
+    // This should reflect what the user saw last during the follow-up, even if it is shorter than prior outputs.
+    const followUpLatestAssistantText = new Map<string, string>();
 
     // Follow-ups log a user_message event at the start of processing. Use it to
     // reset per-task follow-up tracking so we don't incorrectly carry state from
     // the original task execution.
     const onUserMessage = (data: { taskId: string; message?: string }) => {
       followUpMessagesSent.set(data.taskId, false);
+      followUpLatestAssistantText.set(data.taskId, '');
     };
     agentDaemon.on('user_message', onUserMessage);
     this.daemonListeners.push({ event: 'user_message', handler: onUserMessage });
@@ -175,6 +179,7 @@ export class ChannelGateway {
         // follow-up has actually started (see onUserMessage above).
         if (followUpMessagesSent.has(data.taskId)) {
           followUpMessagesSent.set(data.taskId, true);
+          followUpLatestAssistantText.set(data.taskId, trimmed);
         }
       }
     };
@@ -248,12 +253,23 @@ export class ChannelGateway {
 
     // Listen for follow-up message completion
     const onFollowUpCompleted = async (data: { taskId: string }) => {
+      const followUpText = (followUpLatestAssistantText.get(data.taskId) || '').trim();
+      const sentAnyAssistant = followUpMessagesSent.get(data.taskId) === true;
+
+      // Ensure any debounced buffers are flushed and Telegram draft streams are finalized
+      // so transcripts/digests don't miss assistant output from follow-ups.
+      if (sentAnyAssistant && followUpText) {
+        await this.router.flushStreamingUpdateForTask(data.taskId);
+        await this.router.finalizeDraftStreamForTask(data.taskId, followUpText);
+      }
+
       // If no assistant messages were sent during the follow-up, send a confirmation
-      if (!followUpMessagesSent.get(data.taskId)) {
+      if (!sentAnyAssistant) {
         const message = getChannelMessage('followUpProcessed', this.getMessageContext());
         this.router.sendTaskUpdate(data.taskId, message);
       }
       followUpMessagesSent.delete(data.taskId);
+      followUpLatestAssistantText.delete(data.taskId);
 
       // Send any artifacts (images, screenshots) created during the follow-up
       await this.router.sendArtifacts(data.taskId);
@@ -262,14 +278,44 @@ export class ChannelGateway {
     this.daemonListeners.push({ event: 'follow_up_completed', handler: onFollowUpCompleted });
 
     // Listen for follow-up failures
-    const onFollowUpFailed = (data: { taskId: string; error?: string }) => {
+    const onFollowUpFailed = async (data: { taskId: string; error?: string }) => {
       const errorMsg = data.error || 'Unknown error';
       const message = getChannelMessage('followUpFailed', this.getMessageContext(), { error: errorMsg });
-      this.router.sendTaskUpdate(data.taskId, message);
+      const followUpText = (followUpLatestAssistantText.get(data.taskId) || '').trim();
+      const sentAnyAssistant = followUpMessagesSent.get(data.taskId) === true;
+
+      if (sentAnyAssistant && followUpText) {
+        try {
+          await this.router.flushStreamingUpdateForTask(data.taskId);
+          await this.router.finalizeDraftStreamForTask(data.taskId, followUpText);
+        } catch {
+          // Best-effort; still send the failure message below.
+        }
+      }
+
+      await this.router.sendTaskUpdate(data.taskId, message);
       followUpMessagesSent.delete(data.taskId);
+      followUpLatestAssistantText.delete(data.taskId);
     };
     agentDaemon.on('follow_up_failed', onFollowUpFailed);
     this.daemonListeners.push({ event: 'follow_up_failed', handler: onFollowUpFailed });
+
+    // Listen for task pauses (usually when the assistant asks a question).
+    // This is important for Telegram draft streaming: without a task_completed event,
+    // the draft can remain with the typing cursor and the final question may not be persisted.
+    const onTaskPaused = async (data: { taskId: string; message?: string; reason?: string }) => {
+      const explicit = typeof data.message === 'string' ? data.message.trim() : '';
+      try {
+        await this.router.flushStreamingUpdateForTask(data.taskId);
+        if (explicit) {
+          await this.router.finalizeDraftStreamForTask(data.taskId, explicit);
+        }
+      } catch {
+        // Best-effort only.
+      }
+    };
+    agentDaemon.on('task_paused', onTaskPaused);
+    this.daemonListeners.push({ event: 'task_paused', handler: onTaskPaused });
 
     // Listen for approval requests - forward to Discord/Telegram
     const onApprovalRequested = (data: { taskId: string; approval: any }) => {
@@ -833,7 +879,11 @@ export class ChannelGateway {
         email,
         password,
         imapHost,
+        imapPort: 993,
+        imapSecure: true,
         smtpHost,
+        smtpPort: 587,
+        smtpSecure: false,
         displayName,
         allowedSenders,
         subjectFilter,
