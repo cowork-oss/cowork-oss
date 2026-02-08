@@ -43,7 +43,7 @@ import { SearchProviderFactory, SearchSettings, SearchProviderType } from '../ag
 import { ChannelGateway } from '../gateway';
 	import { updateManager } from '../updater';
 	import { rateLimiter, RATE_LIMIT_CONFIGS } from '../utils/rate-limiter';
-	import { buildTaskExportJson } from '../telemetry/task-export';
+	import { buildTaskExportJson } from '../reports/task-export';
 import {
   validateInput,
   WorkspaceCreateSchema,
@@ -744,7 +744,7 @@ export async function setupIpcHandlers(
     return taskRepo.findAll();
   });
 
-  // Export task telemetry as a structured JSON blob (prompt-free summaries)
+  // Export task summaries as a structured JSON blob (prompt-free by design)
   ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (_, rawQuery?: TaskExportQuery) => {
     checkRateLimit(IPC_CHANNELS.TASK_EXPORT_JSON);
 
