@@ -504,8 +504,9 @@ describe('PersonalityManager - agent name', () => {
     it('should include instructions to ask for name when user is unknown', () => {
       const prompt = PersonalityManager.getIdentityPrompt();
 
-      expect(prompt).toContain("don't know the user's name");
-      expect(prompt).toContain('introduce themselves');
+      expect(prompt).toContain('do not have a confirmed name');
+      expect(prompt).toContain('what they\'d like to be called');
+      expect(prompt).toContain('set_user_name tool');
     });
   });
 
