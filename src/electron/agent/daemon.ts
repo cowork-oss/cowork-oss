@@ -1441,6 +1441,339 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Query task event logs from the local database (tool calls/results, messages, feedback, file ops).
+   * This is privacy-sensitive and may be blocked in shared gateway contexts.
+   */
+  queryTaskEvents(params: {
+    period: 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'custom';
+    from?: string | number;
+    to?: string | number;
+    limit?: number;
+    workspaceId?: string;
+    types?: string[];
+    includePayload?: boolean;
+  }): {
+    success: true;
+    period: string;
+    range: { startMs: number; endMs: number; startIso: string; endIso: string };
+    stats: any;
+    events: any[];
+  } | { success: false; error: string } {
+    try {
+      const period = params?.period;
+      if (!period) {
+        return { success: false, error: 'Missing required field: period' };
+      }
+
+      const clampLimit = (value: unknown): number => {
+        const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 200;
+        return Math.min(Math.max(n, 1), 500);
+      };
+
+      const truncate = (value: unknown, maxChars: number): string => {
+        const s = typeof value === 'string' ? value : '';
+        if (!s) return '';
+        if (s.length <= maxChars) return s;
+        return s.slice(0, maxChars) + '…';
+      };
+
+      const now = new Date();
+      const startOfDayMs = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+      const parseTime = (v: unknown): number | null => {
+        if (typeof v === 'number' && Number.isFinite(v)) return v;
+        if (typeof v !== 'string') return null;
+        const raw = v.trim();
+        if (!raw) return null;
+        const dt = new Date(raw);
+        const ms = dt.getTime();
+        return Number.isFinite(ms) ? ms : null;
+      };
+
+      const nowMs = now.getTime();
+      const todayStart = startOfDayMs(now);
+
+      let startMs: number;
+      let endMs: number;
+
+      switch (period) {
+        case 'today': {
+          startMs = todayStart;
+          endMs = todayStart + 24 * 60 * 60 * 1000;
+          break;
+        }
+        case 'yesterday': {
+          endMs = todayStart;
+          startMs = endMs - 24 * 60 * 60 * 1000;
+          break;
+        }
+        case 'last_7_days': {
+          startMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+          endMs = nowMs;
+          break;
+        }
+        case 'last_30_days': {
+          startMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+          endMs = nowMs;
+          break;
+        }
+        case 'custom': {
+          const fromMs = parseTime(params?.from);
+          const toMs = parseTime(params?.to);
+          if (fromMs != null && toMs != null) {
+            startMs = fromMs;
+            endMs = toMs;
+          } else if (fromMs != null) {
+            startMs = fromMs;
+            endMs = nowMs;
+          } else if (toMs != null) {
+            endMs = toMs;
+            // Default to last hour when only end is provided (used by scheduled digests).
+            startMs = endMs - 60 * 60 * 1000;
+          } else {
+            // Default to last hour for custom when no bounds provided.
+            startMs = nowMs - 60 * 60 * 1000;
+            endMs = nowMs;
+          }
+          break;
+        }
+        default: {
+          return { success: false, error: `Unsupported period: ${String(period)}` };
+        }
+      }
+
+      // Guard against inverted ranges.
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        return { success: false, error: 'Invalid time range' };
+      }
+
+      const limit = clampLimit(params?.limit);
+      const workspaceId = typeof params?.workspaceId === 'string' ? params.workspaceId.trim() : '';
+      const workspaceFilter = workspaceId.length > 0 ? workspaceId : undefined;
+      const normalizedTypes = Array.isArray(params?.types)
+        ? params.types.map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean).slice(0, 50)
+        : [];
+      const includePayload = params?.includePayload !== false;
+
+      const db = this.dbManager.getDatabase();
+
+      let sql = `
+        SELECT
+          e.id as id,
+          e.task_id as taskId,
+          e.timestamp as timestamp,
+          e.type as type,
+          e.payload as payload,
+          t.title as taskTitle,
+          t.workspace_id as workspaceId
+        FROM task_events e
+        JOIN tasks t ON t.id = e.task_id
+        WHERE e.timestamp >= ? AND e.timestamp < ?
+      `;
+
+      const args: any[] = [startMs, endMs];
+      if (workspaceFilter) {
+        sql += ' AND t.workspace_id = ?';
+        args.push(workspaceFilter);
+      }
+      if (normalizedTypes.length > 0) {
+        const placeholders = normalizedTypes.map(() => '?').join(', ');
+        sql += ` AND e.type IN (${placeholders})`;
+        args.push(...normalizedTypes);
+      }
+
+      sql += ' ORDER BY e.timestamp ASC LIMIT ?';
+      args.push(limit);
+
+      const rows = db.prepare(sql).all(...args) as Array<{
+        id: string;
+        taskId: string;
+        timestamp: number;
+        type: string;
+        payload: string;
+        taskTitle: string;
+        workspaceId: string;
+      }>;
+
+      const byType: Record<string, number> = {};
+      const toolCallsByName: Record<string, number> = {};
+      const feedbackByDecision: Record<string, number> = {};
+      const tasksTouched = new Set<string>();
+      let assistantMessages = 0;
+      let userMessages = 0;
+      let toolCalls = 0;
+      let toolErrors = 0;
+      let filesCreated = 0;
+      let filesModified = 0;
+      let filesDeleted = 0;
+
+      const parseJson = (raw: unknown): any => {
+        if (typeof raw !== 'string' || !raw) return {};
+        try {
+          const obj = JSON.parse(raw);
+          return obj && typeof obj === 'object' ? obj : {};
+        } catch {
+          return {};
+        }
+      };
+
+      const compactPayloadPreview = (payload: any): string => {
+        if (!payload || typeof payload !== 'object') return '';
+        const keys = Object.keys(payload).slice(0, 12);
+        const preview: Record<string, any> = {};
+        for (const k of keys) {
+          const v = (payload as any)[k];
+          if (typeof v === 'string') preview[k] = truncate(v, 260);
+          else if (typeof v === 'number' || typeof v === 'boolean') preview[k] = v;
+          else if (v && typeof v === 'object') preview[k] = '[object]';
+          else preview[k] = v;
+        }
+        const rendered = JSON.stringify(preview);
+        return truncate(rendered, 520);
+      };
+
+      const summarizeEvent = (type: string, payload: any): string => {
+        switch (type) {
+          case 'tool_call': {
+            const tool = (payload?.tool || payload?.name || '').toString();
+            return tool ? `Tool call: ${tool}` : 'Tool call';
+          }
+          case 'tool_result': {
+            const tool = (payload?.tool || payload?.name || '').toString();
+            return tool ? `Tool result: ${tool}` : 'Tool result';
+          }
+          case 'tool_error': {
+            const tool = (payload?.tool || payload?.name || '').toString();
+            const err = typeof payload?.error === 'string' ? payload.error : '';
+            return truncate(tool ? `Tool error: ${tool}${err ? ` - ${err}` : ''}` : `Tool error${err ? ` - ${err}` : ''}`, 520);
+          }
+          case 'assistant_message': {
+            const text =
+              (typeof payload?.message === 'string' ? payload.message : '')
+              || (typeof payload?.content === 'string' ? payload.content : '');
+            return text ? `Assistant: ${truncate(text, 260)}` : 'Assistant message';
+          }
+          case 'user_message': {
+            const text =
+              (typeof payload?.message === 'string' ? payload.message : '')
+              || (typeof payload?.content === 'string' ? payload.content : '');
+            return text ? `User: ${truncate(text, 260)}` : 'User message';
+          }
+          case 'user_feedback': {
+            const decision = typeof payload?.decision === 'string' ? payload.decision : '';
+            const reason = typeof payload?.reason === 'string' ? payload.reason : '';
+            return truncate(`Feedback: ${decision || 'unknown'}${reason ? ` - ${reason}` : ''}`, 520);
+          }
+          case 'file_created':
+          case 'file_modified':
+          case 'file_deleted': {
+            const p = typeof payload?.path === 'string' ? payload.path : '';
+            return p ? `${type.replace('_', ' ')}: ${truncate(p, 320)}` : type.replace('_', ' ');
+          }
+          case 'step_started':
+          case 'step_completed':
+          case 'step_failed': {
+            const desc = typeof payload?.step?.description === 'string' ? payload.step.description : '';
+            const err = typeof payload?.error === 'string' ? payload.error : '';
+            const base = desc ? `${type.replace('_', ' ')}: ${desc}` : type.replace('_', ' ');
+            return truncate(err ? `${base} - ${err}` : base, 520);
+          }
+          default: {
+            return type;
+          }
+        }
+      };
+
+      const events = rows.map((row) => {
+        tasksTouched.add(row.taskId);
+        byType[row.type] = (byType[row.type] || 0) + 1;
+
+        const payloadObj = parseJson(row.payload);
+
+        if (row.type === 'assistant_message') assistantMessages += 1;
+        if (row.type === 'user_message') userMessages += 1;
+        if (row.type === 'tool_call') {
+          toolCalls += 1;
+          const tool = (payloadObj?.tool || payloadObj?.name || '').toString().trim();
+          if (tool) {
+            toolCallsByName[tool] = (toolCallsByName[tool] || 0) + 1;
+          }
+        }
+        if (row.type === 'tool_error') toolErrors += 1;
+
+        if (row.type === 'file_created') filesCreated += 1;
+        if (row.type === 'file_modified') filesModified += 1;
+        if (row.type === 'file_deleted') filesDeleted += 1;
+
+        if (row.type === 'user_feedback') {
+          const decision = typeof payloadObj?.decision === 'string' ? payloadObj.decision.trim() : 'unknown';
+          const key = decision || 'unknown';
+          feedbackByDecision[key] = (feedbackByDecision[key] || 0) + 1;
+        }
+
+        return {
+          id: row.id,
+          taskId: row.taskId,
+          taskTitle: row.taskTitle,
+          workspaceId: row.workspaceId,
+          timestampMs: row.timestamp,
+          timestampIso: new Date(row.timestamp).toISOString(),
+          type: row.type,
+          summary: summarizeEvent(row.type, payloadObj),
+          ...(includePayload ? { payloadPreview: compactPayloadPreview(payloadObj) } : {}),
+        };
+      });
+
+      // Sort tools by usage desc, keep top 30 for readability.
+      const toolsUsed = Object.entries(toolCallsByName)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 30)
+        .reduce((acc, [k, v]) => {
+          acc[k] = v;
+          return acc;
+        }, {} as Record<string, number>);
+
+      const stats = {
+        totalEvents: rows.length,
+        tasksTouched: tasksTouched.size,
+        byType,
+        messageCounts: {
+          user: userMessages,
+          assistant: assistantMessages,
+        },
+        toolCalls: {
+          total: toolCalls,
+          errors: toolErrors,
+          byTool: toolsUsed,
+        },
+        fileOps: {
+          created: filesCreated,
+          modified: filesModified,
+          deleted: filesDeleted,
+        },
+        feedback: {
+          byDecision: feedbackByDecision,
+        },
+      };
+
+      return {
+        success: true,
+        period,
+        range: {
+          startMs,
+          endMs,
+          startIso: new Date(startMs).toISOString(),
+          endIso: new Date(endMs).toISOString(),
+        },
+        stats,
+        events,
+      };
+    } catch (error: any) {
+      return { success: false, error: error?.message ? String(error.message) : String(error) };
+    }
+  }
+
+  /**
    * Update task workspace ID in database
    */
   updateTaskWorkspace(taskId: string, workspaceId: string): void {

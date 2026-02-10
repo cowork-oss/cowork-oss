@@ -200,7 +200,8 @@ export type ToolType =
   | 'sharepoint_action'
   // Meta tools
   | 'revise_plan'
-  | 'task_history';
+  | 'task_history'
+  | 'task_events';
 
 export type ApprovalType =
   | 'delete_file'
@@ -307,6 +308,7 @@ export const TOOL_GROUPS = {
     'read_clipboard',
     'write_clipboard',
     'task_history',
+    'task_events',
     // Privacy-sensitive: exposes prior chat logs across chats
     'channel_list_chats',
     'channel_history',
@@ -388,6 +390,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Meta
   revise_plan: 'read',
   task_history: 'read',
+  task_events: 'read',
 };
 
 /**

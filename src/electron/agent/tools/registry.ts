@@ -632,6 +632,36 @@ export class ToolRegistry {
   }
 
   /**
+   * Query prior task event logs (tool calls, messages, feedback, file ops) from the local database.
+   * Privacy-sensitive; should be blocked in shared gateway contexts.
+   */
+  private taskEvents(input: {
+    period: 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'custom';
+    from?: string;
+    to?: string;
+    limit?: number;
+    workspace_id?: string;
+    types?: string[];
+    include_payload?: boolean;
+  }): any {
+    const period = input?.period;
+    const allowed: Array<typeof period> = ['today', 'yesterday', 'last_7_days', 'last_30_days', 'custom'];
+    if (!period || !allowed.includes(period)) {
+      throw new Error(`Invalid period. Expected one of: ${allowed.join(', ')}`);
+    }
+
+    return this.daemon.queryTaskEvents({
+      period,
+      from: input.from,
+      to: input.to,
+      limit: input.limit,
+      workspaceId: input.workspace_id,
+      types: input.types,
+      includePayload: input.include_payload,
+    });
+  }
+
+  /**
    * Get human-readable tool descriptions
    */
   getToolDescriptions(): string {
@@ -1041,6 +1071,9 @@ ${skillDescriptions}`;
     // Meta tools
     if (name === 'task_history') {
       return this.taskHistory(input);
+    }
+    if (name === 'task_events') {
+      return this.taskEvents(input);
     }
 
     if (name === 'revise_plan') {
@@ -4302,6 +4335,50 @@ ${skillDescriptions}`;
             include_messages: {
               type: 'boolean',
               description: 'Include last user/assistant message per task (default: true)',
+            },
+          },
+          required: ['period'],
+        },
+      },
+      {
+        name: 'task_events',
+        description:
+          'Query task event logs (tool calls, tool results, assistant/user messages, feedback, file ops) from the local database. ' +
+          'Use this to build accurate digests and stats without scraping filesystem logs.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            period: {
+              type: 'string',
+              enum: ['today', 'yesterday', 'last_7_days', 'last_30_days', 'custom'],
+              description: 'Time period to query',
+            },
+            from: {
+              type: 'string',
+              description:
+                'For custom: start time as ISO string (e.g., "2026-02-06T00:00:00Z"). If omitted, defaults are used.',
+            },
+            to: {
+              type: 'string',
+              description:
+                'For custom: end time as ISO string (e.g., "2026-02-07T00:00:00Z"). If omitted, defaults are used.',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of events to return (1-500). Default: 200',
+            },
+            workspace_id: {
+              type: 'string',
+              description: 'Optional workspace ID to restrict results to',
+            },
+            types: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional list of event types to include (e.g., ["tool_call","user_feedback"])',
+            },
+            include_payload: {
+              type: 'boolean',
+              description: 'Include a compact payload preview for each event (default: true)',
             },
           },
           required: ['period'],
