@@ -1039,7 +1039,16 @@ export class MessageRouter {
     return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
   }
 
-  private updatePrioritiesMarkdown(markdown: string, priorities: string[], timestamp: string): string {
+  private updatePrioritiesMarkdown(
+    markdown: string,
+    extracted: {
+      priorities?: string[];
+      decisions?: string[];
+      actionItems?: string[];
+      contextShifts?: string[];
+    },
+    timestamp: string
+  ): string {
     const lines = String(markdown || '').split('\n');
     const sanitize = (s: string) =>
       String(s || '')
@@ -1051,15 +1060,34 @@ export class MessageRouter {
       return trimmed.length > 220 ? trimmed.slice(0, 217) + '...' : trimmed;
     };
 
-    const incoming = priorities
+    const incomingPriorities = (extracted.priorities || [])
       .map((p) => clean(p))
       .filter((p) => p.length > 0)
       .slice(0, 8);
 
-    if (incoming.length === 0) return markdown;
+    const incomingDecisions = (extracted.decisions || [])
+      .map((p) => clean(p))
+      .filter((p) => p.length > 0)
+      .slice(0, 8);
+    const incomingActionItems = (extracted.actionItems || [])
+      .map((p) => clean(p))
+      .filter((p) => p.length > 0)
+      .slice(0, 8);
+    const incomingContextShifts = (extracted.contextShifts || [])
+      .map((p) => clean(p))
+      .filter((p) => p.length > 0)
+      .slice(0, 8);
+
+    const hasAnyIncoming =
+      incomingPriorities.length > 0
+      || incomingDecisions.length > 0
+      || incomingActionItems.length > 0
+      || incomingContextShifts.length > 0;
+
+    if (!hasAnyIncoming) return markdown;
 
     const idxCurrent = lines.findIndex((l) => /^##\s+Current\s*$/.test(l));
-    if (idxCurrent >= 0) {
+    if (idxCurrent >= 0 && incomingPriorities.length > 0) {
       let idxEnd = lines.length;
       for (let i = idxCurrent + 1; i < lines.length; i++) {
         if (/^##\s+/.test(lines[i])) {
@@ -1079,7 +1107,7 @@ export class MessageRouter {
 
       const seen = new Set<string>();
       const merged: string[] = [];
-      for (const p of [...incoming, ...existingItems]) {
+      for (const p of [...incomingPriorities, ...existingItems]) {
         const key = p.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1100,7 +1128,18 @@ export class MessageRouter {
     if (idxHistory >= 0) {
       const entryLines: string[] = [];
       entryLines.push(`### ${timestamp}`);
-      entryLines.push(`- Priorities: ${incoming.join(' | ')}`);
+      if (incomingPriorities.length > 0) {
+        entryLines.push(`- Priorities: ${incomingPriorities.join(' | ')}`);
+      }
+      if (incomingDecisions.length > 0) {
+        entryLines.push(`- Decisions: ${incomingDecisions.join(' | ')}`);
+      }
+      if (incomingActionItems.length > 0) {
+        entryLines.push(`- Action Items: ${incomingActionItems.join(' | ')}`);
+      }
+      if (incomingContextShifts.length > 0) {
+        entryLines.push(`- Context Shifts: ${incomingContextShifts.join(' | ')}`);
+      }
       entryLines.push('');
       lines.splice(idxHistory + 1, 0, ...entryLines);
     }
@@ -1127,6 +1166,9 @@ export class MessageRouter {
 
     // Extract structured priorities from the transcript via the configured LLM (best-effort).
     let extractedPriorities: string[] = [];
+    let extractedDecisions: string[] = [];
+    let extractedActionItems: string[] = [];
+    let extractedContextShifts: string[] = [];
     try {
       const provider = LLMProviderFactory.createProvider();
       const settings = LLMProviderFactory.getSettings();
@@ -1158,17 +1200,25 @@ export class MessageRouter {
         '- if unsure, use empty arrays',
       ].join('\n');
 
-      const resp = await provider.createMessage({
-        model: modelId,
-        maxTokens: 600,
-        system,
-        messages: [
-          {
-            role: 'user',
-            content: transcript.slice(0, 6000),
-          },
-        ],
-      });
+      const abort = new AbortController();
+      const timeout = setTimeout(() => abort.abort(), 6500);
+      let resp;
+      try {
+        resp = await provider.createMessage({
+          model: modelId,
+          maxTokens: 600,
+          system,
+          messages: [
+            {
+              role: 'user',
+              content: transcript.slice(0, 6000),
+            },
+          ],
+          signal: abort.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
 
       const text = (resp.content || [])
         .filter((c: any) => c.type === 'text' && c.text)
@@ -1177,19 +1227,47 @@ export class MessageRouter {
 
       const values = extractJsonValues(text, { maxResults: 1, allowRepair: true });
       const obj = values[0] as any;
-      if (obj && typeof obj === 'object' && Array.isArray(obj.priorities)) {
-        extractedPriorities = obj.priorities.filter((p: any) => typeof p === 'string');
+      if (obj && typeof obj === 'object') {
+        if (Array.isArray(obj.priorities)) {
+          extractedPriorities = obj.priorities.filter((p: any) => typeof p === 'string');
+        }
+        if (Array.isArray(obj.decisions)) {
+          extractedDecisions = obj.decisions.filter((p: any) => typeof p === 'string');
+        }
+        if (Array.isArray(obj.action_items)) {
+          extractedActionItems = obj.action_items.filter((p: any) => typeof p === 'string');
+        }
+        if (Array.isArray(obj.context_shifts)) {
+          extractedContextShifts = obj.context_shifts.filter((p: any) => typeof p === 'string');
+        }
       }
     } catch (error) {
       console.warn('[Router] Voice priority extraction failed:', error);
       extractedPriorities = [];
+      extractedDecisions = [];
+      extractedActionItems = [];
+      extractedContextShifts = [];
     }
 
-    if (extractedPriorities.length === 0) return;
+    const hasAny =
+      extractedPriorities.length > 0
+      || extractedDecisions.length > 0
+      || extractedActionItems.length > 0
+      || extractedContextShifts.length > 0;
+    if (!hasAny) return;
 
     try {
       const current = fs.readFileSync(prioritiesPath, 'utf8');
-      const next = this.updatePrioritiesMarkdown(current, extractedPriorities, this.formatLocalTimestamp(new Date()));
+      const next = this.updatePrioritiesMarkdown(
+        current,
+        {
+          priorities: extractedPriorities,
+          decisions: extractedDecisions,
+          actionItems: extractedActionItems,
+          contextShifts: extractedContextShifts,
+        },
+        this.formatLocalTimestamp(new Date())
+      );
       if (next !== current) {
         const tmp = prioritiesPath + '.tmp';
         fs.writeFileSync(tmp, next, 'utf8');
