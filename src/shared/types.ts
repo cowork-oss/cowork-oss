@@ -469,6 +469,13 @@ export interface AgentConfig {
   bypassQueue?: boolean;
   /** Whether this task may pause and wait for user input (default: true) */
   allowUserInput?: boolean;
+  /**
+   * Optional response quality loop for final text outputs:
+   * - 1: draft only (default)
+   * - 2: draft + refine
+   * - 3: draft + critique + refine
+   */
+  qualityPasses?: 1 | 2 | 3;
 }
 
 export interface Task {

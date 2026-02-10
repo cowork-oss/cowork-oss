@@ -4765,7 +4765,7 @@ TASK / CONVERSATION HISTORY:
         const availableTools = this.getAvailableTools();
 
         // Use retry wrapper for resilient API calls
-        const response = await this.callLLMWithRetry(
+        let response = await this.callLLMWithRetry(
           () => withTimeout(
             this.provider.createMessage({
               model: this.modelId,
@@ -4784,6 +4784,32 @@ TASK / CONVERSATION HISTORY:
         // Update tracking after response
         if (response.usage) {
           this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
+
+        // Optional quality loop for final text-only outputs (no tool calls).
+        const qualityPasses = this.getQualityPassCount();
+        if (!isPlanVerifyStep && qualityPasses > 1 && response.stopReason === 'end_turn') {
+          const hasToolUse = (response.content || []).some((c: any) => c && c.type === 'tool_use');
+          if (!hasToolUse) {
+            const draftText = this.extractTextFromLLMContent(response.content).trim();
+            if (draftText) {
+              const passes: 2 | 3 = qualityPasses === 2 ? 2 : 3;
+              const improved = await this.applyQualityPassesToDraft({
+                passes,
+                contextLabel: `step:${step.id} ${step.description}`,
+                userIntent: `Task: ${this.task.title}\nStep: ${step.description}\n\nUser request/context:\n${this.task.prompt}`,
+                draft: draftText,
+              });
+              const improvedTrimmed = String(improved || '').trim();
+              if (improvedTrimmed && improvedTrimmed !== draftText) {
+                response = {
+                  ...response,
+                  content: [{ type: 'text', text: improvedTrimmed }],
+                  stopReason: 'end_turn',
+                };
+              }
+            }
+          }
         }
 
         // Process response - only stop if we have actual content AND it's end_turn
@@ -5382,6 +5408,192 @@ TASK / CONVERSATION HISTORY:
     }
   }
 
+  private getQualityPassCount(): 1 | 2 | 3 {
+    const configured = this.task.agentConfig?.qualityPasses;
+    if (configured === 2 || configured === 3) return configured;
+    return 1;
+  }
+
+  private extractTextFromLLMContent(content: any[]): string {
+    return (content || [])
+      .filter((c: any) => c && c.type === 'text' && typeof c.text === 'string')
+      .map((c: any) => c.text)
+      .join('\n');
+  }
+
+  private async applyQualityPassesToDraft(opts: {
+    passes: 2 | 3;
+    contextLabel: string;
+    userIntent: string;
+    draft: string;
+  }): Promise<string> {
+    const draft = String(opts.draft || '').trim();
+    if (!draft) return opts.draft;
+
+    const intent = String(opts.userIntent || '').trim().slice(0, 5000);
+
+    const refineOnce = async (): Promise<string> => {
+      try {
+        this.checkBudgets();
+        const response = await this.callLLMWithRetry(
+          () => withTimeout(
+            this.provider.createMessage({
+              model: this.modelId,
+              maxTokens: 1600,
+              system: this.systemPrompt || '',
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    'Improve the draft assistant response to better satisfy the user intent/context.',
+                    '',
+                    'User intent/context:',
+                    intent,
+                    '',
+                    'Draft response:',
+                    draft,
+                    '',
+                    'Output ONLY the revised response text (no critique, no commentary).',
+                  ].join('\n'),
+                },
+              ],
+              signal: this.abortController.signal,
+            }),
+            LLM_TIMEOUT_MS,
+            `Quality refine (${opts.contextLabel})`
+          ),
+          `Quality refine (${opts.contextLabel})`
+        );
+
+        if (response.usage) {
+          this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
+
+        const text = this.extractTextFromLLMContent(response.content).trim();
+        if (!text) return draft;
+        // If the model attempted tool calls (shouldn't happen without tools), fall back to draft.
+        if ((response.content || []).some((c: any) => c && c.type === 'tool_use')) return draft;
+        return text;
+      } catch (error) {
+        console.warn('[TaskExecutor] Quality refine failed, using draft:', error);
+        return draft;
+      }
+    };
+
+    if (opts.passes === 2) {
+      return refineOnce();
+    }
+
+    // 3-pass: critique -> refine
+    let critique = '';
+    try {
+      this.checkBudgets();
+      const critiqueResp = await this.callLLMWithRetry(
+        () => withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 900,
+            system: this.systemPrompt || '',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  'You are doing an internal quality review of a draft assistant response.',
+                  '',
+                  'User intent/context:',
+                  intent,
+                  '',
+                  'Draft response:',
+                  draft,
+                  '',
+                  'Return a concise critique as bullet points under these headings:',
+                  '- Missing/unclear',
+                  '- Incorrect/risky assumptions',
+                  '- Structure/format',
+                  '- Next actions',
+                  '',
+                  'Do NOT rewrite the response yet.',
+                ].join('\n'),
+              },
+            ],
+            signal: this.abortController.signal,
+          }),
+          LLM_TIMEOUT_MS,
+          `Quality critique (${opts.contextLabel})`
+        ),
+        `Quality critique (${opts.contextLabel})`
+      );
+
+      if (critiqueResp.usage) {
+        this.updateTracking(critiqueResp.usage.inputTokens, critiqueResp.usage.outputTokens);
+      }
+
+      critique = this.extractTextFromLLMContent(critiqueResp.content).trim();
+      if ((critiqueResp.content || []).some((c: any) => c && c.type === 'tool_use')) {
+        critique = '';
+      }
+    } catch (error) {
+      console.warn('[TaskExecutor] Quality critique failed, proceeding without critique:', error);
+      critique = '';
+    }
+
+    if (!critique) {
+      return refineOnce();
+    }
+
+    try {
+      this.checkBudgets();
+      const refineResp = await this.callLLMWithRetry(
+        () => withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 1800,
+            system: this.systemPrompt || '',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  'You are improving a draft assistant response using the critique.',
+                  '',
+                  'User intent/context:',
+                  intent,
+                  '',
+                  'Draft response:',
+                  draft,
+                  '',
+                  'Critique:',
+                  critique,
+                  '',
+                  'Write the improved response.',
+                  'Requirements:',
+                  '- Output ONLY the final response text (no critique, no commentary).',
+                  '- Preserve any correct file paths, commands, IDs, and factual details from the draft unless corrected.',
+                  '- Be concise and actionable.',
+                ].join('\n'),
+              },
+            ],
+            signal: this.abortController.signal,
+          }),
+          LLM_TIMEOUT_MS,
+          `Quality refine (${opts.contextLabel})`
+        ),
+        `Quality refine (${opts.contextLabel})`
+      );
+
+      if (refineResp.usage) {
+        this.updateTracking(refineResp.usage.inputTokens, refineResp.usage.outputTokens);
+      }
+
+      const text = this.extractTextFromLLMContent(refineResp.content).trim();
+      if (!text) return draft;
+      if ((refineResp.content || []).some((c: any) => c && c.type === 'tool_use')) return draft;
+      return text;
+    } catch (error) {
+      console.warn('[TaskExecutor] Quality refine failed, using draft:', error);
+      return draft;
+    }
+  }
+
   private extractHtmlFromText(text: string): string | null {
     if (!text) return null;
     const fenceMatch = text.match(/```html([\s\S]*?)```/i);
@@ -5813,6 +6025,32 @@ TASK / CONVERSATION HISTORY:
         // Update tracking after response
         if (response.usage) {
           this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+        }
+
+        // Optional quality loop for final text-only outputs (no tool calls).
+        const qualityPasses = this.getQualityPassCount();
+        if (qualityPasses > 1 && response.stopReason === 'end_turn') {
+          const hasToolUse = (response.content || []).some((c: any) => c && c.type === 'tool_use');
+          if (!hasToolUse) {
+            const draftText = this.extractTextFromLLMContent(response.content).trim();
+            if (draftText) {
+              const passes: 2 | 3 = qualityPasses === 2 ? 2 : 3;
+              const improved = await this.applyQualityPassesToDraft({
+                passes,
+                contextLabel: `follow-up ${iterationCount}`,
+                userIntent: `User message:\n${messageWithContext}`,
+                draft: draftText,
+              });
+              const improvedTrimmed = String(improved || '').trim();
+              if (improvedTrimmed && improvedTrimmed !== draftText) {
+                response = {
+                  ...response,
+                  content: [{ type: 'text', text: improvedTrimmed }],
+                  stopReason: 'end_turn',
+                };
+              }
+            }
+          }
         }
 
         // Process response - don't immediately stop, check for text response first
