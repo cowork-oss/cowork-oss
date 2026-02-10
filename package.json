@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.57",
+  "version": "0.3.58",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -40,8 +40,8 @@
   ],
   "private": false,
   "scripts": {
-    "setup": "npm install --no-audit --no-fund && sh scripts/setup_native_retry.sh",
-    "setup:native": "sh scripts/setup_native_retry.sh",
+    "setup": "npm install --no-audit --no-fund && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-3}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
+    "setup:native": "sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-3}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",

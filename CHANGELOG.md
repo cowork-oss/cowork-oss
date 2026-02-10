@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.58] - 2026-02-10
+
+### Fixed
+- macOS `npm run setup` could still fail with `Killed: 9` if the native setup retry wrapper itself was SIGKILL’d immediately after install; setup now performs outer retries (with backoff) around native setup so a transient SIGKILL doesn’t require manual re-runs.
+
 ## [0.3.57] - 2026-02-10
 
 ### Fixed
