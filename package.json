@@ -57,7 +57,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.72.1",
+    "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-bedrock": "^3.980.0",
     "@aws-sdk/client-bedrock-runtime": "^3.980.0",
     "@google/generative-ai": "^0.24.1",
