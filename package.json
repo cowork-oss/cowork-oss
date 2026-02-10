@@ -41,7 +41,7 @@
   "private": false,
   "scripts": {
     "setup": "npm install && npm run setup:native",
-    "setup:native": "node node_modules/electron/install.js && ./node_modules/.bin/electron-rebuild -f -w better-sqlite3",
+    "setup:native": "node scripts/setup_native.mjs",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",

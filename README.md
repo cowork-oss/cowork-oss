@@ -60,6 +60,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - Node.js 18+ and npm
 - macOS 12 (Monterey) or later
 - One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
+- Xcode Command Line Tools (needed to build `better-sqlite3` for Electron): `xcode-select --install`
 
 ```bash
 # Clone the repository
@@ -74,6 +75,21 @@ npm run dev
 
 # Configure your API credentials in Settings (gear icon)
 ```
+
+#### Troubleshooting: macOS "Killed: 9" during setup
+
+If `npm run setup` fails with `Killed: 9`, macOS is terminating a process (often due to memory pressure) during Electron download or the `better-sqlite3` rebuild.
+
+Try:
+
+```bash
+# Reduce native build parallelism (lower peak memory)
+COWORK_SETUP_JOBS=1 npm run setup:native
+```
+
+Also verify:
+- You did not copy a different `package.json` into the repo (it must match `package-lock.json`).
+- Xcode CLT is installed: `xcode-select -p`
 
 #### Build for Production
 
