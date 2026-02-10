@@ -917,6 +917,7 @@ export class AgentDaemon extends EventEmitter {
       step_completed: 'observation',
       step_failed: 'error',
       assistant_message: 'observation',
+      user_feedback: 'decision',
       plan_created: 'decision',
       plan_revised: 'decision',
       error: 'error',

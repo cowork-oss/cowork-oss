@@ -125,6 +125,7 @@ export type EventType =
   | 'follow_up_failed'
   | 'tool_warning'
   | 'user_message'
+  | 'user_feedback'
   | 'command_output'
   // LLM usage tracking (tokens/cost)
   | 'llm_usage'
