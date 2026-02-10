@@ -112,6 +112,19 @@ export class MessageRouter {
     contextType?: 'dm' | 'group';
   }> = new Map();
 
+  // Track feedback prompts (inline keyboards) so callback presses can be validated and routed
+  // to the correct task/session (and guarded against stale keyboards after restarts).
+  private pendingFeedbackRequests: Map<string, {
+    taskId: string;
+    sessionId: string;
+    chatId: string;
+    channelType: ChannelType;
+    requestingUserId?: string;
+    requestingUserName?: string;
+    contextType: 'dm' | 'group';
+    expiresAt: number;
+  }> = new Map();
+
   // Track inline-keyboard messages that change state (workspace/provider/model selection).
   // Prevents group hijack and accidental presses on stale keyboards (after restarts).
   private pendingInlineActionGuards: Map<string, {
@@ -137,6 +150,8 @@ export class MessageRouter {
 
   private static readonly STREAMING_UPDATE_DEBOUNCE_MS = 1200;
   private static readonly INLINE_ACTION_GUARD_TTL_MS = 10 * 60 * 1000;
+  private static readonly FEEDBACK_GUARD_TTL_MS = 72 * 60 * 60 * 1000;
+  private static readonly PENDING_FEEDBACK_TTL_MS = 10 * 60 * 1000;
 
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
     this.db = db;
@@ -473,6 +488,71 @@ export class MessageRouter {
         this.pendingInlineActionGuards.delete(key);
       }
     }, MessageRouter.INLINE_ACTION_GUARD_TTL_MS + 500);
+  }
+
+  private registerFeedbackRequest(params: {
+    taskId: string;
+    sessionId: string;
+    channelType: ChannelType;
+    chatId: string;
+    messageId: string;
+    requestingUserId?: string;
+    requestingUserName?: string;
+    contextType: 'dm' | 'group';
+  }): void {
+    const expiresAt = Date.now() + MessageRouter.FEEDBACK_GUARD_TTL_MS;
+    const key = this.makeInlineActionGuardKey(params.channelType, params.chatId, params.messageId);
+    this.pendingFeedbackRequests.set(key, { ...params, expiresAt });
+
+    // Best-effort cleanup.
+    setTimeout(() => {
+      const existing = this.pendingFeedbackRequests.get(key);
+      if (existing && existing.expiresAt === expiresAt) {
+        this.pendingFeedbackRequests.delete(key);
+      }
+    }, MessageRouter.FEEDBACK_GUARD_TTL_MS + 500);
+  }
+
+  private buildFeedbackKeyboard(): InlineKeyboardButton[][] {
+    return [
+      [
+        { text: '✅ Approve', callbackData: 'feedback:approve' },
+        { text: '✏️ Edit', callbackData: 'feedback:edit' },
+      ],
+      [
+        { text: '❌ Reject', callbackData: 'feedback:reject' },
+        { text: '🔄 Another', callbackData: 'feedback:next' },
+      ],
+    ];
+  }
+
+  private logUserFeedback(taskId: string, data: {
+    decision: 'approved' | 'rejected' | 'edit' | 'next';
+    reason?: string;
+    source: 'inline' | 'command' | 'message';
+    channelType: ChannelType;
+    userId?: string;
+    userName?: string;
+  }): void {
+    if (!this.agentDaemon) return;
+
+    const task = this.taskRepo.findById(taskId);
+    const agentRoleId = task?.assignedAgentRoleId || null;
+
+    try {
+      this.agentDaemon.logEvent(taskId, 'user_feedback', {
+        decision: data.decision,
+        ...(typeof data.reason === 'string' && data.reason.trim().length > 0 ? { reason: data.reason.trim() } : {}),
+        source: data.source,
+        channel: data.channelType,
+        userId: data.userId,
+        userName: data.userName,
+        taskTitle: task?.title,
+        agentRoleId,
+      });
+    } catch (error) {
+      console.warn('[Router] Failed to log user_feedback event:', error);
+    }
   }
 
   private resolveTaskRequesterFromSessionContext(session: { context?: unknown }): {
@@ -1090,6 +1170,72 @@ export class MessageRouter {
 
     const session = this.sessionRepo.findById(sessionId);
     const ctx = session?.context as any;
+    const pendingFeedback = ctx?.pendingFeedback as any;
+
+    if (pendingFeedback && typeof pendingFeedback === 'object') {
+      const kind = typeof pendingFeedback.kind === 'string' ? pendingFeedback.kind : '';
+      const taskId = typeof pendingFeedback.taskId === 'string' ? pendingFeedback.taskId : '';
+      const createdAt = typeof pendingFeedback.createdAt === 'number' ? pendingFeedback.createdAt : 0;
+      const requestingUserId = typeof pendingFeedback.requestingUserId === 'string' ? pendingFeedback.requestingUserId : '';
+      const ageMs = Date.now() - createdAt;
+
+      if (!kind || !taskId || ageMs > MessageRouter.PENDING_FEEDBACK_TTL_MS) {
+        this.sessionManager.updateSessionContext(sessionId, { pendingFeedback: undefined });
+      } else if (requestingUserId && requestingUserId !== message.userId) {
+        // In group chats, only the user who initiated the feedback flow can continue it.
+        // For DMs, this is always the same user.
+      } else if (kind === 'reject_reason') {
+        this.sessionManager.updateSessionContext(sessionId, { pendingFeedback: undefined });
+
+        const reason = text.trim();
+        this.logUserFeedback(taskId, {
+          decision: 'rejected',
+          ...(reason.toLowerCase() !== 'skip' ? { reason } : {}),
+          source: 'message',
+          userId: message.userId,
+          userName: message.userName,
+          channelType: adapter.type,
+        });
+
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: reason.toLowerCase() === 'skip' ? '✅ Logged: Rejected' : '✅ Logged: Rejected (with reason)',
+          replyTo: message.messageId,
+        });
+        return;
+      } else if (kind === 'edit') {
+        this.sessionManager.updateSessionContext(sessionId, { pendingFeedback: undefined });
+
+        const instructions = text.trim();
+        if (instructions.toLowerCase() === 'skip') {
+          await adapter.sendMessage({
+            chatId: message.chatId,
+            text: '✅ Edit cancelled.',
+            replyTo: message.messageId,
+          });
+          return;
+        }
+
+        this.logUserFeedback(taskId, {
+          decision: 'edit',
+          reason: instructions,
+          source: 'message',
+          userId: message.userId,
+          userName: message.userName,
+          channelType: adapter.type,
+        });
+
+        // Rewrite the next user message into a structured follow-up for the agent.
+        message.text = [
+          '✏️ USER EDIT REQUEST',
+          '',
+          'Please revise your previous output based on the user instructions below.',
+          '',
+          'User instructions:',
+          instructions,
+        ].join('\n');
+      }
+    }
     const pendingSelection = ctx?.pendingSelection as any;
     const PENDING_SELECTION_TTL_MS = 2 * 60 * 1000;
 
@@ -1422,6 +1568,10 @@ export class MessageRouter {
       case '/no':
       case '/n':
         await this.handleDenyCommand(adapter, message, sessionId, args);
+        break;
+
+      case '/feedback':
+        await this.handleFeedbackCommand(adapter, message, sessionId, args, securityContext);
         break;
 
       case '/queue':
@@ -4124,6 +4274,12 @@ export class MessageRouter {
     this.clearStreamingUpdate(taskId);
 
     try {
+      const task = this.taskRepo.findById(taskId);
+      const taskGatewayContext = task?.agentConfig?.gatewayContext;
+      const contextType: 'dm' | 'group' =
+        taskGatewayContext === 'group' || taskGatewayContext === 'public' ? 'group' : 'dm';
+      let completionMessageId: string | null = null;
+
       // WhatsApp/iMessage-optimized completion message (no follow-up hint)
       const isSimpleMessaging = pending.adapter.type === 'whatsapp' || pending.adapter.type === 'imessage';
       const msgCtx = this.getMessageContext();
@@ -4136,6 +4292,7 @@ export class MessageRouter {
       if (pending.adapter instanceof TelegramAdapter) {
         // Finalize the streaming draft with final message
         const finalizedMessageId = await pending.adapter.finalizeDraftStream(pending.chatId, message);
+        completionMessageId = finalizedMessageId || null;
         this.telegramDraftStreamTouchedTasks.delete(taskId);
 
         // Log outgoing message so transcript-based features can see assistant output.
@@ -4163,14 +4320,23 @@ export class MessageRouter {
         // Split long messages (Telegram has 4096 char limit, WhatsApp/iMessage ~65k but keep it reasonable)
         const maxLen = isSimpleMessaging ? 4000 : 4000;
         const chunks = this.splitMessage(normalizedMessage, maxLen);
+        let lastMessageId = '';
         for (const chunk of chunks) {
-          await this.sendMessage(pending.adapter.type, {
+          lastMessageId = await this.sendMessage(pending.adapter.type, {
             chatId: pending.chatId,
             text: chunk,
             parseMode: 'markdown',
           });
         }
+        completionMessageId = lastMessageId || null;
       }
+
+      await this.maybeSendTaskFeedbackControls({
+        taskId,
+        pending,
+        completionMessageId,
+        contextType,
+      });
 
       // Send artifacts if any were created
       await this.sendTaskArtifacts(taskId, pending.adapter, pending.chatId);
@@ -4181,6 +4347,81 @@ export class MessageRouter {
       console.error('Error sending task completion:', error);
     } finally {
       this.pendingTaskResponses.delete(taskId);
+    }
+  }
+
+  private async maybeSendTaskFeedbackControls(opts: {
+    taskId: string;
+    pending: {
+      adapter: ChannelAdapter;
+      chatId: string;
+      sessionId: string;
+      requestingUserId?: string;
+      requestingUserName?: string;
+      lastChannelMessageId?: string;
+    };
+    completionMessageId: string | null;
+    contextType: 'dm' | 'group';
+  }): Promise<void> {
+    if (opts.contextType !== 'dm') return;
+
+    const adapter = opts.pending.adapter;
+    const channelType = adapter.type;
+
+    // WhatsApp/iMessage don't support inline keyboards; provide a text fallback.
+    if (channelType === 'whatsapp' || channelType === 'imessage') {
+      await adapter.sendMessage({
+        chatId: opts.pending.chatId,
+        text: 'Feedback: reply `/feedback approve`, `/feedback reject [reason]`, `/feedback edit`, or `/feedback next`.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const keyboard = this.buildFeedbackKeyboard();
+
+    // Prefer attaching buttons to the completion message if the adapter supports editing reply markup.
+    if (opts.completionMessageId && adapter.editMessageWithKeyboard) {
+      try {
+        await adapter.editMessageWithKeyboard(opts.pending.chatId, opts.completionMessageId, undefined, keyboard);
+        this.registerFeedbackRequest({
+          taskId: opts.taskId,
+          sessionId: opts.pending.sessionId,
+          channelType,
+          chatId: opts.pending.chatId,
+          messageId: opts.completionMessageId,
+          requestingUserId: opts.pending.requestingUserId,
+          requestingUserName: opts.pending.requestingUserName,
+          contextType: opts.contextType,
+        });
+        return;
+      } catch (error) {
+        console.warn('[Router] Failed to attach feedback keyboard to completion message:', error);
+      }
+    }
+
+    // Fallback: send a separate feedback prompt with buttons.
+    try {
+      const messageId = await this.sendMessage(channelType, {
+        chatId: opts.pending.chatId,
+        text: 'Was this helpful?',
+        parseMode: 'markdown',
+        inlineKeyboard: keyboard,
+      });
+      if (messageId) {
+        this.registerFeedbackRequest({
+          taskId: opts.taskId,
+          sessionId: opts.pending.sessionId,
+          channelType,
+          chatId: opts.pending.chatId,
+          messageId,
+          requestingUserId: opts.pending.requestingUserId,
+          requestingUserName: opts.pending.requestingUserName,
+          contextType: opts.contextType,
+        });
+      }
+    } catch (error) {
+      console.warn('[Router] Failed to send feedback prompt:', error);
     }
   }
 
@@ -4442,6 +4683,202 @@ export class MessageRouter {
     args: string[]
   ): Promise<void> {
     await this.handleApprovalTextCommand(adapter, message, sessionId, args, false);
+  }
+
+  private async sendFollowupToTaskFromGateway(opts: {
+    taskId: string;
+    adapter: ChannelAdapter;
+    chatId: string;
+    sessionId: string;
+    requestingUserId?: string;
+    requestingUserName?: string;
+    lastChannelMessageId?: string;
+    text: string;
+    statusText?: string;
+  }): Promise<void> {
+    if (!this.agentDaemon) {
+      await opts.adapter.sendMessage({
+        chatId: opts.chatId,
+        text: this.getUiCopy('agentUnavailable'),
+      });
+      return;
+    }
+
+    const trimmed = (opts.text || '').trim();
+    if (!trimmed) return;
+
+    // Ensure responses to this follow-up route back to the same chat.
+    this.pendingTaskResponses.set(opts.taskId, {
+      adapter: opts.adapter,
+      chatId: opts.chatId,
+      sessionId: opts.sessionId,
+      requestingUserId: opts.requestingUserId,
+      requestingUserName: opts.requestingUserName,
+      lastChannelMessageId: opts.lastChannelMessageId,
+    });
+
+    // Enable Telegram draft streaming for the follow-up thread.
+    if (opts.adapter instanceof TelegramAdapter) {
+      try {
+        await opts.adapter.startDraftStream(opts.chatId);
+      } catch {
+        // ignore
+      }
+    }
+
+    if (opts.statusText) {
+      await opts.adapter.sendMessage({
+        chatId: opts.chatId,
+        text: opts.statusText,
+      });
+    }
+
+    await this.agentDaemon.sendMessage(opts.taskId, trimmed);
+  }
+
+  private async handleFeedbackCommand(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    sessionId: string,
+    args: string[],
+    securityContext?: { contextType?: 'dm' | 'group' }
+  ): Promise<void> {
+    const session = this.sessionRepo.findById(sessionId);
+    const taskId = session?.taskId;
+    if (!taskId) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: 'No active task in this chat. Start a task first, then run `/feedback`.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    const contextType = securityContext?.contextType ?? (message.isGroup ? 'group' : 'dm');
+    if (contextType === 'group') {
+      const requester = this.resolveTaskRequesterFromSessionContext(session!);
+      if (requester.requestingUserId && requester.requestingUserId !== message.userId) {
+        const who = requester.requestingUserName ? `*${requester.requestingUserName}*` : 'the original requester';
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: `⚠️ Only ${who} can submit feedback for this task in a group chat.`,
+          parseMode: 'markdown',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+    }
+
+    const actionRaw = (args[0] || '').trim().toLowerCase();
+    const action = actionRaw === 'good' ? 'approve' : actionRaw === 'bad' ? 'reject' : actionRaw;
+    const rest = args.slice(1).join(' ').trim();
+
+    if (!action || !['approve', 'reject', 'edit', 'next', 'another'].includes(action)) {
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text:
+          'Usage:\n' +
+          '- `/feedback approve`\n' +
+          '- `/feedback reject [reason]`\n' +
+          '- `/feedback edit` (then reply with instructions)\n' +
+          '- `/feedback next`',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (action === 'approve') {
+      this.logUserFeedback(taskId, {
+        decision: 'approved',
+        source: 'command',
+        channelType: adapter.type,
+        userId: message.userId,
+        userName: message.userName,
+      });
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '✅ Logged: Approved',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (action === 'reject') {
+      if (rest) {
+        this.logUserFeedback(taskId, {
+          decision: 'rejected',
+          reason: rest,
+          source: 'command',
+          channelType: adapter.type,
+          userId: message.userId,
+          userName: message.userName,
+        });
+        await adapter.sendMessage({
+          chatId: message.chatId,
+          text: '✅ Logged: Rejected (with reason)',
+          replyTo: message.messageId,
+        });
+        return;
+      }
+
+      this.sessionManager.updateSessionContext(sessionId, {
+        pendingFeedback: {
+          kind: 'reject_reason',
+          taskId,
+          createdAt: Date.now(),
+          requestingUserId: message.userId,
+        },
+      });
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '❌ Rejected. Reply with a one-line reason, or reply `skip`.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    if (action === 'edit') {
+      this.sessionManager.updateSessionContext(sessionId, {
+        pendingFeedback: {
+          kind: 'edit',
+          taskId,
+          createdAt: Date.now(),
+          requestingUserId: message.userId,
+        },
+      });
+      await adapter.sendMessage({
+        chatId: message.chatId,
+        text: '✏️ Reply with the changes you want (one message), or reply `skip` to cancel.',
+        parseMode: 'markdown',
+        replyTo: message.messageId,
+      });
+      return;
+    }
+
+    // next / another
+    this.logUserFeedback(taskId, {
+      decision: 'next',
+      source: 'command',
+      channelType: adapter.type,
+      userId: message.userId,
+      userName: message.userName,
+    });
+
+    const requester = this.resolveTaskRequesterFromSessionContext(session!);
+    await this.sendFollowupToTaskFromGateway({
+      taskId,
+      adapter,
+      chatId: message.chatId,
+      sessionId,
+      requestingUserId: requester.requestingUserId ?? message.userId,
+      requestingUserName: requester.requestingUserName ?? message.userName,
+      lastChannelMessageId: requester.lastChannelMessageId ?? message.messageId,
+      statusText: '🔄 Generating another option...',
+      text: 'Please propose another alternative (different approach). Keep it concrete, and include 2-3 options if appropriate.',
+    });
   }
 
   private formatPendingApprovalChoices(
@@ -5433,6 +5870,10 @@ Node.js: \`${nodeVersion}\`
           await this.handleApprovalCallback(adapter, query, session.id, param, false);
           break;
 
+        case 'feedback':
+          await this.handleFeedbackCallback(adapter, query, session.id, param);
+          break;
+
         default:
           console.log(`Unknown callback action: ${action}`);
       }
@@ -5656,6 +6097,139 @@ Node.js: \`${nodeVersion}\`
         text: this.getUiCopy('responseFailed'),
       });
     }
+  }
+
+  private async handleFeedbackCallback(
+    adapter: ChannelAdapter,
+    query: CallbackQuery,
+    sessionId: string,
+    param: string
+  ): Promise<void> {
+    const key = this.makeInlineActionGuardKey(adapter.type, query.chatId, query.messageId);
+    const req = this.pendingFeedbackRequests.get(key);
+
+    if (!req || req.sessionId !== sessionId || req.chatId !== query.chatId) {
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: '⌛ This feedback prompt has expired. Use `/feedback approve|reject|edit|next`.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    if (Date.now() > req.expiresAt) {
+      this.pendingFeedbackRequests.delete(key);
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: '⌛ This feedback prompt has expired. Use `/feedback approve|reject|edit|next`.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    // Group chat safety: only the user who triggered the task can submit feedback.
+    if (req.contextType === 'group' && req.requestingUserId && req.requestingUserId !== query.userId) {
+      const who = req.requestingUserName ? `*${req.requestingUserName}*` : 'the original requester';
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: `⚠️ Only ${who} can submit feedback for this task in a group chat.`,
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    const action = (param || '').trim().toLowerCase();
+    const taskId = req.taskId;
+
+    // Remove keyboard to prevent double-taps; text remains unchanged.
+    if (adapter.editMessageWithKeyboard) {
+      try {
+        await adapter.editMessageWithKeyboard(query.chatId, query.messageId, undefined, []);
+      } catch {
+        // ignore
+      }
+    }
+
+    if (action === 'approve') {
+      this.pendingFeedbackRequests.delete(key);
+      this.logUserFeedback(taskId, {
+        decision: 'approved',
+        source: 'inline',
+        channelType: adapter.type,
+        userId: query.userId,
+        userName: query.userName,
+      });
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: '✅ Logged: Approved',
+      });
+      return;
+    }
+
+    if (action === 'reject') {
+      this.pendingFeedbackRequests.delete(key);
+      this.sessionManager.updateSessionContext(req.sessionId, {
+        pendingFeedback: {
+          kind: 'reject_reason',
+          taskId,
+          createdAt: Date.now(),
+          requestingUserId: query.userId,
+        },
+      });
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: '❌ Rejected. Reply with a one-line reason, or reply `skip`.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    if (action === 'edit') {
+      this.pendingFeedbackRequests.delete(key);
+      this.sessionManager.updateSessionContext(req.sessionId, {
+        pendingFeedback: {
+          kind: 'edit',
+          taskId,
+          createdAt: Date.now(),
+          requestingUserId: query.userId,
+        },
+      });
+      await adapter.sendMessage({
+        chatId: query.chatId,
+        text: '✏️ Reply with the changes you want (one message), or reply `skip` to cancel.',
+        parseMode: 'markdown',
+      });
+      return;
+    }
+
+    if (action === 'next') {
+      this.pendingFeedbackRequests.delete(key);
+      this.logUserFeedback(taskId, {
+        decision: 'next',
+        source: 'inline',
+        channelType: adapter.type,
+        userId: query.userId,
+        userName: query.userName,
+      });
+
+      await this.sendFollowupToTaskFromGateway({
+        taskId,
+        adapter,
+        chatId: req.chatId,
+        sessionId: req.sessionId,
+        requestingUserId: req.requestingUserId ?? query.userId,
+        requestingUserName: req.requestingUserName ?? query.userName,
+        lastChannelMessageId: query.messageId,
+        statusText: '🔄 Generating another option...',
+        text: 'Please propose another alternative (different approach). Keep it concrete, and include 2-3 options if appropriate.',
+      });
+      return;
+    }
+
+    await adapter.sendMessage({
+      chatId: query.chatId,
+      text: 'Unknown feedback action.',
+    });
   }
 
   /**
