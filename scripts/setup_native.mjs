@@ -21,6 +21,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+const BETTER_SQLITE3_VERSION = "12.6.2";
+
 function run(cmd, args, opts = {}) {
   const pretty = [cmd, ...(args || [])].join(" ");
   console.log(`\n[cowork] $ ${pretty}`);
@@ -94,6 +96,35 @@ function testBetterSqlite3InElectron(env) {
   return res;
 }
 
+function ensureBetterSqlite3(env) {
+  const pkgPath = path.join(
+    process.cwd(),
+    "node_modules",
+    "better-sqlite3",
+    "package.json"
+  );
+
+  if (fs.existsSync(pkgPath)) {
+    return { status: 0, signal: null };
+  }
+
+  console.log(
+    `[cowork] better-sqlite3 is missing; installing ${BETTER_SQLITE3_VERSION}...`
+  );
+  return run(
+    "npm",
+    [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--ignore-scripts=false",
+      "--no-save",
+      `better-sqlite3@${BETTER_SQLITE3_VERSION}`,
+    ],
+    { env }
+  );
+}
+
 function fail(res, context) {
   const sig = res.signal ? ` (signal ${res.signal})` : "";
   const code =
@@ -151,6 +182,10 @@ function main() {
     });
     if (installRes.status !== 0) return installRes;
 
+    // If optional dependency install was skipped/failed earlier, recover here.
+    const ensureBetterRes = ensureBetterSqlite3(env);
+    if (ensureBetterRes.status !== 0) return ensureBetterRes;
+
     const electronVersion = getElectronVersion();
     const electronAbi = getElectronModulesAbi(env);
 
@@ -193,15 +228,23 @@ function main() {
     }
 
     // 3) Fallback: electron-rebuild (most expensive). Keep it sequential and only rebuild the one module.
+    const electronRebuildCli = path.join(
+      "node_modules",
+      "@electron",
+      "rebuild",
+      "lib",
+      "cli.js"
+    );
+    if (!fs.existsSync(electronRebuildCli)) {
+      console.log(
+        "[cowork] @electron/rebuild is not installed; skipping fallback rebuild."
+      );
+      return testBetterSqlite3InElectron(env);
+    }
+
     const rebuildRes = run(
       process.execPath,
-      [
-        "node_modules/@electron/rebuild/lib/cli.js",
-        "-f",
-        "--only",
-        "better-sqlite3",
-        "--sequential",
-      ],
+      [electronRebuildCli, "-f", "--only", "better-sqlite3", "--sequential"],
       { env }
     );
     if (rebuildRes.status !== 0) return rebuildRes;

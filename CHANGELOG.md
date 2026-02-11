@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.61] - 2026-02-11
+
+### Fixed
+- npm installs could fail with `sh: electron-rebuild: command not found` because `postinstall` depended on a tool not available in all install contexts.
+- `postinstall` now uses a best-effort native setup driver and never fails the overall npm install.
+- `better-sqlite3` is now an optional dependency so transient native build failures no longer abort `npm install`; `npm run setup` now ensures it is installed before rebuild.
+
 ## [0.3.60] - 2026-02-11
 
 ### Fixed

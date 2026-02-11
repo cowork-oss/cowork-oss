@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.60",
+  "version": "0.3.61",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -43,7 +43,7 @@
     "setup": "npm install --no-audit --no-fund && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
     "setup:native": "sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
-    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "node scripts/postinstall.mjs",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && cross-env NODE_ENV=development electron .",
@@ -71,7 +71,6 @@
     "@slack/bolt": "^4.6.0",
     "@types/jszip": "^3.4.1",
     "@whiskeysockets/baileys": "6.7.16",
-    "better-sqlite3": "12.6.2",
     "botbuilder": "^4.23.3",
     "chokidar": "^5.0.0",
     "discord.js": "^14.25.1",
@@ -99,6 +98,9 @@
     "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
+  "optionalDependencies": {
+    "better-sqlite3": "12.6.2"
+  },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.8",
@@ -118,7 +120,6 @@
     "cross-env": "^10.1.0",
     "electron": "^40.1.0",
     "electron-builder": "^26.7.0",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
     "typescript": "^5.7.3",
