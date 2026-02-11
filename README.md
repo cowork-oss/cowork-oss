@@ -171,6 +171,12 @@ npx coworkd-node --print-control-plane-token
 
 Keep this terminal open. It runs the server and prints your Control Plane token.
 
+If you see `sh: 1: tsc: not found` right after `npx coworkd-node`, you are on an older broken npm publish. Upgrade and retry:
+
+```bash
+npm install cowork-os@latest --no-audit --no-fund
+```
+
 3. On your local machine (second terminal), create the SSH tunnel:
 
 ```bash

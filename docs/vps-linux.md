@@ -90,6 +90,9 @@ This quick start is great for first run/testing. For always-on production, conti
   Node version is too old. Install Node 22 and retry step 3.
 - `npm ERR! EACCES` on `npm install -g ...`:
   This guide intentionally uses local install (`npm install` + `npx coworkd-node`) so you do not need global npm permissions.
+- `sh: 1: tsc: not found` after `npx coworkd-node`:
+  You are likely on an older broken npm publish that missed daemon build artifacts. Upgrade and retry:
+  `npm install cowork-os@latest --no-audit --no-fund`
 
 ## Option A: Docker (Headless Electron)
 
