@@ -128,23 +128,23 @@ export interface LLMProvider {
 
 /**
  * Available AI models with their IDs for each provider
- * Note: Bedrock uses inference profile IDs (us. prefix) for newer models
+ * Note: Bedrock models are kept in provider ID form first, then resolved via Bedrock provider mapping when needed.
  * Note: Ollama models are dynamic and fetched from the server
  */
 export const MODELS = {
   'opus-4-5': {
     anthropic: 'claude-opus-4-5-20251101',
-    bedrock: 'us.anthropic.claude-opus-4-5-20251101-v1:0',
+    bedrock: 'anthropic.claude-opus-4-5-20251101',
     displayName: 'Opus 4.5',
   },
   'sonnet-4-5': {
     anthropic: 'claude-sonnet-4-5-20250514',
-    bedrock: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+    bedrock: 'anthropic.claude-sonnet-4-5-20250514',
     displayName: 'Sonnet 4.5',
   },
   'haiku-4-5': {
     anthropic: 'claude-haiku-4-5-20250514',
-    bedrock: 'us.anthropic.claude-haiku-4-5-20250514-v1:0',
+    bedrock: 'anthropic.claude-haiku-4-5-20250514',
     displayName: 'Haiku 4.5',
   },
   'sonnet-4': {

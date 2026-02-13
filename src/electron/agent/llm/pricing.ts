@@ -16,6 +16,7 @@ export interface ModelPricing {
  */
 export const MODEL_PRICING: Record<string, ModelPricing> = {
   // Anthropic Claude models
+  'claude-opus-4-5-20251101': { inputPer1M: 15.00, outputPer1M: 75.00 },
   'claude-opus-4-5-20250101': { inputPer1M: 15.00, outputPer1M: 75.00 },
   'claude-sonnet-4-5-20250514': { inputPer1M: 3.00, outputPer1M: 15.00 },
   'claude-sonnet-4-20250514': { inputPer1M: 3.00, outputPer1M: 15.00 },
@@ -34,7 +35,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'anthropic.claude-3-sonnet-20240229-v1:0': { inputPer1M: 3.00, outputPer1M: 15.00 },
   'anthropic.claude-3-haiku-20240307-v1:0': { inputPer1M: 0.25, outputPer1M: 1.25 },
   'us.anthropic.claude-opus-4-5-20251101-v1:0': { inputPer1M: 15.00, outputPer1M: 75.00 },
+  'anthropic.claude-opus-4-5-20251101': { inputPer1M: 15.00, outputPer1M: 75.00 },
+  'anthropic.claude-opus-4-5-20250514': { inputPer1M: 15.00, outputPer1M: 75.00 },
   'us.anthropic.claude-sonnet-4-5-20250514-v1:0': { inputPer1M: 3.00, outputPer1M: 15.00 },
+  'anthropic.claude-sonnet-4-5-20250514': { inputPer1M: 3.00, outputPer1M: 15.00 },
   'us.anthropic.claude-sonnet-4-20250514-v1:0': { inputPer1M: 3.00, outputPer1M: 15.00 },
 
   // Google Gemini models (prices may vary, free tier has limits)

@@ -1151,7 +1151,7 @@ export class DatabaseManager {
           displayName: 'Opus 4.5',
           description: 'Most capable for complex work',
           anthropicModelId: 'claude-opus-4-5-20250514',
-          bedrockModelId: 'us.anthropic.claude-opus-4-5-20250514-v1:0',
+          bedrockModelId: 'anthropic.claude-opus-4-5-20250514',
           sortOrder: 1,
         },
         {
@@ -1160,7 +1160,7 @@ export class DatabaseManager {
           displayName: 'Sonnet 4.5',
           description: 'Best for everyday tasks',
           anthropicModelId: 'claude-sonnet-4-5-20250514',
-          bedrockModelId: 'us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+          bedrockModelId: 'anthropic.claude-sonnet-4-5-20250514',
           sortOrder: 2,
         },
         {
@@ -1169,7 +1169,7 @@ export class DatabaseManager {
           displayName: 'Haiku 4.5',
           description: 'Fastest for quick answers',
           anthropicModelId: 'claude-haiku-4-5-20250514',
-          bedrockModelId: 'us.anthropic.claude-haiku-4-5-20250514-v1:0',
+          bedrockModelId: 'anthropic.claude-haiku-4-5-20250514',
           sortOrder: 3,
         },
       ];
