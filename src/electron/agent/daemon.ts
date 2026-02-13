@@ -16,7 +16,7 @@ import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
 import { extractMentionedRoles } from '../agents/mentions';
-import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole } from '../../shared/types';
+import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole, TEMP_WORKSPACE_ID } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -1814,6 +1814,19 @@ export class AgentDaemon extends EventEmitter {
    */
   getWorkspaceByPath(path: string): Workspace | undefined {
     return this.workspaceRepo.findByPath(path);
+  }
+
+  /**
+   * Get the most recently used non-temporary workspace, if any.
+   */
+  getMostRecentNonTempWorkspace(): Workspace | undefined {
+    const workspaces = this.workspaceRepo.findAll();
+    return workspaces.find((workspace) =>
+      workspace.id !== TEMP_WORKSPACE_ID &&
+      !workspace.isTemp &&
+      typeof workspace.path === 'string' &&
+      workspace.path.trim().length > 0
+    );
   }
 
   /**
