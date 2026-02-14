@@ -31,19 +31,17 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **8 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
 | **6 Cloud Storage** | Notion, Box, OneDrive, Google Workspace (Drive/Gmail/Calendar), Dropbox, SharePoint |
 | **Voice Calls** | Outbound phone calls via ElevenLabs Agents |
-| **Agentic Tribe** | Agent collaboration through shared checklists, coordinated runs, and agentic tool-calling |
+| **Agent Teams** | Multi-agent collaboration with shared checklists and coordinated runs |
 | **Workspace Kit** | Workspace `.cowork/` kit (projects, access rules, context injection, per-workspace settings) |
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.86
+### What’s new in 0.3.73
 
-- **Agent execution reliability**: task execution now emits long-running tool heartbeats, improves recovery behavior, and adds shell-permission preflight prompts when command execution is required.
-- **Safer shell automation**: `run_command` now supports single-approval bundles for safe command sequences and redacts sensitive output patterns (seed phrases/private keys).
-- **Canvas + Control Plane expansion**: added ACP delegation endpoints plus new canvas checkpoint/list/restore APIs across control-plane, IPC, and tool surfaces.
-- **Gateway + UX upgrades**: channel defaults now support default/allowed agent-role routing, plus renderer improvements for Talk Mode, task activity signaling, and language preferences (`en`, `ja`, `zh`).
-- **SkillHub registry + docs/mobile additions**: static GitHub-backed skill catalog support, bundled registry snapshots, VitePress docs scaffolding, and mobile companion app scaffolds.
-- **Install simulation safety**: you can now disable OS keychain usage in isolated test environments with `COWORK_DISABLE_OS_KEYCHAIN=1` to avoid macOS keychain reset prompts.
+- **Release and install reliability**: fixed publish-blocking type/lint regressions so npm desktop/client releases can be published reliably.
+- **Task config validation**: stricter `personalityId` validation for task `agentConfig` avoids malformed IDs reaching task execution.
+- **Control-plane/LLM error handling alignment**: tests and runtime error codes now match shared validation shapes for predictable client behavior.
+- **Workspace auto-switch confidence**: improved ambiguous temp-task preflight handling when preferred workspace signals are available.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
@@ -70,50 +68,29 @@ Use this flow to test like a first-time user in a clean folder:
 # Install into a local folder
 mkdir -p /tmp/cowork-run
 cd /tmp/cowork-run
-npm install --ignore-scripts --omit=optional cowork-os@latest --no-audit --no-fund
-
-# Prepare native runtime (Electron binary + native module cache)
-npm run --prefix node_modules/cowork-os setup
+npm install cowork-os@latest --no-audit --no-fund
 
 # Ensure no previously running CoWork instance is active
 pkill -f '/cowork-os' || true
 
 # Start app
-./node_modules/.bin/cowork-os
-```
-
-This is the first install path users should try on macOS:
-
-> If you run plain `npm install cowork-os@latest`, macOS can still intermittently kill lifecycle scripts during dependency extraction. Use the flow above with `--ignore-scripts --omit=optional` and `npm run --prefix node_modules/cowork-os setup` before first launch.
-
-For strict reproducibility on low-memory machines:
-
-```bash
-export COWORK_SETUP_JOBS=1
-export COWORK_SETUP_NATIVE_OUTER_ATTEMPTS=10
-export COWORK_SETUP_NATIVE_SHELL_ATTEMPTS=10
-# Optional for fully isolated HOME tests: bypass OS keychain integration
-export COWORK_DISABLE_OS_KEYCHAIN=1
-npm run --prefix node_modules/cowork-os setup
+npx cowork-os
 ```
 
 #### Install reliability notes (macOS / low-memory environments)
 
-- If setup is interrupted by `SIGKILL`, close other memory-heavy apps and rerun:
-  - `npm run --prefix node_modules/cowork-os setup`
+- If install fails with `SIGKILL` during `node_modules/electron/install.js`, use a two-step install:
+  - `npm install --ignore-scripts cowork-os@latest --no-audit --no-fund`
+  - `npm run setup` (from the install directory) before launching the CLI
 - For local package testing, use the same `--ignore-scripts` flow with the tarball:
   - `npm init -y`  
   - `npm install --ignore-scripts /path/to/cowork-os-<version>.tgz`
-  - `npm run --prefix node_modules/cowork-os setup`
-- If you run with an isolated `HOME` and see a macOS **Keychain Not Found** dialog, choose **Cancel**.
-  - Do not use **Reset To Defaults** in this flow.
-  - Prefer setting `COWORK_DISABLE_OS_KEYCHAIN=1` for disposable install simulations.
 - If you already have a global install, verify with `coworkd-node --version` and avoid launching without dependency setup on first run.
 
 You can also install globally and launch directly:
 
 ```bash
-npm install -g --ignore-scripts --omit=optional --no-audit --no-fund cowork-os
+npm install -g cowork-os
 
 # Optional: verify installed version
 npm list -g cowork-os --depth=0
@@ -160,26 +137,10 @@ npm run dev
 
 If you see `Killed: 9` during `npm run setup`, macOS terminated a native build due to memory pressure.
 
-`npm run setup` already retries native setup automatically with backoff. Let it continue until it exits. If it still exits non-zero:
+`npm run setup` already retries native setup automatically with backoff. Let it continue until it exits. If it still exits non-zero, close heavy apps and run the same command again:
 
 ```bash
-pkill -f '/cowork-os' || true
-npm run --prefix node_modules/cowork-os setup
-```
-
-If the shell shows `zsh: killed` again, this usually means your system killed a child process. Repeat with lower-memory settings:
-
-```bash
-COWORK_SETUP_JOBS=1 \
-COWORK_SETUP_NATIVE_OUTER_ATTEMPTS=12 \
-COWORK_SETUP_NATIVE_SHELL_ATTEMPTS=12 \
-npm run --prefix node_modules/cowork-os setup
-```
-
-If `npm run --prefix node_modules/cowork-os setup` is itself killed immediately (before setup logs appear), run the native retry wrapper directly:
-
-```bash
-(cd node_modules/cowork-os && sh scripts/setup_native_retry.sh)
+npm run setup
 ```
 
 #### Build for Production
@@ -469,7 +430,7 @@ Configure in **Settings** > **Appearance**.
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting
 - **Persistent Memory**: Cross-session context with privacy-aware observation capture
 - **Workspace Kit**: `.cowork/` project kit + markdown indexing with context injection
-- **Agentic Tribe**: Coordinated multi-agent execution with shared checklists, synchronized runs, and team management UI
+- **Agent Teams**: Multi-agent collaboration with shared checklists, coordinated runs, and team management UI
 - **Performance Reviews**: Score and review agent-role outcomes, with autonomy-level recommendations
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
 - **Vision**: Analyze workspace images (screenshots, photos, diagrams) via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
@@ -582,19 +543,19 @@ Tips:
   - `mkdir -p .cowork/agents/<role-id> && printf '%s\n' "# SOUL.md" "..." > .cowork/agents/<role-id>/SOUL.md`
   - If you are unsure about the folder name, place a `default` profile at `.cowork/agents/default/` and copy it to `.../<role-id>/`.
 
-### Agentic Tribe
+### Agent Teams
 
-Coordinate multiple agents as an Agentic Tribe to solve complex tasks together through shared state, context, and tool-calling loops.
+Coordinate multiple agents working together on complex tasks with shared state.
 
 | Feature | Description |
 |---------|-------------|
 | **Team Management** | Create and manage teams with multiple agent members |
-| **Shared Checklists** | Tribe members share checklist items for coordinated task execution |
+| **Shared Checklists** | Agents share checklist items for coordinated task execution |
 | **Run Tracking** | Track team runs with status, progress, and history |
 | **Member Roles** | Assign different agents to team members |
 | **Defaults** | Set default model + personality preferences for spawned work |
 | **Queue-Friendly** | Team runs respect global concurrency limits by default |
-| **UI Panel** | Full React UI for creating, managing, and monitoring agentic tribes |
+| **UI Panel** | Full React UI for creating, managing, and monitoring agent teams |
 | **Data Persistence** | SQLite-backed repositories for teams, members, items, and runs |
 
 Configure in **Mission Control** > **Teams**.
@@ -2295,7 +2256,7 @@ Users must comply with their model provider's terms:
 - [x] Gateway hardening (group chat security, streaming coalescing, restart resilience, tool restrictions)
 - [x] Outbound phone calls via ElevenLabs Agents (voice_call tool)
 - [x] Workspace Kit (`.cowork/` init + projects, markdown indexing, context injection, memory hub settings)
-- [x] Agentic Tribe (coordinated agentic execution with shared checklists, synchronized runs, and tribe UI)
+- [x] Agent Teams (multi-agent collaboration with shared checklists, coordinated runs, team UI)
 - [x] Gateway pending selection state for workspace/provider commands (improved WhatsApp/iMessage UX)
 - [x] Task result summary persistence from executor to daemon
 - [x] Memory retention isolation for sub-agents and public contexts

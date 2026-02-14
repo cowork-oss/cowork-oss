@@ -7,104 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.86] - 2026-02-14
-
-### Added
-- **ACP and Canvas control-plane endpoints**: introduced ACP task-delegation handlers and new canvas APIs (`canvas.list/get/snapshot/content/push/eval/checkpoint.*`) with corresponding protocol constants and IPC wiring.
-- **Canvas checkpoint tooling**: added `canvas_checkpoint`, `canvas_restore`, and `canvas_checkpoints` tools, plus in-memory checkpoint history and restore flows in `CanvasManager`.
-- **Renderer i18n support**: added language resources and UI selection for English, Japanese, and Simplified Chinese, with persisted language preference.
-- **Talk Mode UX**: introduced continuous voice talk-mode hook and UI controls for conversational voice interaction in main task view.
-
-### Changed
-- **Agent execution flow hardening**: executor now emits long-running tool heartbeats, tracks recovered failures more precisely, and preflights shell-permission requirements when command execution is required.
-- **Shell approvals and safety**: `run_command` now supports single-approval bundle mode for safe command sequences and normalizes signatures more robustly for duplicate detection.
-- **Gateway routing extensibility**: router now supports channel-level `defaultAgentRoleId`, `defaultWorkspaceId`, and `allowedAgentRoleIds`, plus new `set_agent` router-rule action.
-- **Skill registry backend**: default registry now points to GitHub static catalog mode with client-side cached search and static skill fetch/install paths.
-- **Plugin discovery behavior**: plugin registry initializes at startup and supports incremental discovery of newly-added plugins without full re-init.
-
-### Fixed
-- **Sensitive shell output leakage**: command output now redacts seed phrases and private-key material before logging/model context.
-- **Isolated macOS install keychain prompt safety**: added `COWORK_DISABLE_OS_KEYCHAIN=1` path to bypass OS keychain integration in disposable test environments.
-- **Task activity signaling in UI**: task “working” indicators now consider tool calls/results and tool-execution progress heartbeats, reducing false idle states.
-- **Install reliability carry-forward**: retains prior setup retry behavior and low-memory setup defaults while validating clean first-install flow.
-
-## [0.3.85] - 2026-02-14
-
-### Fixed
-- **Hoisted Electron detection in setup**: `npm run setup` now treats `../electron` as valid in npm-hoisted installs, so first-time setup no longer triggers unnecessary full dependency bootstrap.
-- **Native setup install scope**: missing `better-sqlite3` recovery and rebuild now run from the actual install root (not inside `node_modules/cowork-os`), reducing first-run reify pressure that caused frequent macOS `SIGKILL`.
-- **Release publish gating**: npm/GitHub package publish jobs now depend on the release validation job, and smoke tests fail if setup unexpectedly falls back to dependency bootstrap.
-- **Install docs hardening**: README now includes a direct native retry-wrapper fallback when `npm run --prefix node_modules/cowork-os setup` is terminated by `zsh: killed`, and recommends local bin launch over `npx` for first run.
-
-## [0.3.84] - 2026-02-14
-
-### Fixed
-- **Release smoke-test module resolution**: installability validation now runs Electron with `cwd` set to the installed `cowork-os` package directory so `require('better-sqlite3')` resolves correctly after setup.
-- **Release continuity**: keeps the 0.3.82 npm SIGKILL regression fix while restoring end-to-end GitHub release packaging path after CI validation.
-
-## [0.3.83] - 2026-02-14
-
-### Fixed
-- **Release workflow syntax fix**: corrected the installability smoke-test shell step so the release pipeline no longer exits with `syntax error: unexpected end of file` before desktop packaging.
-- **Release continuity**: preserves the 0.3.82 npm SIGKILL fix while restoring full GitHub release asset publishing (DMG/ZIP).
-
-## [0.3.82] - 2026-02-14
-
-### Fixed
-- **SIGKILL regression fix for npm installs**: `setup_native` no longer uses `npm install --ignore-scripts=false` when recovering missing `better-sqlite3`, preventing `electron-winstaller` lifecycle scripts from being executed during first-time setup.
-- **Recovery install hardening**: missing runtime dependency repair now uses `--omit=dev` and `--package-lock=false` to avoid reifying packaging/dev dependency trees in user runtime installs.
-
-## [0.3.81] - 2026-02-14
-
-### Fixed
-- **README install path hardening**: `npm run setup` now skips a full dependency reinstall when the Electron dependency is already present, so fresh `/tmp` installs avoid avoidable reinstall-driven SIGKILL pressure.
-- **Native setup reliability**: restores the 0.3.71-style flow with retryable native setup and keeps `better-sqlite3` installation script-safe, then rebuilds it explicitly against Electron ABI.
-
-## [0.3.80] - 2026-02-14
-
-### Fixed
-- **macOS install reliability hardening**: setup now skips optional dependency reinstall during `npm run setup`, avoids propagating child SIGKILL events from native setup back to the shell, and documents a first-install flow that avoids macOS-terminating paths.
-- **Release validation hardening**: CI now resolves release metadata before install validation and validates installability from either published npm tarball (if already published) or local `npm pack` fallback, preventing release regressions for first-release tags.
-
-## [0.3.79] - 2026-02-14
-
-### Fixed
-- **macOS install reliability carry-forward**: retained the 0.3.71 SIGKILL workaround for first-time users by documenting and reinforcing the `npm install --ignore-scripts` + `npm run --prefix node_modules/cowork-os setup` flow.
-- **Release workflow hardening**: ensured the macOS release job always creates or reopens the GitHub release as a draft before packaging so `electron-builder` can attach DMG/zip assets without immutable-release failures.
-- **Version alignment**: published metadata now identifies this release as `0.3.79` with the same installability and packaging reliability changes.
-
-## [0.3.78] - 2026-02-14
-
-### Fixed
-- **Release build hardening**: restored the missing `src/electron/agent/executor-helpers.ts` source file so builds can resolve `executor.ts` imports after packaging from a fresh clone.
-- **TypeScript strictness fixes**: fixed implicit `any` errors in `executor.ts` that could break release builds on CI.
-- **TLS fingerprint callback typing fix**: aligned `remote-client.ts` callback signature/type usage with current `ws` client typings to satisfy strict build checks.
-
-## [0.3.77] - 2026-02-14
-
-### Fixed
-- **Setup script safety**: `npm run setup` in a fresh install now runs dependency reinstall with `--ignore-scripts` so optional postinstall hooks like `electron-winstaller` cannot SIGKILL the process during first-run recovery on macOS.
-- **Install reliability carry-forward**: this patch keeps the documented `/tmp` first-install sequence intact while ensuring setup stays stable across npm install layouts.
-- **Version alignment**: published metadata is now aligned on `0.3.77` so the installability fix is included in both npm and GitHub release tracks.
-
-## [0.3.76] - 2026-02-14
-
-### Fixed
-- **Installability restoration**: pinned `electron` to `40.2.1` so first-time installs from `npm` pull the known-good Electron patch and avoid `SIGKILL` during `node_modules/electron/install.js` on affected macOS environments.
-- **README alignment**: clarified the first-time CLI install path to reflect the exact commands users should run from a fresh temporary folder.
-
-## [0.3.75] - 2026-02-14
-
-### Fixed
-- **Installability fix from 0.3.71**: restored Electron lockfile behavior by keeping `electron` at `40.2.1` during publish-time installs, matching the working `0.3.71` state and avoiding default `SIGKILL` during `node_modules/electron/install.js` on affected installs.
-
-## [0.3.74] - 2026-02-14
-
-### Fixed
-- **Release pipeline reliability**: updated the GitHub release publish step to find and publish the tag created by `electron-builder` instead of assuming the trigger ref matches exactly.
-- **Release docs/notes alignment**: updated release notes and README "What’s new" section for `0.3.74` to reflect install and CI reliability fixes.
-- **Release artifact consistency**: ensured workflow publishes desktop artifacts and release notes from the same release tag path used by electron packaging.
-
 ## [0.3.73] - 2026-02-14
 
 ### Fixed
@@ -607,16 +509,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.3.84 | 2026-02-14 | Fixes CI installability check module resolution so release validation passes and desktop packaging can continue |
-| 0.3.83 | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully |
-| 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
-| 0.3.81 | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths |
-| 0.3.80 | 2026-02-14 | Fixed macOS first-install runtime setup reliability and hardened release validation so new tags can still run installation checks |
-| 0.3.79 | 2026-02-14 | Retained the 0.3.71 SIGKILL workaround and hardened draft release preparation so desktop assets upload reliably |
-| 0.3.78 | 2026-02-14 | Fixes missing release-time `executor-helpers` source and remaining strict-mode TypeScript blockers |
-| 0.3.77 | 2026-02-14 | Skips lifecycle scripts during setup reinstall and prevents setup-time SIGKILL in user-first installs |
-| 0.3.76 | 2026-02-14 | Pinned Electron to 40.2.1 for first-run installability and aligned README CLI flow |
-| 0.3.75 | 2026-02-14 | Restored 0.3.71-compatible Electron lockfile for installability and release confidence |
 | 0.3.73 | 2026-02-14 | Release automation hardening and task/workspace validation fixes |
 | 0.3.72 | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation |
 | 0.3.29 | 2025-02-08 | Multi-provider image generation, visual annotation, local embeddings, verification UX |
@@ -628,17 +520,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.84...HEAD
-[0.3.84]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.84
-[0.3.83]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.83
-[0.3.82]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.82
-[0.3.81]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.81
-[0.3.80]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.80
-[0.3.79]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.79
-[0.3.78]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.78
-[0.3.77]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.77
-[0.3.76]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.76
-[0.3.75]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.75
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.73...HEAD
 [0.3.73]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.73
 [0.3.72]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.72
 [0.3.71]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.71
