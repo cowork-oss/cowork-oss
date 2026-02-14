@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.72] - 2026-02-14
+
+### Added
+- **Session workspace isolation and cleanup**: temp tasks now get session-scoped workspace IDs, dedicated temp directories, and automatic pruning by age + usage caps.
+- **Autonomous task mode** in execution flow and control-plane/web-UI paths, with optional bypass of interactive approval prompts where explicitly enabled.
+- **Companion-mode handling for short conversational prompts** to return concise check-in responses without running task pipeline when appropriate.
+- **Search execution ordering** now prefers Brave when available and can safely fallback through configured providers automatically.
+- **PDF parsing compatibility wrapper** with runtime-safe handling for both legacy and v2 parser module shapes.
+
+### Changed
+- **Task completion validation tightened** with final-response contracts (required direct answers, artifact checks, verification evidence).
+- **Stricter tool failure handling** for hard/unavailable/disallowed outcomes to prevent false completion without real progress.
+- **Temporary workspace handling** now uses explicit session-aware IDs and filters temp workspaces from user-visible lists consistently.
+- **Search and file tools** now enforce more bounded scanning behavior and clearer fallback behavior under high-load conditions.
+
+### Fixed
+- **Watch/skip recommendation tasks** now block artifact tools and require direct recommendation output.
+- **Intermittent approval/partial-task updates** reduced by normalizing auto-approved events in UI and task-stream handling.
+- **Temp workspace lifecycle reliability** improved through scheduled pruning and safer restore/create paths.
+
 ## [0.3.69] - 2026-02-11
 
 ### Fixed
@@ -481,6 +501,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.72 | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation |
 | 0.3.29 | 2025-02-08 | Multi-provider image generation, visual annotation, local embeddings, verification UX |
 | 0.3.25 | 2025-02-05 | Google Workspace integration, gateway enhancements, agent retry logic |
 | 0.1.6 | 2025-01-25 | Discord bot integration with slash commands |
@@ -490,7 +511,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.29...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.72...HEAD
+[0.3.72]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.72
+[0.3.71]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.71
 [0.3.29]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.29
 [0.3.25]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.25
 [0.1.6]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.1.6

@@ -16,7 +16,7 @@ import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
 import { extractMentionedRoles } from '../agents/mentions';
-import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole, TEMP_WORKSPACE_ID } from '../../shared/types';
+import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole, isTempWorkspaceId } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -428,6 +428,11 @@ export class AgentDaemon extends EventEmitter {
     const parent = this.taskRepo.findById(params.parentTaskId);
     const parentGatewayContext = parent?.agentConfig?.gatewayContext;
     const childGatewayContext = params.agentConfig?.gatewayContext;
+    const parentAutonomousMode = parent?.agentConfig?.autonomousMode === true;
+    const mergedAutonomousMode = parentAutonomousMode || params.agentConfig?.autonomousMode === true;
+    const mergedAllowUserInput = mergedAutonomousMode
+      ? false
+      : params.agentConfig?.allowUserInput ?? parent?.agentConfig?.allowUserInput;
 
     // Prevent privilege escalation: a child task may not become "more private" than its parent.
     const mergedGatewayContext: AgentConfig['gatewayContext'] | undefined = (() => {
@@ -467,6 +472,12 @@ export class AgentDaemon extends EventEmitter {
       }
       if (mergedToolRestrictions) {
         next.toolRestrictions = mergedToolRestrictions;
+      }
+      if (mergedAutonomousMode !== undefined) {
+        next.autonomousMode = mergedAutonomousMode;
+      }
+      if (mergedAllowUserInput !== undefined) {
+        next.allowUserInput = mergedAllowUserInput;
       }
       return Object.keys(next).length > 0 ? next : undefined;
     })();
@@ -813,6 +824,28 @@ export class AgentDaemon extends EventEmitter {
     description: string,
     details: any
   ): Promise<boolean> {
+    const task = this.taskRepo.findById(taskId);
+    if (task?.agentConfig?.autonomousMode) {
+      const approval = this.approvalRepo.create({
+        taskId,
+        type: type as any,
+        description,
+        details,
+        status: 'approved',
+        requestedAt: Date.now(),
+      });
+      this.approvalRepo.update(approval.id, 'approved');
+      this.logEvent(taskId, 'approval_requested', {
+        approval,
+        autoApproved: true,
+      });
+      this.logEvent(taskId, 'approval_granted', {
+        approvalId: approval.id,
+        autoApproved: true,
+      });
+      return true;
+    }
+
     const approval = this.approvalRepo.create({
       taskId,
       type: type as any,
@@ -1822,7 +1855,7 @@ export class AgentDaemon extends EventEmitter {
   getMostRecentNonTempWorkspace(): Workspace | undefined {
     const workspaces = this.workspaceRepo.findAll();
     return workspaces.find((workspace) =>
-      workspace.id !== TEMP_WORKSPACE_ID &&
+      !isTempWorkspaceId(workspace.id) &&
       !workspace.isTemp &&
       typeof workspace.path === 'string' &&
       workspace.path.trim().length > 0
@@ -1844,7 +1877,7 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Update task fields (for Goal Mode attempt tracking, etc.)
+   * Update task fields (for retry/verification attempt tracking, etc.)
    */
   updateTask(taskId: string, updates: Partial<Pick<Task, 'currentAttempt' | 'status' | 'error' | 'completedAt'>>): void {
     const existing = this.taskRepo.findById(taskId);

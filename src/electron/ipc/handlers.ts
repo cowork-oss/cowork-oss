@@ -11,6 +11,7 @@ import {
   shouldRunImageOcr,
 } from './image-viewer-ocr';
 import { extractPptxContentFromFile } from '../utils/pptx-extractor';
+import { parsePdfBuffer } from '../utils/pdf-parser';
 
 import { DatabaseManager } from '../database/schema';
 import {
@@ -33,7 +34,7 @@ import { AgentTeamOrchestrator } from '../agents/AgentTeamOrchestrator';
 	import { TaskLabelRepository } from '../database/TaskLabelRepository';
 	import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 	import { ContextPolicyManager } from '../gateway/context-policy';
-	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery, WorkspaceKitStatus, WorkspaceKitInitRequest, WorkspaceKitProjectCreateRequest } from '../../shared/types';
+	import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID_PREFIX, TEMP_WORKSPACE_NAME, TEMP_WORKSPACE_ROOT_DIR_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData, TaskExportQuery, WorkspaceKitStatus, WorkspaceKitInitRequest, WorkspaceKitProjectCreateRequest, isTempWorkspaceId } from '../../shared/types';
 	import * as os from 'os';
 	import { AgentDaemon } from '../agent/daemon';
 import {
@@ -132,6 +133,7 @@ import { getVoiceService } from '../voice/VoiceService';
 import { AgentPerformanceReviewService } from '../reports/AgentPerformanceReviewService';
 import { getCronService } from '../cron';
 import type { CronJobCreate } from '../cron/types';
+import { pruneTempWorkspaces } from '../utils/temp-workspace';
 
 type FileViewerRequestOptions = {
   workspacePath?: string;
@@ -139,15 +141,6 @@ type FileViewerRequestOptions = {
   imageOcrMaxChars?: number;
   includeImageContent?: boolean;
 };
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParseModule = require('pdf-parse');
-// Handle both ESM default export and CommonJS module.exports
-const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as (dataBuffer: Buffer) => Promise<{
-  text: string;
-  numpages: number;
-  info: { Title?: string; Author?: string };
-}>;
 
 // Global notification service instance
 let notificationService: NotificationService | null = null;
@@ -285,71 +278,96 @@ export async function setupIpcHandlers(
     return !relative.startsWith('..') && !path.isAbsolute(relative);
   };
 
-  // Temp workspace management
-  // The temp workspace is created on-demand and stored in the database with a special ID
-  // It uses the system's temp directory and is filtered from the workspace list shown to users
-  const getOrCreateTempWorkspace = async (): Promise<Workspace> => {
-    // Check if temp workspace already exists in database
-    const existing = workspaceRepo.findById(TEMP_WORKSPACE_ID);
-    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-    await fs.mkdir(tempDir, { recursive: true });
-    const normalizedPermissions = existing
-      ? {
-          ...existing.permissions,
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: existing.permissions.shell ?? false,
-          unrestrictedFileAccess: true,
-        }
-      : {
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: false,
-          unrestrictedFileAccess: true,
-        };
+  const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
 
-    if (existing) {
-      if (!existing.permissions.unrestrictedFileAccess) {
-        workspaceRepo.updatePermissions(existing.id, normalizedPermissions);
-      }
+  const normalizeTempPermissions = (existing?: Workspace): Workspace['permissions'] => ({
+    ...(existing?.permissions ?? {}),
+    read: true,
+    write: true,
+    delete: true,
+    network: true,
+    shell: existing?.permissions?.shell ?? false,
+    unrestrictedFileAccess: true,
+  });
 
-      if (existing.path === tempDir) {
-        return { ...existing, permissions: normalizedPermissions, isTemp: true };
-      }
-    }
+  const ensureTempWorkspace = async (
+    workspaceId: string,
+    workspacePath: string,
+    existing?: Workspace
+  ): Promise<Workspace> => {
+    await fs.mkdir(workspacePath, { recursive: true });
+    const createdAt = existing?.createdAt ?? Date.now();
+    const lastUsedAt = Date.now();
+    const permissions = normalizeTempPermissions(existing);
 
-    const tempWorkspace: Workspace = {
-      id: TEMP_WORKSPACE_ID,
-      name: TEMP_WORKSPACE_NAME,
-      path: tempDir,
-      createdAt: Date.now(),
-      permissions: normalizedPermissions,
-      isTemp: true,
-    };
-
-    // Insert directly using raw SQL to use our specific ID
     const stmt = db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, permissions)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         path = excluded.path,
-        created_at = excluded.created_at,
+        last_used_at = excluded.last_used_at,
         permissions = excluded.permissions
     `);
     stmt.run(
-      tempWorkspace.id,
-      tempWorkspace.name,
-      tempWorkspace.path,
-      tempWorkspace.createdAt,
-      JSON.stringify(tempWorkspace.permissions)
+      workspaceId,
+      TEMP_WORKSPACE_NAME,
+      workspacePath,
+      createdAt,
+      lastUsedAt,
+      JSON.stringify(permissions)
     );
 
-    return tempWorkspace;
+    return {
+      id: workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: workspacePath,
+      createdAt,
+      lastUsedAt,
+      permissions,
+      isTemp: true,
+    };
+  };
+
+  const buildTempWorkspaceKey = (): string =>
+    `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+
+  // Temp workspace management
+  // Creates isolated temp workspaces so each new session can use its own folder.
+  const getOrCreateTempWorkspace = async (options?: { createNew?: boolean }): Promise<Workspace> => {
+    const createNew = options?.createNew === true;
+    let workspace: Workspace;
+
+    if (!createNew) {
+      const existingTemp = workspaceRepo.findAll().find((workspace) => isTempWorkspaceId(workspace.id));
+      if (existingTemp) {
+        workspace = await ensureTempWorkspace(existingTemp.id, existingTemp.path, existingTemp);
+      } else {
+        await fs.mkdir(tempWorkspaceRoot, { recursive: true });
+        const key = buildTempWorkspaceKey();
+        const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+        const workspacePath = path.join(tempWorkspaceRoot, key);
+        workspace = await ensureTempWorkspace(workspaceId, workspacePath);
+      }
+    } else {
+      await fs.mkdir(tempWorkspaceRoot, { recursive: true });
+      const key = buildTempWorkspaceKey();
+      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+      const workspacePath = path.join(tempWorkspaceRoot, key);
+      workspace = await ensureTempWorkspace(workspaceId, workspacePath);
+    }
+
+    try {
+      pruneTempWorkspaces({
+        db,
+        tempWorkspaceRoot,
+        currentWorkspaceId: workspace.id,
+      });
+    } catch (error) {
+      console.warn('Failed to prune temp workspaces:', error);
+    }
+
+    return workspace;
   };
 
   // File handlers - open files and show in Finder
@@ -500,7 +518,7 @@ export async function setupIpcHandlers(
 
         case 'pdf': {
           const buffer = await fs.readFile(resolvedPath);
-          const pdfData = await pdfParse(buffer);
+          const pdfData = await parsePdfBuffer(buffer);
           content = pdfData.text;
           break;
         }
@@ -738,19 +756,19 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LIST, async () => {
-    // Filter out the temp workspace from the list - users shouldn't see it in their workspaces
+    // Filter out temp workspaces from user workspace lists.
     const allWorkspaces = workspaceRepo.findAll();
-    return allWorkspaces.filter(w => w.id !== TEMP_WORKSPACE_ID);
+    return allWorkspaces.filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
   });
 
   // Get or create the temp workspace (used when no workspace is selected)
-  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TEMP, async () => {
-    return getOrCreateTempWorkspace();
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TEMP, async (_, options?: { createNew?: boolean }) => {
+    return getOrCreateTempWorkspace(options);
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SELECT, async (_, id: string) => {
     const workspace = workspaceRepo.findById(id);
-    if (workspace && workspace.id !== TEMP_WORKSPACE_ID) {
+    if (workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
       try {
         workspaceRepo.updateLastUsedAt(workspace.id);
       } catch (error) {
@@ -783,7 +801,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);
     const validated = validateInput(TaskCreateSchema, data, 'task');
-    const { title, prompt, workspaceId, budgetTokens, budgetCost } = validated;
+    const { title, prompt, workspaceId, budgetTokens, budgetCost, agentConfig } = validated;
+    const normalizedAgentConfig = agentConfig
+      ? {
+        ...agentConfig,
+        ...(agentConfig.autonomousMode ? { allowUserInput: false } : {}),
+      }
+      : undefined;
     const task = taskRepo.create({
       title,
       prompt,
@@ -791,9 +815,10 @@ export async function setupIpcHandlers(
       workspaceId,
       budgetTokens,
       budgetCost,
+      agentConfig: normalizedAgentConfig,
     });
 
-    if (workspaceId !== TEMP_WORKSPACE_ID) {
+    if (!isTempWorkspaceId(workspaceId)) {
       try {
         workspaceRepo.updateLastUsedAt(workspaceId);
       } catch (error) {
@@ -967,7 +992,9 @@ export async function setupIpcHandlers(
 
   // Task events handler - get historical events from database
   ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
-    return taskEventRepo.findByTaskId(taskId);
+    const events = taskEventRepo.findByTaskId(taskId);
+    const maxEvents = 600;
+    return events.length > maxEvents ? events.slice(-maxEvents) : events;
   });
 
   // Send follow-up message to a task
@@ -3418,6 +3445,10 @@ export function getHooksServer(): HooksServer | null {
  * Set up Hooks (Webhooks & Gmail Pub/Sub) IPC handlers
  */
 async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
+  const db = agentDaemon.getDatabase();
+  const workspaceRepo = new WorkspaceRepository(db);
+  const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
+
   // Initialize settings manager
   HooksSettingsManager.initialize();
 
@@ -3431,6 +3462,64 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
       ...(forceEnabled ? { enabled: true } : {}),
       ...(tokenOverride ? { token: tokenOverride } : {}),
     };
+  };
+
+  const createTempWorkspaceForHooks = async (): Promise<Workspace> => {
+    await fs.mkdir(tempWorkspaceRoot, { recursive: true });
+
+    const key = `hooks-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+    const workspacePath = path.join(tempWorkspaceRoot, key);
+    await fs.mkdir(workspacePath, { recursive: true });
+
+    const now = Date.now();
+    const permissions: Workspace['permissions'] = {
+      read: true,
+      write: true,
+      delete: true,
+      network: true,
+      shell: false,
+      unrestrictedFileAccess: true,
+    };
+
+    db.prepare(`
+      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        path = excluded.path,
+        last_used_at = excluded.last_used_at,
+        permissions = excluded.permissions
+    `).run(
+      workspaceId,
+      TEMP_WORKSPACE_NAME,
+      workspacePath,
+      now,
+      now,
+      JSON.stringify(permissions)
+    );
+
+    const workspace = workspaceRepo.findById(workspaceId) ?? {
+      id: workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: workspacePath,
+      createdAt: now,
+      lastUsedAt: now,
+      permissions,
+      isTemp: true,
+    };
+
+    try {
+      pruneTempWorkspaces({
+        db,
+        tempWorkspaceRoot,
+        currentWorkspaceId: workspace.id,
+      });
+    } catch (error) {
+      console.warn('[Hooks] Failed to prune temp workspaces:', error);
+    }
+
+    return workspace;
   };
 
   const ensureHooksServerRunning = async (): Promise<void> => {
@@ -3477,10 +3566,14 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
         console.log('[Hooks] Agent action:', action.message.substring(0, 100));
 
         // Create a task for the agent action
+        const fallbackWorkspace = await createTempWorkspaceForHooks();
         const task = await agentDaemon.createTask({
           title: action.name || 'Webhook Task',
           prompt: action.message,
-          workspaceId: action.workspaceId || TEMP_WORKSPACE_ID,
+          workspaceId: action.workspaceId || fallbackWorkspace.id,
+          agentConfig: {
+            allowUserInput: false,
+          },
         });
 
         return { taskId: task.id };
@@ -4150,7 +4243,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
   };
 
   const ensureDefaultKitCronJobs = async (workspaceId: string, kitMode: 'missing' | 'overwrite'): Promise<void> => {
-    if (!workspaceId || workspaceId === TEMP_WORKSPACE_ID) return;
+    if (!workspaceId || isTempWorkspaceId(workspaceId)) return;
 
     const cron = getCronService();
     if (!cron) return;

@@ -1604,7 +1604,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createWorkspace: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, data),
   listWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_LIST),
   selectWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SELECT, id),
-  getTempWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_TEMP),
+  getTempWorkspace: (options?: { createNew?: boolean }) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_TEMP, options),
   touchWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_TOUCH, id),
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
@@ -2495,7 +2495,7 @@ export interface ElectronAPI {
   createWorkspace: (data: any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
-  getTempWorkspace: () => Promise<Workspace | null>;
+  getTempWorkspace: (options?: { createNew?: boolean }) => Promise<Workspace | null>;
   touchWorkspace: (id: string) => Promise<any>;
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) => Promise<any>;
   respondToApproval: (data: any) => Promise<void>;

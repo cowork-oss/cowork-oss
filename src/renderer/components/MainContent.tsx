@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment, Children }
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS, CanvasSession } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, CustomSkill, EventType, DEFAULT_QUIRKS, CanvasSession, isTempWorkspaceId } from '../../shared/types';
 import { isVerificationStepDescription } from '../../shared/plan-utils';
 import type { AgentRoleData } from '../../electron/preload';
 import { useVoiceInput } from '../hooks/useVoiceInput';
@@ -73,7 +73,7 @@ const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
     return isVerificationStepDescription(event.payload?.step?.description);
   }
 
-  // Goal Mode verification: silent on success, noisy on failure.
+  // Verification events are shown on failure; success is kept quiet.
   if (event.type === 'verification_started' || event.type === 'verification_passed') {
     return true;
   }
@@ -898,9 +898,8 @@ function ClickableFilePath({
   );
 }
 
-interface GoalModeOptions {
-  successCriteria?: SuccessCriteria;
-  maxAttempts?: number;
+interface CreateTaskOptions {
+  autonomousMode?: boolean;
 }
 
 type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'voice';
@@ -911,7 +910,7 @@ interface MainContentProps {
   workspace: Workspace | null;
   events: TaskEvent[];
   onSendMessage: (message: string) => void;
-  onCreateTask?: (title: string, prompt: string, options?: GoalModeOptions) => void;
+  onCreateTask?: (title: string, prompt: string, options?: CreateTaskOptions) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
@@ -959,10 +958,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       return new Set();
     }
   });
-  // Goal Mode state
-  const [goalModeEnabled, setGoalModeEnabled] = useState(false);
-  const [verificationCommand, setVerificationCommand] = useState('');
-  const [maxAttempts, setMaxAttempts] = useState(3);
+  // Autonomous mode state
+  const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
@@ -1331,7 +1328,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
         const workspaces = await window.electronAPI.listWorkspaces();
         // Filter out temp workspace and sort by most recently used
         const filteredWorkspaces = workspaces
-          .filter((w: Workspace) => w.id !== TEMP_WORKSPACE_ID)
+          .filter((w: Workspace) => !w.isTemp && !isTempWorkspaceId(w.id))
           .sort((a: Workspace, b: Workspace) =>
             (b.lastUsedAt ?? b.createdAt) - (a.lastUsedAt ?? a.createdAt)
           );
@@ -1598,7 +1595,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
     // Find an approval request that hasn't been resolved yet
     const pendingApprovalEvent = events.find(e => {
-      if (e.type !== 'approval_requested' || !e.payload?.approval) return false;
+      const isAutoApprovalRequested = e.type === 'approval_requested' && e.payload?.autoApproved === true;
+      if (e.type !== 'approval_requested' || isAutoApprovalRequested || !e.payload?.approval) return false;
       const approvalId = e.payload.approval.id;
       // Only show if not already resolved
       return !resolvedApprovalIds.has(approvalId);
@@ -1880,20 +1878,13 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       // This fixes the bug where old tasks (beyond the 100 most recent) would create new tasks
       // instead of sending follow-up messages
       if (!selectedTaskId && onCreateTask) {
-        // No task selected - create new task with optional Goal Mode options
+        // No task selected - create new task with optional autonomy enabled
         const titleSource = trimmedInput || (pendingAttachments[0]?.name ? `Review ${pendingAttachments[0].name}` : 'New task');
         const title = buildTaskTitle(titleSource);
-        const options: GoalModeOptions | undefined = goalModeEnabled && verificationCommand
-          ? {
-            successCriteria: { type: 'shell_command' as const, command: verificationCommand },
-            maxAttempts,
-          }
-          : undefined;
+        const options: CreateTaskOptions | undefined = autonomousModeEnabled ? { autonomousMode: true } : undefined;
         onCreateTask(title, message, options);
-        // Reset Goal Mode state
-        setGoalModeEnabled(false);
-        setVerificationCommand('');
-        setMaxAttempts(3);
+        // Reset task mode state
+        setAutonomousModeEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
         onSendMessage(message);
@@ -2301,43 +2292,17 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
 
-              {/* Goal Mode Options */}
+              {/* Task mode options */}
               <div className="goal-mode-section">
                 <label className="goal-mode-toggle">
                   <input
                     type="checkbox"
-                    checked={goalModeEnabled}
-                    onChange={(e) => setGoalModeEnabled(e.target.checked)}
+                    checked={autonomousModeEnabled}
+                    onChange={(e) => setAutonomousModeEnabled(e.target.checked)}
                   />
-                  <span className="goal-mode-label">Goal Mode</span>
-                  <span className="goal-mode-hint">Verify & retry until success</span>
+                  <span className="goal-mode-label">Autonomous mode</span>
+                  <span className="goal-mode-hint">Skip confirmation prompts and keep working</span>
                 </label>
-                {goalModeEnabled && (
-                  <div className="goal-mode-options">
-                    <div className="goal-mode-command">
-                      <span className="goal-mode-prompt">$</span>
-                      <input
-                        type="text"
-                        className="goal-mode-input"
-                        placeholder="Verification command (e.g., npm test)"
-                        value={verificationCommand}
-                        onChange={(e) => setVerificationCommand(e.target.value)}
-                      />
-                    </div>
-                    <div className="goal-mode-attempts">
-                      <label>
-                        Max attempts:
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          value={maxAttempts}
-                          onChange={(e) => setMaxAttempts(Math.min(10, Math.max(1, Number(e.target.value))))}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="welcome-input-footer">
@@ -2366,7 +2331,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
                       </svg>
-                      <span>{workspace?.id === TEMP_WORKSPACE_ID ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
+                      <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
                         <path d="M6 9l6 6 6-6" />
                       </svg>
@@ -2577,7 +2542,9 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     : baseTitle;
   const headerTooltip = isTitleTruncated ? trimmedPrompt : baseTitle;
   const latestPauseEvent = [...events].reverse().find(event => event.type === 'task_paused');
-  const latestApprovalEvent = [...events].reverse().find(event => event.type === 'approval_requested');
+  const latestApprovalEvent = [...events].reverse().find(
+    (event) => event.type === 'approval_requested' && event.payload?.autoApproved !== true
+  );
 
   // Task view
   return (
@@ -2994,7 +2961,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
-                <span>{workspace?.id === TEMP_WORKSPACE_ID ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
+                <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
                   <path d="M6 9l6 6 6-6" />
                 </svg>
@@ -3254,7 +3221,6 @@ function renderEventTitle(
       return `${getMessage('approval', msgCtx)} ${event.payload.approval?.description}`;
     case 'log':
       return event.payload.message;
-    // Goal Mode verification events
     case 'verification_started':
       return getMessage('verifying', msgCtx);
     case 'verification_passed':

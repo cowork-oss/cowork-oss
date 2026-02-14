@@ -1,4 +1,5 @@
 import path from 'path';
+import os from 'os';
 import * as fs from 'fs/promises';
 import { pathToFileURL } from 'url';
 import { app, BrowserWindow, ipcMain, dialog, session, shell, Notification } from 'electron';
@@ -31,7 +32,7 @@ import { ChannelGateway } from './gateway';
 import { formatChatTranscriptForPrompt } from './gateway/chat-transcript';
 import { updateManager } from './updater';
 import { importProcessEnvToSettings, migrateEnvToSettings } from './utils/env-migration';
-import { TEMP_WORKSPACE_ID } from '../shared/types';
+import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_ROOT_DIR_NAME, isTempWorkspaceId } from '../shared/types';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MemoryFeaturesManager } from './settings/memory-features-manager';
@@ -46,6 +47,7 @@ import { getUserDataDir } from './utils/user-data-dir';
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
 import { setupCanvasHandlers, cleanupCanvasHandlers } from './ipc/canvas-handlers';
+import { pruneTempWorkspaces } from './utils/temp-workspace';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -54,6 +56,8 @@ let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let crossSignalService: CrossSignalService | null = null;
 let feedbackService: FeedbackService | null = null;
+let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
+const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const HEADLESS = isHeadlessMode();
 const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
@@ -182,6 +186,20 @@ app.whenReady().then(async () => {
 
   // Initialize database first - required for SecureSettingsRepository
   dbManager = new DatabaseManager();
+  const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
+  const runTempWorkspacePrune = () => {
+    try {
+      pruneTempWorkspaces({
+        db: dbManager.getDatabase(),
+        tempWorkspaceRoot,
+      });
+    } catch (error) {
+      console.warn('[Main] Failed to prune temp workspaces:', error);
+    }
+  };
+  runTempWorkspacePrune();
+  tempWorkspacePruneTimer = setInterval(runTempWorkspacePrune, TEMP_WORKSPACE_PRUNE_INTERVAL_MS);
+  tempWorkspacePruneTimer.unref();
 
   // Initialize secure settings repository for encrypted settings storage
   // This MUST be done before provider factories so they can migrate legacy settings
@@ -571,7 +589,7 @@ app.whenReady().then(async () => {
 
     const resolveDefaultWorkspace = (): ReturnType<typeof workspaceRepo.findById> | undefined => {
       const workspaces = workspaceRepo.findAll();
-      return workspaces.find((workspace) => workspace.id !== TEMP_WORKSPACE_ID) ?? workspaces[0];
+      return workspaces.find((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id)) ?? workspaces[0];
     };
 
     // Initialize HeartbeatService with dependencies
@@ -585,6 +603,9 @@ app.whenReady().then(async () => {
           title,
           prompt,
           workspaceId,
+          agentConfig: {
+            allowUserInput: false,
+          },
         });
         if (_agentRoleId) {
           taskRepo.update(task.id, {
@@ -600,10 +621,14 @@ app.whenReady().then(async () => {
         return tasks.filter((t: { assignedAgentRoleId?: string }) => t.assignedAgentRoleId === agentRoleId);
       },
       getDefaultWorkspaceId: () => {
-        return resolveDefaultWorkspace()?.id ?? TEMP_WORKSPACE_ID;
+        const fallbackTemp = workspaceRepo.findAll().find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id));
+        return resolveDefaultWorkspace()?.id ?? fallbackTemp?.id ?? TEMP_WORKSPACE_ID;
       },
       getDefaultWorkspacePath: () => {
-        return resolveDefaultWorkspace()?.path || workspaceRepo.findById(TEMP_WORKSPACE_ID)?.path;
+        const fallbackTempPath = workspaceRepo
+          .findAll()
+          .find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id))?.path;
+        return resolveDefaultWorkspace()?.path || fallbackTempPath;
       },
       getWorkspacePath: (workspaceId: string) => {
         const workspace = workspaceRepo.findById(workspaceId);
@@ -798,6 +823,11 @@ if (HEADLESS) {
 }
 
 app.on('before-quit', async () => {
+  if (tempWorkspacePruneTimer) {
+    clearInterval(tempWorkspacePruneTimer);
+    tempWorkspacePruneTimer = null;
+  }
+
   // Destroy tray
   trayManager.destroy();
 

@@ -6,6 +6,7 @@ interface SidebarProps {
   tasks: Task[];
   selectedTaskId: string | null;
   onSelectTask: (id: string | null) => void;
+  onNewSession?: () => void;
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
   onTasksChanged: () => void;
@@ -22,6 +23,7 @@ export function Sidebar({
   tasks,
   selectedTaskId,
   onSelectTask,
+  onNewSession,
   onOpenSettings,
   onOpenMissionControl,
   onTasksChanged,
@@ -230,7 +232,11 @@ export function Sidebar({
   };
 
   const handleNewTask = () => {
-    // Deselect current task to show the welcome/new task screen
+    if (onNewSession) {
+      onNewSession();
+      return;
+    }
+    // Fallback: deselect current task to show the welcome/new task screen
     onSelectTask(null);
   };
 

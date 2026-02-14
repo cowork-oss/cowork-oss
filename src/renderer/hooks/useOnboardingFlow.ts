@@ -49,7 +49,6 @@ const SCRIPT = {
   // Implications shown after work style selection
   style_implications_planner: [
     "• I'll create step-by-step plans before starting",
-    "• Goal Mode will be on by default — I'll verify my work",
     "• You'll see clear progress updates along the way",
   ],
   style_implications_flexible: [

@@ -33,7 +33,16 @@ import {
 } from '../database/repositories';
 import Database from 'better-sqlite3';
 import { AgentDaemon } from '../agent/daemon';
-import { Task, IPC_CHANNELS, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, WorkspacePermissions } from '../../shared/types';
+import {
+  Task,
+  IPC_CHANNELS,
+  TEMP_WORKSPACE_ID_PREFIX,
+  TEMP_WORKSPACE_NAME,
+  TEMP_WORKSPACE_ROOT_DIR_NAME,
+  Workspace,
+  WorkspacePermissions,
+  isTempWorkspaceId,
+} from '../../shared/types';
 import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { LLMProviderType } from '../agent/llm/types';
@@ -53,6 +62,7 @@ import { DEFAULT_QUIRKS } from '../../shared/types';
 import { formatChatTranscriptForPrompt } from './chat-transcript';
 import { evaluateWorkspaceRouterRules } from './router-rules';
 import { extractJsonValues } from '../utils/json-utils';
+import { pruneTempWorkspaces } from '../utils/temp-workspace';
 
 function getCoworkVersion(): string {
   try {
@@ -280,73 +290,103 @@ export class MessageRouter {
     return getChannelUiCopy(key, this.getMessageContext(), replacements);
   }
 
-  /**
-   * Get or create the temp workspace for sessions without a workspace
-   */
-  private getOrCreateTempWorkspace(): Workspace {
-    // Check if temp workspace exists
-    const existing = this.workspaceRepo.findById(TEMP_WORKSPACE_ID);
-    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    const permissions = existing
-      ? {
-          ...existing.permissions,
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: existing.permissions.shell ?? false,
-          unrestrictedFileAccess: true,
-        }
-      : {
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: false,
-          unrestrictedFileAccess: true,
-        };
-
-    if (existing) {
-      if (!existing.permissions.unrestrictedFileAccess) {
-        this.workspaceRepo.updatePermissions(existing.id, permissions);
-      }
-
-      if (existing.path === tempDir) {
-        return { ...existing, permissions, isTemp: true };
-      }
+  private ensureTempWorkspaceRecord(workspaceId: string, workspacePath: string, existing?: Workspace): Workspace {
+    if (!fs.existsSync(workspacePath)) {
+      fs.mkdirSync(workspacePath, { recursive: true });
     }
 
-    // Create workspace record
-    const tempWorkspace: Workspace = {
-      id: TEMP_WORKSPACE_ID,
-      name: TEMP_WORKSPACE_NAME,
-      path: tempDir,
-      createdAt: Date.now(),
-      permissions,
-      isTemp: true,
+    const createdAt = existing?.createdAt ?? Date.now();
+    const lastUsedAt = Date.now();
+    const permissions = {
+      ...(existing?.permissions ?? {}),
+      read: true,
+      write: true,
+      delete: true,
+      network: true,
+      shell: existing?.permissions?.shell ?? false,
+      unrestrictedFileAccess: true,
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, permissions)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         path = excluded.path,
-        created_at = excluded.created_at,
+        last_used_at = excluded.last_used_at,
         permissions = excluded.permissions
     `);
     stmt.run(
-      tempWorkspace.id,
-      tempWorkspace.name,
-      tempWorkspace.path,
-      tempWorkspace.createdAt,
-      JSON.stringify(tempWorkspace.permissions)
+      workspaceId,
+      TEMP_WORKSPACE_NAME,
+      workspacePath,
+      createdAt,
+      lastUsedAt,
+      JSON.stringify(permissions)
     );
 
-    return tempWorkspace;
+    return {
+      id: workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: workspacePath,
+      createdAt,
+      lastUsedAt,
+      permissions,
+      isTemp: true,
+    };
+  }
+
+  private static sanitizeTempKey(value: string): string {
+    const safe = value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (safe.length > 0) return safe.slice(0, 120);
+    return `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  }
+
+  private isPersistedWorkspaceId(workspaceId: string | undefined): boolean {
+    if (!workspaceId || isTempWorkspaceId(workspaceId)) return false;
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    return !!workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id);
+  }
+
+  /**
+   * Get or create a temp workspace.
+   * When a session ID is provided, each session gets its own dedicated temp folder.
+   */
+  private getOrCreateTempWorkspace(sessionId?: string): Workspace {
+    let workspace: Workspace;
+    if (sessionId) {
+      const key = MessageRouter.sanitizeTempKey(sessionId);
+      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+      const existing = this.workspaceRepo.findById(workspaceId);
+      if (existing) {
+        workspace = this.ensureTempWorkspaceRecord(workspaceId, existing.path, existing);
+      } else {
+        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+        workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
+      }
+    } else {
+      const existingTemp = this.workspaceRepo.findAll().find((candidate) => candidate.isTemp || isTempWorkspaceId(candidate.id));
+      if (existingTemp) {
+        workspace = this.ensureTempWorkspaceRecord(existingTemp.id, existingTemp.path, existingTemp);
+      } else {
+        const key = MessageRouter.sanitizeTempKey(`session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`);
+        const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+        const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+        workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
+      }
+    }
+
+    try {
+      pruneTempWorkspaces({
+        db: this.db,
+        tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
+        currentWorkspaceId: workspace.id,
+      });
+    } catch (error) {
+      console.warn('Failed to prune temp workspaces:', error);
+    }
+
+    return workspace;
   }
 
   private static slugify(value: string): string {
@@ -1587,7 +1627,9 @@ export class MessageRouter {
           // User likely sent a real task; clear pending selection and continue.
           this.sessionManager.updateSessionContext(sessionId, { pendingSelection: undefined });
         } else if (pendingSelection.type === 'workspace') {
-          const workspaces = this.workspaceRepo.findAll();
+          const workspaces = this.workspaceRepo
+            .findAll()
+            .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
           const isNumeric = /^[0-9]+$/.test(text);
           const num = parseInt(text, 10);
           let workspace: Workspace | undefined;
@@ -1611,7 +1653,7 @@ export class MessageRouter {
 
           if (workspace) {
             this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
-            if (workspace.id !== TEMP_WORKSPACE_ID) {
+            if (!workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
               try {
                 this.workspaceRepo.updateLastUsedAt(workspace.id);
               } catch (error) {
@@ -1684,14 +1726,16 @@ export class MessageRouter {
     // Check if session has no workspace - might be workspace selection
     if (!session?.workspaceId) {
       // Check if this looks like workspace selection (number or short name)
-      const workspaces = this.workspaceRepo.findAll();
+      const workspaces = this.workspaceRepo
+        .findAll()
+        .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
       if (workspaces.length > 0) {
         // Try to match by number
         const num = parseInt(text, 10);
         if (!isNaN(num) && num > 0 && num <= workspaces.length) {
           const workspace = workspaces[num - 1];
           this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
-          if (workspace.id !== TEMP_WORKSPACE_ID) {
+          if (!workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
             try {
               this.workspaceRepo.updateLastUsedAt(workspace.id);
             } catch (error) {
@@ -1715,7 +1759,7 @@ export class MessageRouter {
         );
         if (matchedWorkspace) {
           this.sessionManager.setSessionWorkspace(sessionId, matchedWorkspace.id);
-          if (matchedWorkspace.id !== TEMP_WORKSPACE_ID) {
+          if (!matchedWorkspace.isTemp && !isTempWorkspaceId(matchedWorkspace.id)) {
             try {
               this.workspaceRepo.updateLastUsedAt(matchedWorkspace.id);
             } catch (error) {
@@ -1734,7 +1778,7 @@ export class MessageRouter {
       }
 
       // No workspace match found - auto-assign temp workspace so tasks can proceed
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
     }
 
@@ -1773,7 +1817,7 @@ export class MessageRouter {
             const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
             if (nextWs) {
               this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
-              if (nextWs.id !== TEMP_WORKSPACE_ID) {
+              if (!nextWs.isTemp && !isTempWorkspaceId(nextWs.id)) {
                 try {
                   this.workspaceRepo.updateLastUsedAt(nextWs.id);
                 } catch (error) {
@@ -2131,7 +2175,7 @@ export class MessageRouter {
 
     let session = this.sessionRepo.findById(sessionId);
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
       session = this.sessionRepo.findById(sessionId);
     }
@@ -2659,8 +2703,8 @@ export class MessageRouter {
 
     const workspaceId = (() => {
       const existing = existingJobs[0]?.workspaceId;
-      if (existing && existing !== TEMP_WORKSPACE_ID) return existing;
-      if (sessionWorkspaceId && sessionWorkspaceId !== TEMP_WORKSPACE_ID) return sessionWorkspaceId;
+      if (existing && this.isPersistedWorkspaceId(existing)) return existing;
+      if (sessionWorkspaceId && this.isPersistedWorkspaceId(sessionWorkspaceId)) return sessionWorkspaceId;
       return this.createDedicatedWorkspaceForScheduledJob(jobName).id;
     })();
 
@@ -3086,8 +3130,8 @@ export class MessageRouter {
 
     const workspaceId = (() => {
       const existing = existingJobs[0]?.workspaceId;
-      if (existing && existing !== TEMP_WORKSPACE_ID) return existing;
-      if (sessionWorkspaceId && sessionWorkspaceId !== TEMP_WORKSPACE_ID) return sessionWorkspaceId;
+      if (existing && this.isPersistedWorkspaceId(existing)) return existing;
+      if (sessionWorkspaceId && this.isPersistedWorkspaceId(sessionWorkspaceId)) return sessionWorkspaceId;
       return this.createDedicatedWorkspaceForScheduledJob(name).id;
     })();
 
@@ -3305,7 +3349,9 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string
   ): Promise<void> {
-    const workspaces = this.workspaceRepo.findAll();
+    const workspaces = this.workspaceRepo
+      .findAll()
+      .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
 
     if (workspaces.length === 0) {
       await adapter.sendMessage({
@@ -3385,7 +3431,7 @@ export class MessageRouter {
 
       // Auto-assign temp workspace if none selected
       if (!session?.workspaceId) {
-        const tempWorkspace = this.getOrCreateTempWorkspace();
+        const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
         this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
         session = this.sessionRepo.findById(sessionId);
       }
@@ -3393,7 +3439,7 @@ export class MessageRouter {
       if (session?.workspaceId) {
         const workspace = this.workspaceRepo.findById(session.workspaceId);
         if (workspace) {
-          const isTempWorkspace = workspace.id === TEMP_WORKSPACE_ID;
+          const isTempWorkspace = workspace.isTemp || isTempWorkspaceId(workspace.id);
           const displayName = isTempWorkspace ? 'Temporary Workspace (work in a folder for persistence)' : workspace.name;
           await adapter.sendMessage({
             chatId: message.chatId,
@@ -3414,7 +3460,9 @@ export class MessageRouter {
       return;
     }
 
-    const workspaces = this.workspaceRepo.findAll();
+    const workspaces = this.workspaceRepo
+      .findAll()
+      .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
     const selector = args.join(' ');
     let workspace;
 
@@ -3439,7 +3487,7 @@ export class MessageRouter {
 
     // Update session workspace
     this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
-    if (workspace.id !== TEMP_WORKSPACE_ID) {
+    if (!workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
       try {
         this.workspaceRepo.updateLastUsedAt(workspace.id);
       } catch (error) {
@@ -4041,7 +4089,7 @@ export class MessageRouter {
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
       session = this.sessionRepo.findById(sessionId);
     }
@@ -4253,7 +4301,7 @@ export class MessageRouter {
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
       session = this.sessionRepo.findById(sessionId);
     }
@@ -5710,7 +5758,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
       session = this.sessionRepo.findById(sessionId);
     }
@@ -5757,7 +5805,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace();
+      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
       this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
       session = this.sessionRepo.findById(sessionId);
     }

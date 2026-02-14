@@ -428,7 +428,7 @@ export const CONTEXT_TOOL_RESTRICTIONS: Record<GatewayContextType, {
   },
 };
 
-// Success Criteria for Goal Mode
+// Success criteria for verification/retry metadata
 export type SuccessCriteriaType = 'shell_command' | 'file_exists';
 
 export interface SuccessCriteria {
@@ -476,6 +476,8 @@ export interface AgentConfig {
   bypassQueue?: boolean;
   /** Whether this task may pause and wait for user input (default: true) */
   allowUserInput?: boolean;
+  /** Whether to run with reduced friction in autonomous mode (auto-approve approval-gated tools) */
+  autonomousMode?: boolean;
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -497,7 +499,7 @@ export interface Task {
   budgetTokens?: number;
   budgetCost?: number;
   error?: string | null;
-  // Goal Mode fields
+  // Verification/retry metadata
   successCriteria?: SuccessCriteria;
   maxAttempts?: number;        // Default: 3, max: 10
   currentAttempt?: number;     // Tracks which attempt we're on
@@ -598,7 +600,14 @@ export interface Workspace {
 
 // Temp workspace constants
 export const TEMP_WORKSPACE_ID = '__temp_workspace__';
+export const TEMP_WORKSPACE_ID_PREFIX = '__temp_workspace__:';
 export const TEMP_WORKSPACE_NAME = 'Temporary Workspace';
+export const TEMP_WORKSPACE_ROOT_DIR_NAME = 'cowork-os-temp';
+
+export function isTempWorkspaceId(id: string | null | undefined): boolean {
+  if (typeof id !== 'string') return false;
+  return id === TEMP_WORKSPACE_ID || id.startsWith(TEMP_WORKSPACE_ID_PREFIX);
+}
 
 /**
  * Sandbox type for command execution isolation

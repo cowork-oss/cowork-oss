@@ -8,7 +8,7 @@ import { app, ipcMain, BrowserWindow } from 'electron';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import path from 'path';
-import { IPC_CHANNELS, TEMP_WORKSPACE_ID } from '../../shared/types';
+import { IPC_CHANNELS, isTempWorkspaceId } from '../../shared/types';
 import type {
   ControlPlaneSettingsData,
   ControlPlaneStatus,
@@ -644,7 +644,7 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
   server.registerMethod(Methods.WORKSPACE_LIST, async (client) => {
     requireScope(client, 'read');
     const all = workspaceRepo.findAll();
-    const workspaces = all.filter((w) => w.id !== TEMP_WORKSPACE_ID);
+    const workspaces = all.filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
     return {
       workspaces: isAdminClient(client) ? workspaces : workspaces.map(redactWorkspaceForRead),
     };
@@ -697,12 +697,19 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     }
 
     // Create task record
+    const normalizedAgentConfig = validated.agentConfig
+      ? {
+        ...validated.agentConfig,
+        ...(validated.agentConfig.autonomousMode ? { allowUserInput: false } : {}),
+      }
+      : undefined;
+
     const task = taskRepo.create({
       title: validated.title,
       prompt: validated.prompt,
       status: 'pending',
       workspaceId: validated.workspaceId,
-      agentConfig: validated.agentConfig,
+      agentConfig: normalizedAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
     });
@@ -718,7 +725,7 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
       Object.assign(task, initialUpdates);
     }
 
-    if (validated.workspaceId !== TEMP_WORKSPACE_ID) {
+    if (!isTempWorkspaceId(validated.workspaceId) && !workspace?.isTemp) {
       try {
         workspaceRepo.updateLastUsedAt(validated.workspaceId);
       } catch (error) {
@@ -1053,7 +1060,7 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     requireScope(client, 'read');
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = workspaceRepo.findAll().filter((w) => w.id !== TEMP_WORKSPACE_ID);
+    const allWorkspaces = workspaceRepo.findAll().filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
     const taskStatusRows = db

@@ -6,14 +6,7 @@ import { GuardrailManager } from '../../guardrails/guardrail-manager';
 import { checkProjectAccess, getProjectIdFromWorkspaceRelPath, getWorkspaceRelativePosixPath } from '../../security/project-access';
 import mammoth from 'mammoth';
 import { extractPptxContentFromFile } from '../../utils/pptx-extractor';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParseModule = require('pdf-parse');
-// Handle both ESM default export and CommonJS module.exports
-const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as (dataBuffer: Buffer) => Promise<{
-  numpages: number;
-  info: { Title?: string; Author?: string };
-  text: string;
-}>;
+import { parsePdfBuffer } from '../../utils/pdf-parser';
 
 // Limits to prevent context overflow
 const MAX_FILE_SIZE = 100 * 1024; // 100KB max for file reads
@@ -441,7 +434,7 @@ export class FileTools {
   private async readPdfFile(fullPath: string, size: number): Promise<{ content: string; size: number; truncated?: boolean; format: string }> {
     try {
       const dataBuffer = await fs.readFile(fullPath);
-      const data = await pdfParse(dataBuffer);
+      const data = await parsePdfBuffer(dataBuffer);
 
       let content = data.text;
 

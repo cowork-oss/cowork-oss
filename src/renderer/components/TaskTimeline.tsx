@@ -11,7 +11,6 @@ import {
   PackageIcon,
   PauseIcon,
   PlayIcon,
-  ShieldIcon,
   SlidersIcon,
   StopIcon,
   TargetIcon,
@@ -135,9 +134,13 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
       case 'task_cancelled':
         return 'Session stopped';
       case 'approval_requested':
-        return isCompanion
-          ? `I need your input: ${event.payload.approval?.description}`
-          : `Need your input: ${event.payload.approval?.description}`;
+        return event.payload?.autoApproved === true
+          ? isCompanion
+            ? `Auto-approved: ${event.payload.approval?.description}`
+            : `Auto-approved: ${event.payload.approval?.description}`
+          : isCompanion
+            ? `I need your input: ${event.payload.approval?.description}`
+            : `Need your input: ${event.payload.approval?.description}`;
       case 'approval_granted':
         return 'Approval granted';
       case 'approval_denied':

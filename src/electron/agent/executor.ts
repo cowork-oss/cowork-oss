@@ -1,4 +1,4 @@
-import { Task, Workspace, Plan, PlanStep, TaskEvent, SuccessCriteria, TEMP_WORKSPACE_ID } from '../../shared/types';
+import { Task, Workspace, Plan, PlanStep, TaskEvent, SuccessCriteria, isTempWorkspaceId } from '../../shared/types';
 import { isVerificationStepDescription } from '../../shared/plan-utils';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -37,6 +37,15 @@ class AwaitingUserInputError extends Error {
     this.name = 'AwaitingUserInputError';
   }
 }
+
+type CompletionContract = {
+  requiresExecutionEvidence: boolean;
+  requiresDirectAnswer: boolean;
+  requiresDecisionSignal: boolean;
+  requiresArtifactEvidence: boolean;
+  requiredArtifactExtensions: string[];
+  requiresVerificationEvidence: boolean;
+};
 
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
@@ -1782,8 +1791,9 @@ ${transcript}
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${task.prompt}`);
     const allowUserInput = task.agentConfig?.allowUserInput ?? true;
+    const autonomousMode = task.agentConfig?.autonomousMode === true;
     // Only interactive main tasks should pause for user input.
-    this.shouldPauseForQuestions = allowUserInput && !task.parentTaskId && (task.agentType ?? 'main') === 'main';
+    this.shouldPauseForQuestions = allowUserInput && !autonomousMode && !task.parentTaskId && (task.agentType ?? 'main') === 'main';
     // Get base settings
     const settings = LLMProviderFactory.loadSettings();
 
@@ -1884,7 +1894,7 @@ ${transcript}
 
     // Set up plan revision handler
     this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
-      this.handlePlanRevision(newSteps, reason, clearRemaining);
+      this.requestPlanRevision(newSteps, reason, clearRemaining);
     });
 
     // Set up workspace switch handler
@@ -2555,6 +2565,269 @@ ${transcript}
     return undefined;
   }
 
+  private promptRequiresDirectAnswer(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    if (prompt.includes('?')) return true;
+    return (
+      /\blet me know\b/.test(prompt) ||
+      /\btell me\b/.test(prompt) ||
+      /\badvise\b/.test(prompt) ||
+      /\brecommend\b/.test(prompt) ||
+      /\bwhether\b/.test(prompt) ||
+      /\bwhich\b.*\b(best|better|choose|option)\b/.test(prompt) ||
+      /\bwhat should\b/.test(prompt) ||
+      /\bshould i\b/.test(prompt)
+    );
+  }
+
+  private promptRequestsDecision(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    return (
+      /\bshould i\b/.test(prompt) ||
+      /\bwhether\b/.test(prompt) ||
+      /\bwhich\b.*\bchoose\b/.test(prompt) ||
+      /\bworth\b/.test(prompt) ||
+      /\bwaste of\b/.test(prompt) ||
+      /\brecommend\b/.test(prompt) ||
+      /\bbest option\b/.test(prompt)
+    );
+  }
+
+  private promptIsWatchSkipRecommendationTask(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    const hasVideoOrTranscriptCue = /\b(video|youtube|podcast|transcript|clip|vlog)\b/.test(prompt);
+    const hasReviewWorkCue = /\b(transcribe|summarize|review|evaluate|assess|analy[sz]e|watch)\b/.test(prompt);
+    const hasDecisionCue =
+      /\b(should i|whether|which\b.*\b(choose|better)|worth|waste of|recommend|watch|skip)\b/.test(prompt) ||
+      /\brecommend\b/.test(prompt);
+
+    return hasVideoOrTranscriptCue && hasReviewWorkCue && hasDecisionCue;
+  }
+
+  private shouldRequireExecutionEvidence(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    return /\b(create|build|write|generate|transcribe|summarize|analyze|review|fix|implement|run|execute)\b/.test(prompt);
+  }
+
+  private promptRequestsArtifactOutput(): boolean {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    const createVerb = /\b(create|build|write|generate|produce|draft|prepare|save|export)\b/.test(prompt);
+    const artifactNoun =
+      /\b(file|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides)\b/.test(prompt);
+    return createVerb && artifactNoun;
+  }
+
+  private inferRequiredArtifactExtensions(): string[] {
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    const extensions = new Set<string>();
+
+    if (/\bpdf\b|\.pdf\b/.test(prompt)) extensions.add('.pdf');
+    if (/\bdocx\b|\.docx\b|\bword document\b/.test(prompt)) extensions.add('.docx');
+    if (/\bmarkdown\b|\.md\b|\bmd file\b/.test(prompt)) extensions.add('.md');
+    if (/\bcsv\b|\.csv\b/.test(prompt)) extensions.add('.csv');
+    if (/\bxlsx\b|\.xlsx\b|\bexcel\b|\bspreadsheet\b/.test(prompt)) extensions.add('.xlsx');
+    if (/\bjson\b|\.json\b/.test(prompt)) extensions.add('.json');
+    if (/\btxt\b|\.txt\b|\btext file\b/.test(prompt)) extensions.add('.txt');
+    if (/\bpptx\b|\.pptx\b|\bpowerpoint\b|\bslides?\b/.test(prompt)) extensions.add('.pptx');
+
+    return Array.from(extensions);
+  }
+
+  private buildCompletionContract(): CompletionContract {
+    const requiresExecutionEvidence = this.shouldRequireExecutionEvidence();
+    const requiresDirectAnswer = this.promptRequiresDirectAnswer();
+    const requiresDecisionSignal = this.promptRequestsDecision();
+    const requiredArtifactExtensions = this.inferRequiredArtifactExtensions();
+    const isWatchSkipRecommendationTask = this.promptIsWatchSkipRecommendationTask();
+    const requiresArtifactEvidence =
+      (this.promptRequestsArtifactOutput() || requiredArtifactExtensions.length > 0) &&
+      !isWatchSkipRecommendationTask;
+    const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+    const hasReviewCue = /\b(review|evaluate|assess|verify|check|read|audit)\b/.test(prompt);
+    const hasJudgmentCue = /\b(let me know|tell me|advise|recommend|whether|should i|worth|waste of)\b/.test(prompt);
+    const hasEvidenceWorkCue = /\b(transcribe|summarize|review|evaluate|assess|audit|analy[sz]e|watch|read)\b/.test(prompt);
+    const hasSequencingCue = /\b(and then|then|after|based on)\b/.test(prompt);
+    const requiresVerificationEvidence =
+      requiresExecutionEvidence &&
+      (hasReviewCue || (hasJudgmentCue && hasEvidenceWorkCue && hasSequencingCue));
+
+    return {
+      requiresExecutionEvidence,
+      requiresDirectAnswer,
+      requiresDecisionSignal,
+      requiresArtifactEvidence,
+      requiredArtifactExtensions,
+      requiresVerificationEvidence,
+    };
+  }
+
+  private responseHasDecisionSignal(text: string): boolean {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized.trim()) return false;
+    return (
+      /\byes\b/.test(normalized) ||
+      /\bno\b/.test(normalized) ||
+      /\bi recommend\b/.test(normalized) ||
+      /\byou should\b/.test(normalized) ||
+      /\bshould (?:you|i|we)\b/.test(normalized) ||
+      /\bgo with\b/.test(normalized) ||
+      /\bchoose\b/.test(normalized) ||
+      /\bworth(?:\s+it)?\b/.test(normalized) ||
+      /\bnot worth\b/.test(normalized) ||
+      /\bskip\b/.test(normalized)
+    );
+  }
+
+  private responseHasVerificationSignal(text: string): boolean {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized.trim()) return false;
+    return (
+      /\bi\s+(reviewed|read|analyzed|assessed|verified|checked)\b/.test(normalized) ||
+      /\bafter\s+(reviewing|reading|analyzing)\b/.test(normalized) ||
+      /\bbased on\b/.test(normalized) ||
+      /\bfindings\b/.test(normalized) ||
+      /\bkey takeaways\b/.test(normalized) ||
+      /\brecommendation\b/.test(normalized)
+    );
+  }
+
+  private responseLooksOperationalOnly(text: string): boolean {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) return true;
+
+    const hasArtifactReference =
+      /\.(pdf|docx|txt|md|csv|xlsx|pptx|json)\b/.test(normalized) ||
+      /\b(document|file|report|output|artifact)\b/.test(normalized);
+    const hasStatusVerb =
+      /\b(created|saved|generated|wrote|updated|exported|finished|completed|done)\b/.test(normalized);
+    const hasReasoningCue =
+      /\b(because|therefore|so that|tradeoff|pros|cons|reason|recommend|should|why|answer|conclusion)\b/.test(normalized);
+
+    const sentenceCount = normalized
+      .split(/[.!?]\s+/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .length;
+
+    if (/^created:\s+\S+/i.test(normalized) || /^saved:\s+\S+/i.test(normalized)) {
+      return true;
+    }
+
+    return hasArtifactReference && hasStatusVerb && !hasReasoningCue && sentenceCount <= 2 && normalized.length < 320;
+  }
+
+  private getBestFinalResponseCandidate(): string {
+    const candidates = [
+      this.buildResultSummary(),
+      this.lastAssistantText,
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+      return trimmed;
+    }
+
+    return '';
+  }
+
+  private responseDirectlyAddressesPrompt(text: string, contract: CompletionContract): boolean {
+    const normalized = String(text || '').trim();
+    if (!normalized) return false;
+    if (!contract.requiresDirectAnswer) return true;
+    if (this.responseLooksOperationalOnly(normalized)) return false;
+    if (contract.requiresDecisionSignal && !this.responseHasDecisionSignal(normalized)) return false;
+    const needsDetailedAnswer = contract.requiresExecutionEvidence || contract.requiresDecisionSignal;
+    if (needsDetailedAnswer && normalized.length < TaskExecutor.MIN_RESULT_SUMMARY_LENGTH) return false;
+    return true;
+  }
+
+  private fallbackContainsDirectAnswer(contract: CompletionContract): boolean {
+    const fallbackCandidates = [
+      this.lastAssistantText,
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+    ];
+    return fallbackCandidates.some(candidate => this.responseDirectlyAddressesPrompt(candidate || '', contract));
+  }
+
+  private hasExecutionEvidence(): boolean {
+    if (!this.plan) return true;
+    return this.plan.steps.some(step => step.status === 'completed');
+  }
+
+  private hasArtifactEvidence(contract: CompletionContract): boolean {
+    if (!contract.requiresArtifactEvidence) return true;
+
+    const createdFiles = this.fileOperationTracker?.getCreatedFiles?.() || [];
+    if (createdFiles.length === 0) return false;
+
+    if (!contract.requiredArtifactExtensions.length) return true;
+    const lowered = createdFiles.map(file => String(file).toLowerCase());
+    return contract.requiredArtifactExtensions.some(ext => lowered.some(file => file.endsWith(ext)));
+  }
+
+  private hasVerificationEvidence(bestCandidate: string): boolean {
+    const hasCompletedReviewStep = !!this.plan?.steps?.some(step =>
+      step.status === 'completed' &&
+      (
+        isVerificationStepDescription(step.description) ||
+        /\b(review|evaluate|assess|verify|check|read|audit|analy[sz]e)\b/i.test(step.description || '')
+      )
+    );
+    return hasCompletedReviewStep || this.responseHasVerificationSignal(bestCandidate);
+  }
+
+  private getFinalOutcomeGuardError(): string | null {
+    const contract = this.buildCompletionContract();
+
+    if (contract.requiresExecutionEvidence && !this.hasExecutionEvidence()) {
+      return 'Task missing execution evidence: no plan step completed successfully.';
+    }
+
+    if (!this.hasArtifactEvidence(contract)) {
+      const requested = contract.requiredArtifactExtensions.join(', ');
+      return requested
+        ? `Task missing artifact evidence: expected an output artifact (${requested}) but no matching created file was detected.`
+        : 'Task missing artifact evidence: expected an output file/document but no created file was detected.';
+    }
+
+    const bestCandidate = this.getBestFinalResponseCandidate();
+    if (contract.requiresDirectAnswer && !this.responseDirectlyAddressesPrompt(bestCandidate, contract)) {
+      if (this.fallbackContainsDirectAnswer(contract)) {
+        return null;
+      }
+      return 'Task missing direct answer: the final response does not clearly answer the user request and appears to be operational status only.';
+    }
+
+    if (contract.requiresVerificationEvidence && !this.hasVerificationEvidence(bestCandidate)) {
+      return 'Task missing verification evidence: no completed review/verification step or review-backed conclusion was detected.';
+    }
+
+    return null;
+  }
+
+  private getFinalResponseGuardError(): string | null {
+    return this.getFinalOutcomeGuardError();
+  }
+
+  private finalizeTask(resultSummary?: string): void {
+    const finalResponseGuardError = this.getFinalResponseGuardError();
+    if (finalResponseGuardError) {
+      throw new Error(finalResponseGuardError);
+    }
+
+    this.saveConversationSnapshot();
+    this.taskCompleted = true;
+    const summary = (typeof resultSummary === 'string' && resultSummary.trim())
+      ? resultSummary.trim()
+      : this.buildResultSummary();
+    this.daemon.completeTask(this.task.id, summary);
+  }
+
   private getToolInputValidationError(toolName: string, input: any): string | null {
     if (toolName === 'create_document') {
       if (!input?.filename) return 'create_document requires a filename';
@@ -2566,6 +2839,44 @@ ${transcript}
       if (!input?.content) return 'write_file requires content';
     }
     return null;
+  }
+
+  private isHardToolFailure(toolName: string, result: any, failureReason = ''): boolean {
+    if (!result || result.success !== false) {
+      return false;
+    }
+
+    if (result.disabled === true || result.unavailable === true || result.blocked === true) {
+      return true;
+    }
+
+    if (result.missing_requirements || result.missing_tools || result.missing_items) {
+      return true;
+    }
+
+    const message = String(failureReason || result.error || result.reason || '').toLowerCase();
+    if (!message) {
+      return false;
+    }
+
+    if (toolName === 'use_skill') {
+      return /not currently executable|cannot be invoked automatically|not found|blocked by|disabled/.test(message);
+    }
+
+    return /not currently executable|blocked by|disabled|not available in this context|not configured/.test(message);
+  }
+
+  private getToolFailureReason(result: any, fallback: string): string {
+    if (typeof result?.error === 'string' && result.error.trim()) {
+      return result.error;
+    }
+    if (typeof result?.terminationReason === 'string') {
+      return `termination: ${result.terminationReason}`;
+    }
+    if (typeof result?.exitCode === 'number') {
+      return `exit code ${result.exitCode}`;
+    }
+    return fallback;
   }
 
   private async handleCanvasPushFallback(content: LLMToolUse, assistantText: string): Promise<void> {
@@ -2962,7 +3273,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     // Re-register handlers after recreating tool registry
     this.toolRegistry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
-      this.handlePlanRevision(newSteps, reason, clearRemaining);
+      this.requestPlanRevision(newSteps, reason, clearRemaining);
     });
     this.toolRegistry.setWorkspaceSwitchHandler(async (newWorkspace) => {
       await this.handleWorkspaceSwitch(newWorkspace);
@@ -2972,7 +3283,7 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
-   * Verify success criteria for Goal Mode
+   * Verify success criteria for verification loop
    * @returns Object with success status and message
    */
   private async verifySuccessCriteria(): Promise<{ success: boolean; message: string }> {
@@ -3021,7 +3332,7 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
-   * Reset state for retry attempt in Goal Mode
+   * Reset state for retry attempt
    */
   private resetForRetry(): void {
     // Reset plan steps to pending
@@ -3111,12 +3422,7 @@ You are continuing a previous conversation. The context from the previous conver
     return `${String(stepDescription || '')}::${String(reason || '').slice(0, 240).toLowerCase()}`;
   }
 
-  /**
-   * Handle plan revision request from the LLM
-   * Can add new steps, clear remaining steps, or both
-   * Enforces a maximum revision limit to prevent infinite loops
-   */
-  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
+  private requestPlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
     if (!this.plan) {
       console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
       return;
@@ -3133,9 +3439,23 @@ You are continuing a previous conversation. The context from the previous conver
       });
       return;
     }
+    this.handlePlanRevision(newSteps, reason, clearRemaining);
+  }
+
+  /**
+   * Handle plan revision request from the LLM
+   * Can add new steps, clear remaining steps, or both
+   */
+  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
+    if (!this.plan) {
+      console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
+      return;
+    }
 
     // If clearRemaining is true, remove all pending steps
     let clearedCount = 0;
+
+    // If clearRemaining is true, remove all pending steps
     if (clearRemaining) {
       const currentStepIndex = this.plan.steps.findIndex(s => s.status === 'in_progress');
       if (currentStepIndex !== -1) {
@@ -3438,6 +3758,10 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private getWorkspaceSignals(): { hasProjectMarkers: boolean; hasCodeFiles: boolean; hasAppDirs: boolean } {
+    return this.getWorkspaceSignalsForPath(this.workspace.path);
+  }
+
+  private getWorkspaceSignalsForPath(workspacePath: string): { hasProjectMarkers: boolean; hasCodeFiles: boolean; hasAppDirs: boolean } {
     const projectMarkers = new Set([
       'package.json',
       'pnpm-lock.yaml',
@@ -3469,7 +3793,7 @@ You are continuing a previous conversation. The context from the previous conver
     ]);
 
     try {
-      const entries = fs.readdirSync(this.workspace.path, { withFileTypes: true });
+      const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
       let hasProjectMarkers = false;
       let hasCodeFiles = false;
       let hasAppDirs = false;
@@ -3547,7 +3871,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     const signals = this.getWorkspaceSignals();
     const looksLikeProject = signals.hasProjectMarkers || signals.hasCodeFiles || signals.hasAppDirs;
-    const isTemp = this.workspace.isTemp || this.workspace.id === TEMP_WORKSPACE_ID;
+    const isTemp = this.workspace.isTemp || isTempWorkspaceId(this.workspace.id);
 
     if (isTemp && !looksLikeProject && workspaceNeed === 'ambiguous') {
       // Safe default: prefer a real, recent workspace over creating in temp when intent is ambiguous.
@@ -3586,6 +3910,12 @@ You are continuing a previous conversation. The context from the previous conver
       if (!preferred) return false;
       if (preferred.id === this.workspace.id) return false;
       if (!preferred.path || !fs.existsSync(preferred.path) || !fs.statSync(preferred.path).isDirectory()) {
+        return false;
+      }
+      const preferredSignals = this.getWorkspaceSignalsForPath(preferred.path);
+      const preferredLooksLikeProject =
+        preferredSignals.hasProjectMarkers || preferredSignals.hasCodeFiles || preferredSignals.hasAppDirs;
+      if (!preferredLooksLikeProject) {
         return false;
       }
 
@@ -3837,9 +4167,7 @@ You are continuing a previous conversation. The context from the previous conver
     };
 
     const finishOk = (resultSummary: string) => {
-      this.saveConversationSnapshot();
-      this.taskCompleted = true;
-      this.daemon.completeTask(this.task.id, resultSummary);
+      this.finalizeTask(resultSummary);
     };
 
     const runScheduleTool = async (input: any): Promise<any> => {
@@ -4123,6 +4451,196 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Check whether the prompt is conversational and should be handled as a friendly chat
+   * instead of full task execution.
+   */
+  private isCompanionPrompt(prompt: string): boolean {
+    const raw = String(prompt || '').trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase();
+
+    if (lower.startsWith('/')) return false;
+    if (raw.length > 240) return false;
+    if (this.isRecoveryIntent(lower) || this.isCapabilityUpgradeIntent(lower) || this.isInternalAppOrToolChangeIntent(lower)) {
+      return false;
+    }
+    if (this.isLikelyTaskRequest(lower)) {
+      return false;
+    }
+    if (this.isCasualCompanionPrompt(lower)) {
+      return true;
+    }
+
+    return this.isLikelyCompanionTask(lower);
+  }
+
+  private isCasualCompanionPrompt(lower: string): boolean {
+    const compact = lower.trim().replace(/\s+/g, ' ');
+
+    if (!compact) {
+      return false;
+    }
+
+    const casualPatterns = [
+      /^(hi|hey|hello|yo|sup|greetings|good morning|good afternoon|good evening|good night|hey there|hi there|hello there|yo|hiya)([.!?\s]*)$/,
+      /^(thanks|thank you|thx|ty|nice one|good work|great work|you're great|you are great)([.!?\s]*)$/,
+      /^(how are you|how's it going|how are things|what's up|what’s up|whats up|how have you been)([.!?\s]*)$/,
+      /^(goodbye|bye|see you|talk soon|see ya|ciao)([.!?\s]*)$/,
+      /^(i am here|i'm here|i'm back|i am back|im ready|i'm ready|you're amazing|you are amazing)([.!?\s]*)$/,
+      /^(can you tell me about yourself|who are you|what can you do|who am i|what am i|introduce yourself)([.!?\s]*)$/,
+      /^(\u{1F44B}|\u{1F44F}|\u{1F44C}|\u{1F44D}|\u{1F44E}|\u{2764})+$/u,
+    ];
+
+    if (casualPatterns.some((pattern) => pattern.test(compact))) {
+      return true;
+    }
+
+    const words = compact.split(/\s+/).filter(Boolean);
+    if (!words.length || words.length > 8) {
+      return false;
+    }
+
+    const casualWordSet = new Set([
+      'hi', 'hey', 'hello', 'yo', 'sup', 'thanks', 'thank', 'thx', 'ty',
+      'good', 'morning', 'afternoon', 'evening', 'night', 'how', 'are',
+      'you', 'here', 'back', 'ready', 'nice', 'bye', 'see', 'am', 'i', 'im',
+      'i\'m', 'glad', 'great', 'fine', 'okay', 'ok', 'goodnight', 'working',
+      'chat', 'check', 'in', 'anyway', 'well', 'cool', 'awesome',
+    ]);
+
+    return words.every((word) => casualWordSet.has(word));
+  }
+
+  private isLikelyCompanionTask(lower: string): boolean {
+    const likelyTaskPhrases = [
+      /\b(?:can|could|would|please)\s+(?:you|i)\s+(?:create|make|build|edit|write|find|search|check|show|open|run|fix|update|remove|set|configure|install|deploy|schedule|remind|summarize|analyze|review|start|stop|execute|inspect|watch|fetch)\b/i,
+      /\b(?:can|could|would|please|i need)\s+(?:help|assist)\s+with\b.*\b(?:file|files|folder|folders|repo|repository|project|code|codebase|document|task|issue|bug|script|web\s*site|website|page|workflow|setting|plan)\b/i,
+      /\b(?:create|make|build|open|read|write|edit|find|search|check|fix|update|install|configure|set|enable|disable|schedule|remind|summarize|analyze|review|start|stop|watch|fetch)\b/i,
+    ];
+    return likelyTaskPhrases.some((pattern) => pattern.test(lower));
+  }
+
+  private isLikelyTaskRequest(lower: string): boolean {
+    if (/\b(\/|\.\/|~\/|\.{2}\/|[A-Za-z]:\\|\/[a-z0-9_\-/.]+)/i.test(lower)) {
+      return true;
+    }
+
+    const explicitTaskVerb = /\b(?:create|make|build|edit|write|read|open|list|find|search|check|fix|remove|delete|add|update|modify|move|rename|copy|run|test|deploy|install|configure|set|enable|disable|schedule|remind|summarize|analyze|review|start|stop|open|show|convert|generate|draft|plan|execute|inspect|watch|fetch)\b/i;
+    const taskObject = /\b(?:file|files|folder|folders|repo|repository|project|workspace|code|codebase|document|documents|issue|bug|error|script|page|prompt|task|setting|message|commit|branch|agent|plan|tool)\b/i;
+    if (explicitTaskVerb.test(lower) && taskObject.test(lower)) {
+      return true;
+    }
+
+    const explicitHelpWith = /\b(?:can|could|would|please|help me|i need)\b[\s\S]{0,80}\b(?:with|for)\s+[\s\S]{0,80}\b(?:file|files|folder|folders|repo|repository|project|workspace|code|codebase|document|task|issue|bug|script|web\s*site|website|page|workflow|setting|plan)\b/i.test(lower);
+    const requestWithVerb =
+      /(?:can|could|would|please)\s+(?:you|i)\s+(?:create|make|build|edit|write|find|search|check|show|open|run|help|fix|update|remove|set|configure)\b/i.test(lower);
+    const requestAsQuestion =
+      /(?:can|could|would|do|does)\s+(?:you|i)\s+(?:have|help)\b.*\b(?:a|any|the)?\s*(?:task|bug|problem|repo|repository|file|folder|project|code|workspace|website|document)\b/i.test(lower);
+
+    return requestWithVerb || requestAsQuestion;
+  }
+
+  private generateCompanionFallbackResponse(prompt: string): string {
+    const agentName = PersonalityManager.getAgentName();
+    const userName = PersonalityManager.getUserName();
+    const greeting = PersonalityManager.getGreeting();
+    const lower = String(prompt || '').trim().toLowerCase();
+
+    if (/(who are you|who am i|introduce yourself|what can you do)/.test(lower)) {
+      if (userName) {
+        return `Hey ${userName}, I’m ${agentName}. I’m here as your workspace assistant, and we can tackle planning, coding, browsing, and more whenever you want.`;
+      }
+      return `I’m ${agentName}. I’m your assistant and ready to help with practical tasks.`;
+    }
+
+    if (/(how are you|how's it going|how is it going|how are things|what's up|what’s up|whats up|how have you been|good morning|good afternoon|good evening|good night)/.test(lower)) {
+      return `${greeting || 'Hi there'} I’m doing well and ready to help.`;
+    }
+
+    return `${greeting || 'Hi there'} I’m here and ready whenever you want to move forward.`;
+  }
+
+  /**
+   * Friendly companion-mode responder (single LLM call, no plan/tool pipeline).
+   */
+  private async handleCompanionPrompt(): Promise<void> {
+    const rawPrompt = String(this.task.prompt || '').trim();
+    const personalityIdOverride = this.task.agentConfig?.personalityId;
+    const personalityPrompt = personalityIdOverride
+      ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
+      : PersonalityManager.getPersonalityPrompt();
+    const identityPrompt = PersonalityManager.getIdentityPrompt();
+    const roleContext = this.getRoleContextPrompt();
+
+    this.daemon.updateTaskStatus(this.task.id, 'executing');
+
+    const systemPrompt = [
+      'You are a warm, friendly companion.',
+      `WORKSPACE: ${this.workspace.path}`,
+      `Current time: ${getCurrentDateTimeContext()}`,
+      identityPrompt,
+      roleContext ? `ROLE CONTEXT:\n${roleContext}` : '',
+      personalityPrompt,
+      'Response rules:',
+      '- Keep replies concise and conversational.',
+      '- This is a check-in conversation, not a full task execution turn.',
+      '- Respond naturally as a friendly teammate.',
+      '- If the user asks about your capabilities, answer briefly and invite them to share a concrete request.',
+      'Do NOT pretend to run tools or provide a technical plan for this turn.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      const response = await this.callLLMWithRetry(
+        () => withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: 220,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: rawPrompt }],
+            signal: this.abortController.signal,
+          }),
+          LLM_TIMEOUT_MS,
+          'Companion response'
+        ),
+        'Companion response'
+      );
+
+      if (response.usage) {
+        this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+      }
+
+      const text = this.extractTextFromLLMContent(response.content || []);
+      const assistantText = String(text || '').trim() || this.generateCompanionFallbackResponse(rawPrompt);
+
+      this.daemon.logEvent(this.task.id, 'assistant_message', { message: assistantText });
+      this.lastAssistantOutput = assistantText;
+      this.lastNonVerificationOutput = assistantText;
+      this.lastAssistantText = assistantText;
+      this.conversationHistory = [
+        { role: 'user', content: [{ type: 'text', text: rawPrompt }] },
+        { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
+      ];
+      const resultSummary = this.buildResultSummary() || assistantText;
+      this.finalizeTask(resultSummary);
+    } catch (error: any) {
+      const assistantText = this.generateCompanionFallbackResponse(rawPrompt);
+      this.daemon.logEvent(this.task.id, 'assistant_message', { message: assistantText });
+      this.lastAssistantOutput = assistantText;
+      this.lastNonVerificationOutput = assistantText;
+      this.lastAssistantText = assistantText;
+      this.conversationHistory = [
+        { role: 'user', content: [{ type: 'text', text: rawPrompt }] },
+        { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
+      ];
+      const resultSummary = this.buildResultSummary() || assistantText;
+      this.finalizeTask(resultSummary);
+      console.error('[TaskExecutor] Companion mode failed, using fallback reply:', error);
+    }
+  }
+
+  /**
    * Main execution loop
    */
   async execute(): Promise<void> {
@@ -4149,6 +4667,12 @@ You are continuing a previous conversation. The context from the previous conver
         return;
       }
 
+      // Friendly companion-mode for conversational prompts (greetings/check-ins).
+      if (this.isCompanionPrompt(this.task.prompt)) {
+        await this.handleCompanionPrompt();
+        return;
+      }
+
       // Phase 0: Pre-task Analysis (like Cowork's AskUserQuestion)
       // Analyze task complexity and check if clarification is needed
       const taskAnalysis = await this.analyzeTask();
@@ -4168,7 +4692,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       if (this.cancelled) return;
 
-      // Phase 2: Execution with Goal Mode retry loop
+      // Phase 2: Execution with verification retry loop
       const maxAttempts = this.task.maxAttempts || 1;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -4196,7 +4720,7 @@ You are continuing a previous conversation. The context from the previous conver
 
         if (this.cancelled) break;
 
-        // Verify success criteria if defined (Goal Mode)
+        // Verify success criteria if defined (verification mode)
         if (this.task.successCriteria) {
           const result = await this.verifySuccessCriteria();
 
@@ -4227,11 +4751,8 @@ You are continuing a previous conversation. The context from the previous conver
         throw new Error('Task required running tests, but no test command was executed.');
       }
 
-      // Phase 3: Completion
-      // Save conversation snapshot before completing task for future follow-ups
-      this.saveConversationSnapshot();
-      this.taskCompleted = true;  // Mark task as completed to prevent any further processing
-      this.daemon.completeTask(this.task.id, this.buildResultSummary());
+      // Phase 3: Completion (single guarded finalizer path)
+      this.finalizeTask(this.buildResultSummary());
     } catch (error: any) {
       // Don't log cancellation as an error - it's intentional
       const isCancellation = this.cancelled ||
@@ -4727,15 +5248,48 @@ Format your plan as a JSON object with this structure:
       const completedAfterStep = this.plan.steps.filter(s => s.status === 'completed').length;
       const totalAfterStep = this.plan.steps.length;
 
-      // Emit step completed progress
+      const latestStepState = this.plan.steps.find(s => s.id === step.id) ?? step;
+
+      if (latestStepState.status === 'failed') {
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          currentStep: step.id,
+          completedSteps: completedAfterStep,
+          totalSteps: totalAfterStep,
+          progress: totalAfterStep > 0 ? Math.round((completedAfterStep / totalAfterStep) * 100) : 0,
+          message: `Step failed ${step.id}: ${step.description}`,
+          hasFailures: true,
+        });
+      } else {
+        // Emit step completed progress
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          currentStep: step.id,
+          completedSteps: completedAfterStep,
+          totalSteps: totalAfterStep,
+          progress: totalAfterStep > 0 ? Math.round((completedAfterStep / totalAfterStep) * 100) : 100,
+          message: `Completed step ${step.id}: ${step.description}`,
+        });
+      }
+    }
+
+    const incompleteSteps = this.plan.steps.filter(s => s.status === 'pending' || s.status === 'in_progress');
+    if (incompleteSteps.length > 0) {
+      const totalSteps = this.plan.steps.length;
+      const successfulStepsCount = this.plan.steps.filter(s => s.status === 'completed').length;
+      const progress = totalSteps > 0 ? Math.round((successfulStepsCount / totalSteps) * 100) : 0;
       this.daemon.logEvent(this.task.id, 'progress_update', {
         phase: 'execution',
-        currentStep: step.id,
-        completedSteps: completedAfterStep,
-        totalSteps: totalAfterStep,
-        progress: totalAfterStep > 0 ? Math.round((completedAfterStep / totalAfterStep) * 100) : 100,
-        message: `Completed step ${step.id}: ${step.description}`,
+        completedSteps: successfulStepsCount,
+        totalSteps,
+        progress,
+        message: `Execution incomplete: ${incompleteSteps.length} step(s) did not finish`,
+        hasFailures: true,
       });
+      throw new Error(
+        `Task incomplete: ${incompleteSteps.length} step(s) did not finish - ` +
+        incompleteSteps.map(s => s.description).join('; ')
+      );
     }
 
     // Check if any steps failed
@@ -4747,22 +5301,19 @@ Format your plan as a JSON object with this structure:
       const failedDescriptions = failedSteps.map(s => s.description).join(', ');
       console.log(`[TaskExecutor] ${failedSteps.length} step(s) failed: ${failedDescriptions}`);
 
-      // If critical steps failed (not just verification), this should be marked
-      const criticalFailures = failedSteps.filter(s => !s.description.toLowerCase().includes('verify'));
-      if (criticalFailures.length > 0) {
-        const totalSteps = this.plan.steps.length;
-        const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
-        this.daemon.logEvent(this.task.id, 'progress_update', {
-          phase: 'execution',
-          completedSteps: successfulSteps.length,
-          totalSteps,
-          progress,
-          message: `Completed with ${criticalFailures.length} failed step(s)`,
-          hasFailures: true,
-        });
-        // Throw error to mark task as failed
-        throw new Error(`Task partially completed: ${criticalFailures.length} step(s) failed - ${criticalFailures.map(s => s.description).join('; ')}`);
-      }
+      const totalSteps = this.plan.steps.length;
+      const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'execution',
+        completedSteps: successfulSteps.length,
+        totalSteps,
+        progress,
+        message: `Execution failed: ${failedSteps.length} step(s) failed`,
+        hasFailures: true,
+      });
+
+      // Any failed step means the task is not complete.
+      throw new Error(`Task failed: ${failedSteps.length} step(s) failed - ${failedSteps.map(s => s.description).join('; ')}`);
     }
 
     // Emit completion progress (only if no critical failures)
@@ -5159,6 +5710,20 @@ TASK / CONVERSATION HISTORY:
           return 'Action required: Enable/reconnect the integration in Settings > Integrations, then try again.';
         }
 
+        const approvalBlocked =
+          lower.includes('approval request timed out') ||
+          lower.includes('user denied approval') ||
+          lower.includes('approval denied') ||
+          lower.includes('requires approval');
+        if (approvalBlocked) {
+          if (toolName === 'run_applescript') {
+            return 'Action required: Approve or deny the AppleScript request to continue.';
+          }
+          if (toolName === 'run_command') {
+            return 'Action required: Approve or deny the shell command request to continue.';
+          }
+        }
+
         return null;
       };
 
@@ -5428,6 +5993,7 @@ TASK / CONVERSATION HISTORY:
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
+        let hasHardToolFailureAttempt = false;
         const availableToolNames = new Set(availableTools.map(tool => tool.name));
 
         for (const content of response.content || []) {
@@ -5446,6 +6012,10 @@ TASK / CONVERSATION HISTORY:
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
               console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              hadToolError = true;
+              toolErrors.add(content.name);
+              const disabledFailureReason = `Tool ${content.name} failed: ${lastError}`;
+              lastToolErrorReason = disabledFailureReason;
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: `Tool disabled due to repeated failures: ${lastError}`,
@@ -5461,12 +6031,52 @@ TASK / CONVERSATION HISTORY:
                 is_error: true,
               });
               hasDisabledToolAttempt = true;
+              hasHardToolFailureAttempt = true;
               continue;
+            }
+
+            // Special guard for watch/skip recommendation tasks:
+            // These should return a direct recommendation instead of creating deliverables.
+            if (this.promptIsWatchSkipRecommendationTask()) {
+              const disallowedArtifactTools = [
+                'create_document',
+                'write_file',
+                'copy_file',
+                'create_spreadsheet',
+                'create_presentation',
+              ];
+              if (disallowedArtifactTools.includes(content.name)) {
+                this.daemon.logEvent(this.task.id, 'tool_blocked', {
+                  tool: content.name,
+                  reason: 'watch_skip_recommendation_task',
+                  message:
+                    `Tool "${content.name}" is not allowed for watch/skip recommendation tasks. ` +
+                    'Provide the transcript-based recommendation directly in a text response instead of creating files.',
+                });
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: content.id,
+                  content: JSON.stringify({
+                    error:
+                      `Tool "${content.name}" is not allowed for this watch/skip recommendation task. ` +
+                      'Please provide a direct "watch" or "skip" recommendation based on your analysis.',
+                    suggestion:
+                      'Switch to a text-only answer with your recommendation and brief rationale.',
+                    blocked: true,
+                  }),
+                  is_error: true,
+                });
+                continue;
+              }
             }
 
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
               console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
+              hadToolError = true;
+              toolErrors.add(content.name);
+              const unavailableFailureReason = `Tool ${content.name} failed: Tool not available`;
+              lastToolErrorReason = unavailableFailureReason;
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: 'Tool not available in current context or permissions',
@@ -5482,6 +6092,7 @@ TASK / CONVERSATION HISTORY:
                 is_error: true,
               });
               hasUnavailableToolAttempt = true;
+              hasHardToolFailureAttempt = true;
               continue;
             }
 
@@ -5674,10 +6285,7 @@ TASK / CONVERSATION HISTORY:
 
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false) {
-                const reason = result.error
-                  || (result.terminationReason ? `termination: ${result.terminationReason}` : undefined)
-                  || (typeof result.exitCode === 'number' ? `exit code ${result.exitCode}` : undefined)
-                  || 'unknown error';
+                const reason = this.getToolFailureReason(result, 'unknown error');
                 hadToolError = true;
                 toolErrors.add(content.name);
                 lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
@@ -5690,12 +6298,16 @@ TASK / CONVERSATION HISTORY:
 
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error || reason);
+                const isHardFailure = this.isHardToolFailure(content.name, result, result.error || reason);
                 if (shouldDisable) {
                   this.daemon.logEvent(this.task.id, 'tool_error', {
                     tool: content.name,
                     error: result.error || reason,
                     disabled: true,
                   });
+                  hasHardToolFailureAttempt = true;
+                } else if (isHardFailure) {
+                  hasHardToolFailureAttempt = true;
                 }
               } else if (hadToolError) {
                 hadToolSuccessAfterError = true;
@@ -5733,21 +6345,28 @@ TASK / CONVERSATION HISTORY:
                 result: result,
               });
 
-              const resultIsError = Boolean(result && result.success === false && result.error);
+              const resultIsError = Boolean(result && result.success === false);
+              const toolFailureReason = resultIsError ? this.getToolFailureReason(result, 'Tool execution failed') : '';
+
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
                 content: resultIsError
-                  ? JSON.stringify({ error: result.error, ...(result.url ? { url: result.url } : {}) })
+                  ? JSON.stringify({
+                    error: toolFailureReason,
+                    ...(result.url ? { url: result.url } : {}),
+                  })
                   : sanitizedResult,
                 is_error: resultIsError,
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
 
+              const failureMessage = error?.message || 'Tool execution failed';
+
               hadToolError = true;
               toolErrors.add(content.name);
-              lastToolErrorReason = `Tool ${content.name} failed: ${error.message}`;
+              lastToolErrorReason = `Tool ${content.name} failed: ${failureMessage}`;
               if (content.name === 'run_command') {
                 hadRunCommandFailure = true;
               }
@@ -5759,11 +6378,15 @@ TASK / CONVERSATION HISTORY:
               }
 
               // Track the failure
-              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
+              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, failureMessage);
+              const isHardFailure = this.isHardToolFailure(content.name, { error: failureMessage }, failureMessage);
+              if (shouldDisable || isHardFailure) {
+                hasHardToolFailureAttempt = true;
+              }
 
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
-                error: error.message,
+                error: failureMessage,
                 disabled: shouldDisable,
               });
 
@@ -5771,7 +6394,7 @@ TASK / CONVERSATION HISTORY:
                 type: 'tool_result',
                 tool_use_id: content.id,
                 content: JSON.stringify({
-                  error: error.message,
+                  error: failureMessage,
                   ...(pauseReason ? { suggestion: pauseReason, action_required: true } : {}),
                   ...(shouldDisable ? { disabled: true, message: 'Tool has been disabled due to repeated failures.' } : {}),
                 }),
@@ -5790,16 +6413,21 @@ TASK / CONVERSATION HISTORY:
           // If all tool attempts were for disabled or duplicate tools, don't continue looping
           // This prevents infinite retry loops
           const allToolsFailed = toolResults.every(r => r.is_error);
-          if ((hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt) && allToolsFailed) {
+          if (hasHardToolFailureAttempt && !lastFailureReason) {
+            stepFailed = true;
+            lastFailureReason = lastToolErrorReason || 'A required tool became unavailable or returned a hard failure.';
+          }
+          const shouldStopFromFailures =
+            (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt || hasHardToolFailureAttempt)
+            && allToolsFailed;
+          const shouldStopFromHardFailure = hasHardToolFailureAttempt;
+          if (shouldStopFromFailures) {
             console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
-            if (hasDuplicateToolAttempt) {
-              // Duplicate detection triggered - step is likely complete
-              stepFailed = false;
-              lastFailureReason = '';
-            } else {
-              stepFailed = true;
-              lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
-            }
+            stepFailed = true;
+            lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
+            continueLoop = false;
+          } else if (shouldStopFromHardFailure) {
+            console.log('[TaskExecutor] Hard tool failure detected - stopping iteration');
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -5912,7 +6540,7 @@ TASK / CONVERSATION HISTORY:
                   description: 'If normal tools are blocked, implement the smallest safe code/feature change needed to continue and complete the goal.',
                 },
               ];
-          this.handlePlanRevision(
+          this.requestPlanRevision(
             recoverySteps,
             `Recovery attempt: Previous step failed: ${lastFailureReason}`,
             false,
@@ -5982,9 +6610,7 @@ TASK / CONVERSATION HISTORY:
         }
       }
 
-      this.saveConversationSnapshot();
-      this.taskCompleted = true;
-      this.daemon.completeTask(this.task.id, this.buildResultSummary());
+      this.finalizeTask(this.buildResultSummary());
     } finally {
       await this.toolRegistry.cleanup().catch(e => {
         console.error('Cleanup error:', e);
@@ -6731,6 +7357,7 @@ TASK / CONVERSATION HISTORY:
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
         let hasUnavailableToolAttempt = false;
+        let hasHardToolFailureAttempt = false;
 
         for (const content of response.content || []) {
           if (content.type === 'tool_use') {
@@ -6748,6 +7375,7 @@ TASK / CONVERSATION HISTORY:
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
               console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              hasHardToolFailureAttempt = true;
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: `Tool disabled due to repeated failures: ${lastError}`,
@@ -6769,6 +7397,7 @@ TASK / CONVERSATION HISTORY:
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
               console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
+              hasHardToolFailureAttempt = true;
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
                 error: 'Tool not available in current context or permissions',
@@ -6927,13 +7556,18 @@ TASK / CONVERSATION HISTORY:
               this.recordFileOperation(content.name, content.input, result);
 
               // Check if the result indicates an error (some tools return error in result)
-              if (result && result.success === false && result.error) {
+              if (result && result.success === false) {
+                const reason = this.getToolFailureReason(result, 'unknown error');
                 // Check if this is a non-retryable error
-                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error);
+                const shouldDisable = this.toolFailureTracker.recordFailure(content.name, reason);
+                const isHardFailure = this.isHardToolFailure(content.name, result, reason);
+                if (shouldDisable || isHardFailure) {
+                  hasHardToolFailureAttempt = true;
+                }
                 if (shouldDisable) {
                   this.daemon.logEvent(this.task.id, 'tool_error', {
                     tool: content.name,
-                    error: result.error,
+                    error: reason,
                     disabled: true,
                   });
                 }
@@ -6949,20 +7583,34 @@ TASK / CONVERSATION HISTORY:
                 result: result,
               });
 
+              const resultIsError = Boolean(result && result.success === false);
+              const toolFailureReason = resultIsError ? this.getToolFailureReason(result, 'Tool execution failed') : '';
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
-                content: sanitizedResult,
+                content: resultIsError
+                  ? JSON.stringify({
+                    error: toolFailureReason,
+                    ...(result.url ? { url: result.url } : {}),
+                  })
+                  : sanitizedResult,
+                is_error: resultIsError,
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
 
+              const failureMessage = error?.message || 'Tool execution failed';
+
               // Track the failure
-              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
+              const shouldDisable = this.toolFailureTracker.recordFailure(content.name, failureMessage);
+              const isHardFailure = this.isHardToolFailure(content.name, { error: failureMessage }, failureMessage);
+              if (shouldDisable || isHardFailure) {
+                hasHardToolFailureAttempt = true;
+              }
 
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
-                error: error.message,
+                error: failureMessage,
                 disabled: shouldDisable,
               });
 
@@ -6970,7 +7618,7 @@ TASK / CONVERSATION HISTORY:
                 type: 'tool_result',
                 tool_use_id: content.id,
                 content: JSON.stringify({
-                  error: error.message,
+                  error: failureMessage,
                   ...(shouldDisable ? { disabled: true, message: 'Tool has been disabled due to repeated failures.' } : {}),
                 }),
                 is_error: true,
@@ -6988,8 +7636,15 @@ TASK / CONVERSATION HISTORY:
 
           // If all tool attempts were for disabled or duplicate tools, don't continue looping
           const allToolsFailed = toolResults.every(r => r.is_error);
-          if ((hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt) && allToolsFailed) {
+          const shouldStopFromFailures =
+            (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt || hasHardToolFailureAttempt)
+            && allToolsFailed;
+          const shouldStopFromHardFailure = hasHardToolFailureAttempt;
+          if (shouldStopFromFailures) {
             console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
+            continueLoop = false;
+          } else if (shouldStopFromHardFailure) {
+            console.log('[TaskExecutor] Hard tool failure detected - stopping iteration');
             continueLoop = false;
           } else {
             continueLoop = true;

@@ -91,7 +91,10 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
   executor.checkFileOperation = vi.fn().mockReturnValue({ blocked: false });
   executor.recordFileOperation = vi.fn();
   executor.recordCommandExecution = vi.fn();
-  executor.fileOperationTracker = { getKnowledgeSummary: vi.fn().mockReturnValue('') };
+  executor.fileOperationTracker = {
+    getKnowledgeSummary: vi.fn().mockReturnValue(''),
+    getCreatedFiles: vi.fn().mockReturnValue([]),
+  };
   executor.toolFailureTracker = {
     isDisabled: vi.fn().mockReturnValue(false),
     getLastError: vi.fn().mockReturnValue(''),
@@ -166,7 +169,10 @@ function createExecutorWithLLMHandler(
   executor.checkFileOperation = vi.fn().mockReturnValue({ blocked: false });
   executor.recordFileOperation = vi.fn();
   executor.recordCommandExecution = vi.fn();
-  executor.fileOperationTracker = { getKnowledgeSummary: vi.fn().mockReturnValue('') };
+  executor.fileOperationTracker = {
+    getKnowledgeSummary: vi.fn().mockReturnValue(''),
+    getCreatedFiles: vi.fn().mockReturnValue([]),
+  };
   executor.toolFailureTracker = {
     isDisabled: vi.fn().mockReturnValue(false),
     getLastError: vi.fn().mockReturnValue(''),
@@ -225,6 +231,63 @@ describe('TaskExecutor executeStep failure handling', () => {
     expect(step.error).toContain('run_command');
   });
 
+  it('marks step failed when only duplicate non-idempotent tool calls are attempted', async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse('run_command', { command: 'echo test' }),
+      ],
+      {}
+    );
+    (executor as any).toolCallDeduplicator.checkDuplicate = vi.fn().mockReturnValue({
+      isDuplicate: true,
+      reason: 'duplicate_call',
+      cachedResult: null,
+    });
+
+    const step: any = { id: '1b', description: 'Execute command once', status: 'pending' };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('failed');
+    expect(step.error).toContain('All required tools are unavailable or failed');
+  });
+
+  it('blocks create_document for watch-skip recommendation prompts and continues with a text answer', async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse('create_document', {
+          filename: 'Dan_Koe_Video_Review.docx',
+          format: 'docx',
+          content: [{ type: 'paragraph', text: 'placeholder' }],
+        }),
+        textResponse('Watch it only if you want to improve your creator-economy positioning; otherwise skip it.'),
+      ],
+      {}
+    );
+    (executor as any).task.title = 'Video review';
+    (executor as any).task.prompt =
+      'Transcribe this YouTube video and create a document so I can review it, then tell me if I should watch it.';
+
+    const step: any = {
+      id: 'watch-skip-1',
+      description: 'Transcribe and decide watchability',
+      status: 'pending',
+    };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('completed');
+    expect(executor.daemon.logEvent).toHaveBeenCalledWith(
+      'task-1',
+      'tool_blocked',
+      expect.objectContaining({
+        tool: 'create_document',
+        reason: 'watch_skip_recommendation_task',
+      })
+    );
+    expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
   it('marks verification step failed when no new image is found', async () => {
     const oldTimestamp = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     executor = createExecutorWithStubs(
@@ -250,6 +313,95 @@ describe('TaskExecutor executeStep failure handling', () => {
 
     expect(step.status).toBe('failed');
     expect(step.error).toContain('no newly generated image');
+  });
+
+  it('fails executePlan when a step remains unfinished', async () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    const step: any = { id: 'plan-1', description: 'Do the work', status: 'pending' };
+    (executor as any).plan = { description: 'Plan', steps: [step] };
+    (executor as any).executeStep = vi.fn(async () => {
+      // Simulate a broken executor path that returns without finalizing the step status.
+    });
+
+    await expect((executor as any).executePlan()).rejects.toThrow('Task incomplete');
+  });
+
+  it('emits failed-step progress instead of completed-step progress when step execution fails', async () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    const step: any = { id: 'plan-2', description: 'Fetch transcript', status: 'pending' };
+    (executor as any).plan = { description: 'Plan', steps: [step] };
+    (executor as any).executeStep = vi.fn(async (target: any) => {
+      target.status = 'failed';
+      target.error = 'All required tools are unavailable or failed. Unable to complete this step.';
+      target.completedAt = Date.now();
+    });
+
+    await expect((executor as any).executePlan()).rejects.toThrow('Task failed');
+
+    const progressMessages = (executor as any).daemon.logEvent.mock.calls
+      .filter((call: any[]) => call[1] === 'progress_update')
+      .map((call: any[]) => String(call[2]?.message || ''));
+
+    expect(progressMessages.some((message: string) => message.includes('Step failed'))).toBe(true);
+    expect(progressMessages.some((message: string) => message.includes('Completed step'))).toBe(false);
+  });
+
+  it('fails executePlan when a verification-labeled step fails', async () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    const step: any = { id: 'plan-verify-1', description: 'Verify: Read the created document and present recommendation', status: 'pending' };
+    (executor as any).plan = { description: 'Plan', steps: [step] };
+    (executor as any).executeStep = vi.fn(async (target: any) => {
+      target.status = 'failed';
+      target.error = 'Verification failed';
+      target.completedAt = Date.now();
+    });
+
+    await expect((executor as any).executePlan()).rejects.toThrow('Task failed');
+  });
+
+  it('requires a direct answer when prompt asks for a decision and summary is artifact-only', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).task.title = 'Review YouTube video';
+    (executor as any).task.prompt = 'Transcribe this YouTube video and let me know if I should spend my time watching it or skip it.';
+    (executor as any).fileOperationTracker.getCreatedFiles.mockReturnValue(['Dan_Koe_Video_Review.pdf']);
+    (executor as any).lastNonVerificationOutput = 'Created: Dan_Koe_Video_Review.pdf';
+    (executor as any).lastAssistantOutput = 'Created document successfully.';
+
+    const guardError = (executor as any).getFinalResponseGuardError();
+    expect(guardError).toContain('missing direct answer');
+  });
+
+  it('allows completion when recommendation is explicitly present for decision prompts', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).task.title = 'Review YouTube video';
+    (executor as any).task.prompt = 'Transcribe this YouTube video and let me know if I should spend my time watching it or skip it.';
+    (executor as any).fileOperationTracker.getCreatedFiles.mockReturnValue(['Dan_Koe_Video_Review.pdf']);
+    (executor as any).lastNonVerificationOutput = 'Recommendation: Skip this video unless you are new to creator-economy basics; it is likely not worth your time.';
+    (executor as any).plan = { description: 'Plan', steps: [{ id: '1', description: 'Review transcript and recommend', status: 'completed' }] };
+
+    const guardError = (executor as any).getFinalResponseGuardError();
+    expect(guardError).toBeNull();
+  });
+
+  it('does not require direct answer for artifact-only tasks without question intent', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).task.title = 'Generate PDF report';
+    (executor as any).task.prompt = 'Create a PDF report from the attached data.';
+    (executor as any).fileOperationTracker.getCreatedFiles.mockReturnValue(['report.pdf']);
+    (executor as any).lastNonVerificationOutput = 'Created: report.pdf';
+
+    const guardError = (executor as any).getFinalResponseGuardError();
+    expect(guardError).toBeNull();
+  });
+
+  it('requires direct answer for non-video advisory prompts too', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).task.title = 'Stack choice';
+    (executor as any).task.prompt = 'Compare option A and option B and tell me which one I should choose.';
+    (executor as any).lastNonVerificationOutput = 'Created: comparison.md';
+
+    const guardError = (executor as any).getFinalResponseGuardError();
+    expect(guardError).toContain('missing direct answer');
   });
 
   it('pauses when assistant asks blocking questions', async () => {
@@ -314,6 +466,40 @@ describe('TaskExecutor executeStep failure handling', () => {
     await (executor as any).executeStep(step);
 
     expect(step.status).toBe('completed');
+  });
+
+  it('fails fast when tool returns unrecoverable failure (use_skill not currently executable)', async () => {
+    const executorWithTools = createExecutorWithStubs(
+      [
+        toolUseResponse('use_skill', {
+          skill_id: 'audio-transcribe',
+          parameters: { inputPath: '/tmp/audio.mp3' },
+        }),
+      ],
+      {
+        use_skill: {
+          success: false,
+          error: 'Skill \'audio-transcribe\' is not currently executable',
+          reason: 'Missing or invalid skill prerequisites.',
+          missing_requirements: {
+            bins: ['ffmpeg'],
+          },
+        },
+      }
+    );
+    executorWithTools.getAvailableTools = vi.fn().mockReturnValue([
+      { name: 'run_command', description: '', input_schema: { type: 'object', properties: {} } },
+      { name: 'glob', description: '', input_schema: { type: 'object', properties: {} } },
+      { name: 'use_skill', description: '', input_schema: { type: 'object', properties: {} } },
+    ]);
+
+    const step: any = { id: '7', description: 'Create transcript and summary', status: 'pending' };
+
+    await (executorWithTools as any).executeStep(step);
+
+    expect(step.status).toBe('failed');
+    expect((executorWithTools as any).callLLMWithRetry).toHaveBeenCalledTimes(1);
+    expect(step.error).toContain('All required tools are unavailable or failed');
   });
 
   it('normalizes namespaced tool names like functions.web_search', async () => {
@@ -422,7 +608,7 @@ describe('TaskExecutor executeStep failure handling', () => {
         run_command: { success: false, error: 'cannot complete this task without a workaround' },
       }
     );
-    (executor as any).handlePlanRevision = vi.fn();
+    const handlePlanRevisionSpy = vi.spyOn(executor as any, 'handlePlanRevision');
     const failedStep: any = { id: '1', description: 'Run baseline task', status: 'pending' };
     const retainedPendingStep: any = { id: '2', description: 'Validate output', status: 'pending' };
 
@@ -434,7 +620,7 @@ describe('TaskExecutor executeStep failure handling', () => {
     await (executor as any).executeStep(failedStep);
     await (executor as any).executeStep(failedStep);
 
-    expect((executor as any).handlePlanRevision).toHaveBeenCalledTimes(1);
+    expect(handlePlanRevisionSpy).toHaveBeenCalledTimes(1);
     expect(failedStep.status).toBe('failed');
     expect(executor.planRevisionCount).toBe(1);
     const planDescriptions = executor.plan.steps.map((step: any) => step.description);
@@ -465,7 +651,7 @@ describe('TaskExecutor executeStep failure handling', () => {
       };
     });
 
-    (executor as any).handlePlanRevision = vi.fn();
+    const handlePlanRevisionSpy = vi.spyOn(executor as any, 'handlePlanRevision');
     const failedStep: any = { id: '1', description: 'Run baseline task', status: 'pending' };
     const retainedPendingStep: any = { id: '2', description: 'Validate output', status: 'pending' };
     executor.plan = { description: 'Plan', steps: [failedStep, retainedPendingStep] };
@@ -476,7 +662,7 @@ describe('TaskExecutor executeStep failure handling', () => {
     await (executor as any).executeStep(failedStep);
     await (executor as any).executeStep(failedStep);
 
-    expect((executor as any).handlePlanRevision).toHaveBeenCalledTimes(2);
+    expect(handlePlanRevisionSpy).toHaveBeenCalledTimes(2);
     const planDescriptions = executor.plan.steps.map((step: any) => step.description);
     expect(planDescriptions.filter((desc: string) => desc.includes('alternative toolchain')).length).toBe(2);
     expect(planDescriptions.length).toBe(6);

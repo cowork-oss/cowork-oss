@@ -5,7 +5,7 @@
 
 import * as path from 'path';
 import { z } from 'zod';
-import { LLM_PROVIDER_TYPES } from '../../shared/types';
+import { LLM_PROVIDER_TYPES, isTempWorkspaceId } from '../../shared/types';
 
 // Common validation patterns
 const MAX_STRING_LENGTH = 10000;
@@ -32,27 +32,34 @@ export const WorkspaceCreateSchema = z.object({
 
 // ============ Task Schemas ============
 
-export const SuccessCriteriaSchema = z.object({
-  type: z.enum(['shell_command', 'file_exists']),
-  command: z.string().max(5000).optional(),
-  filePaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(20).optional(),
-});
+const AgentConfigSchema = z.object({
+  providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
+  modelKey: z.string().max(200).optional(),
+  personalityId: z.string().max(100).optional(),
+  gatewayContext: z.enum(['private', 'group', 'public']).optional(),
+  toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
+  maxTurns: z.number().int().min(1).max(100).optional(),
+  maxTokens: z.number().int().min(1).max(1_000_000).optional(),
+  retainMemory: z.boolean().optional(),
+  bypassQueue: z.boolean().optional(),
+  allowUserInput: z.boolean().optional(),
+  autonomousMode: z.boolean().optional(),
+  qualityPasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+}).strict();
 
-// TEMP_WORKSPACE_ID constant for validation
-const TEMP_WORKSPACE_ID = '__temp_workspace__';
+const isValidWorkspaceId = (workspaceId: string): boolean =>
+  isTempWorkspaceId(workspaceId) || z.string().uuid().safeParse(workspaceId).success;
 
 export const TaskCreateSchema = z.object({
   title: z.string().min(1).max(MAX_TITLE_LENGTH),
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
   workspaceId: z.string().refine(
-    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    isValidWorkspaceId,
     { message: 'Must be a valid UUID or temp workspace ID' }
   ),
   budgetTokens: z.number().int().positive().optional(),
   budgetCost: z.number().positive().optional(),
-  // Goal Mode fields
-  successCriteria: SuccessCriteriaSchema.optional(),
-  maxAttempts: z.number().int().min(1).max(10).optional(),
+  agentConfig: AgentConfigSchema.optional(),
 });
 
 export const TaskRenameSchema = z.object({
@@ -67,7 +74,7 @@ export const TaskMessageSchema = z.object({
 
 export const FileImportSchema = z.object({
   workspaceId: z.string().refine(
-    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    isValidWorkspaceId,
     { message: 'Must be a valid UUID or temp workspace ID' }
   ),
   files: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
@@ -75,7 +82,7 @@ export const FileImportSchema = z.object({
 
 export const FileImportDataSchema = z.object({
   workspaceId: z.string().refine(
-    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    isValidWorkspaceId,
     { message: 'Must be a valid UUID or temp workspace ID' }
   ),
   files: z.array(z.object({
@@ -504,7 +511,7 @@ export const GeneratePairingSchema = z.object({
 
 export const ChatGPTImportSchema = z.object({
   workspaceId: z.string().refine(
-    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    isValidWorkspaceId,
     { message: 'Must be a valid UUID or temp workspace ID' }
   ),
   filePath: z.string()
@@ -521,7 +528,7 @@ export const ChatGPTImportSchema = z.object({
 
 export const FindImportedSchema = z.object({
   workspaceId: z.string().refine(
-    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    isValidWorkspaceId,
     { message: 'Must be a valid UUID or temp workspace ID' }
   ),
   limit: z.number().int().min(1).max(500).optional(),

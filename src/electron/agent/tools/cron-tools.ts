@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { Workspace, TEMP_WORKSPACE_ID } from '../../../shared/types';
+import { Workspace, isTempWorkspaceId } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { LLMTool } from '../llm/types';
 import { getCronService } from '../../cron';
@@ -151,7 +151,7 @@ export class CronTools {
     // Scheduled jobs need a stable, persisted workspace. If we're currently in the
     // global temp workspace, create a dedicated managed workspace directory for this job.
     let workspaceForJob: Workspace = this.workspace;
-    if (workspaceForJob.id === TEMP_WORKSPACE_ID) {
+    if (workspaceForJob.isTemp || isTempWorkspaceId(workspaceForJob.id)) {
       try {
         workspaceForJob = this.ensureDedicatedWorkspaceForScheduledJob(params.name);
       } catch (error: any) {

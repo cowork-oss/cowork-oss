@@ -96,13 +96,13 @@ export class GlobTools {
       }
 
       // Parse the glob pattern
-      const matches = await this.findMatches(basePath, pattern);
+      const { matches, scanTruncated } = await this.findMatches(basePath, pattern, maxResults);
 
       // Sort by modification time (newest first)
       matches.sort((a, b) => b.mtime - a.mtime);
 
       // Truncate if needed
-      const truncated = matches.length > maxResults;
+      const truncated = scanTruncated || matches.length > maxResults;
       const limitedMatches = matches.slice(0, maxResults);
 
       // Format results
@@ -119,6 +119,7 @@ export class GlobTools {
           matchCount: results.length,
           totalMatches: matches.length,
           truncated,
+          scanTruncated,
         },
       });
 
@@ -173,14 +174,30 @@ export class GlobTools {
    */
   private async findMatches(
     basePath: string,
-    pattern: string
-  ): Promise<Array<{ path: string; size: number; mtime: number }>> {
+    pattern: string,
+    maxResults: number
+  ): Promise<{
+    matches: Array<{ path: string; size: number; mtime: number }>;
+    scanTruncated: boolean;
+  }> {
     const matches: Array<{ path: string; size: number; mtime: number }> = [];
     const regex = this.globToRegex(pattern);
+    const limits = this.getTraversalLimits(maxResults);
+    const maxMatchBuffer = Math.min(Math.max(maxResults * 5, 500), 5000);
+    const scanState = {
+      filesScanned: 0,
+      directoriesScanned: 0,
+      maxFilesScanned: limits.maxFiles,
+      maxDirectoriesScanned: limits.maxDirectories,
+      scanTruncated: false,
+    };
 
-    await this.walkDirectory(basePath, basePath, regex, matches);
+    await this.walkDirectory(basePath, basePath, regex, matches, maxMatchBuffer, scanState);
 
-    return matches;
+    return {
+      matches,
+      scanTruncated: scanState.scanTruncated,
+    };
   }
 
   /**
@@ -191,10 +208,26 @@ export class GlobTools {
     basePath: string,
     regex: RegExp,
     matches: Array<{ path: string; size: number; mtime: number }>,
+    maxMatchBuffer: number,
+    scanState: {
+      filesScanned: number;
+      directoriesScanned: number;
+      maxFilesScanned: number;
+      maxDirectoriesScanned: number;
+      scanTruncated: boolean;
+    },
     depth: number = 0
   ): Promise<void> {
+    if (scanState.scanTruncated) return;
+
     // Limit recursion depth to prevent infinite loops
     if (depth > 50) return;
+
+    if (scanState.directoriesScanned >= scanState.maxDirectoriesScanned) {
+      scanState.scanTruncated = true;
+      return;
+    }
+    scanState.directoriesScanned += 1;
 
     // Skip common non-code directories
     const dirName = path.basename(currentPath);
@@ -224,12 +257,25 @@ export class GlobTools {
       const entries = fs.readdirSync(currentPath, { withFileTypes: true });
 
       for (const entry of entries) {
+        if (scanState.scanTruncated) break;
+
         const fullPath = path.join(currentPath, entry.name);
         const relativePath = path.relative(basePath, fullPath);
 
         if (entry.isDirectory()) {
-          await this.walkDirectory(fullPath, basePath, regex, matches, depth + 1);
+          await this.walkDirectory(fullPath, basePath, regex, matches, maxMatchBuffer, scanState, depth + 1);
         } else if (entry.isFile()) {
+          scanState.filesScanned += 1;
+          if (scanState.filesScanned > scanState.maxFilesScanned) {
+            scanState.scanTruncated = true;
+            break;
+          }
+
+          if (matches.length >= maxMatchBuffer) {
+            scanState.scanTruncated = true;
+            break;
+          }
+
           // Test against the pattern
           if (regex.test(relativePath) || regex.test(entry.name)) {
             try {
@@ -248,6 +294,14 @@ export class GlobTools {
     } catch {
       // Skip directories we can't read
     }
+  }
+
+  private getTraversalLimits(maxResults: number): { maxFiles: number; maxDirectories: number } {
+    const safeMaxResults = Number.isFinite(maxResults) ? Math.max(1, Math.floor(maxResults)) : 100;
+    return {
+      maxFiles: Math.min(Math.max(safeMaxResults * 300, 5000), 50000),
+      maxDirectories: Math.min(Math.max(safeMaxResults * 50, 1000), 10000),
+    };
   }
 
   /**

@@ -896,8 +896,10 @@ export function getControlPlaneWebUIHtml(): string {
               log('[' + formatTs(ts) + '] ' + type + (tid ? ' (' + tid.slice(0, 8) + ')' : '') + '\\n' + safeJson(evt.payload || {}));
             }
             if (type === 'approval_requested') {
-              // Opportunistically refresh approval list.
-              refreshApprovals().catch(() => {});
+              // Opportunistically refresh approval list for user-actionable approvals.
+              if (!evt?.payload?.autoApproved) {
+                refreshApprovals().catch(() => {});
+              }
             }
           }
         }

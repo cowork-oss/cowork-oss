@@ -36,6 +36,14 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
+### What’s new in 0.3.72
+
+- **Session-temporary workspace isolation**: temporary tasks can now use per-session temp folders that are tracked, pruned, and isolated from user workspaces.
+- **Smarter search reliability**: Brave is now preferred when multiple search providers are configured, with automatic provider fallback execution and clearer failure reporting.
+- **Completion quality guardrails**: task finalization now validates required execution signals and output artifacts before marking tasks complete.
+- **Autonomous execution mode**: optional mode for trusted prompts that skips manual approvals for gated actions while preserving safety checks.
+- **More resilient tool execution**: stronger handling of tool failures, duplicate calls, and blocked/unavailable tools to avoid partial task completion.
+
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
 ---
@@ -408,7 +416,6 @@ Configure in **Settings** > **Appearance**.
 ### Agent Capabilities
 
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
-- **Goal Mode**: Define success criteria and auto-retry until verification passes
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
 - **85+ Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, and more
 - **Document Creation**: Excel, Word, PDF, PowerPoint with professional formatting

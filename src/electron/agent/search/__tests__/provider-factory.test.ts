@@ -257,4 +257,154 @@ describe('SearchProviderFactory', () => {
       expect((SearchProviderFactory as any).cachedSettings).toBeNull();
     });
   });
+
+  describe('provider execution order', () => {
+    it('should prefer Brave when multiple providers are configured', () => {
+      const settings = {
+        primaryProvider: 'tavily',
+        fallbackProvider: 'google',
+        tavily: { apiKey: 'tavily' },
+        brave: { apiKey: 'brave' },
+        serpapi: { apiKey: 'serpapi' },
+        google: { apiKey: 'google', searchEngineId: 'id' },
+      } as any;
+
+      const order = (SearchProviderFactory as any).getProviderExecutionOrder(settings);
+
+      expect(order).toEqual(['brave', 'tavily', 'google', 'serpapi']);
+    });
+
+    it('should not change order when Brave is not configured', () => {
+      const settings = {
+        primaryProvider: 'tavily',
+        fallbackProvider: 'google',
+        tavily: { apiKey: 'tavily' },
+        google: { apiKey: 'google', searchEngineId: 'id' },
+      } as any;
+
+      const order = (SearchProviderFactory as any).getProviderExecutionOrder(settings);
+
+      expect(order).toEqual(['tavily', 'google']);
+    });
+  });
+
+  describe('searchWithFallback', () => {
+    it('should try providers in order and stop on first successful result', async () => {
+      const braveProvider = { search: vi.fn().mockResolvedValue({ provider: 'brave' }) };
+      const tavilyProvider = { search: vi.fn().mockResolvedValue({ provider: 'tavily' }) };
+
+      vi.spyOn(SearchProviderFactory, 'loadSettings').mockReturnValue({
+        primaryProvider: 'tavily',
+        fallbackProvider: 'google',
+        tavily: { apiKey: 'tavily' },
+        brave: { apiKey: 'brave' },
+      } as any);
+
+      vi.spyOn(SearchProviderFactory as any, 'getProviderExecutionOrder').mockReturnValue([
+        'brave',
+        'tavily',
+      ]);
+
+      const getConfigSpy = vi.spyOn(SearchProviderFactory as any, 'getProviderConfig');
+      getConfigSpy.mockImplementation((providerType: string) => ({ type: providerType }));
+
+      const createProviderSpy = vi.spyOn(SearchProviderFactory as any, 'createProviderFromConfig');
+      createProviderSpy.mockImplementation((config: any) => {
+        if (config.type === 'brave') return braveProvider;
+        return tavilyProvider;
+      });
+
+      const searchRetrySpy = vi.spyOn(SearchProviderFactory as any, 'searchWithRetry');
+      searchRetrySpy.mockImplementation(async (provider: any) => provider.search());
+
+      const response = await SearchProviderFactory.searchWithFallback({
+        query: 'f1 latest',
+        searchType: 'web',
+      });
+
+      expect(searchRetrySpy).toHaveBeenCalledTimes(1);
+      expect(response.provider).toBe('brave');
+      expect(braveProvider.search).toHaveBeenCalledTimes(1);
+      expect(tavilyProvider.search).not.toHaveBeenCalled();
+    });
+
+    it('should fallback to next configured provider when prior provider fails', async () => {
+      const braveProvider = { search: vi.fn().mockRejectedValue(new Error('Brave failed')) };
+      const tavilyProvider = { search: vi.fn().mockResolvedValue({ provider: 'tavily' }) };
+
+      vi.spyOn(SearchProviderFactory, 'loadSettings').mockReturnValue({
+        primaryProvider: 'tavily',
+        fallbackProvider: 'google',
+        tavily: { apiKey: 'tavily' },
+        brave: { apiKey: 'brave' },
+      } as any);
+
+      vi.spyOn(SearchProviderFactory as any, 'getProviderExecutionOrder').mockReturnValue([
+        'brave',
+        'tavily',
+      ]);
+
+      vi.spyOn(SearchProviderFactory as any, 'getProviderConfig').mockImplementation((providerType: string) => ({
+        type: providerType,
+      }));
+
+      vi.spyOn(SearchProviderFactory as any, 'createProviderFromConfig').mockImplementation((config: any) => {
+        if (config.type === 'brave') return braveProvider;
+        return tavilyProvider;
+      });
+
+      vi.spyOn(SearchProviderFactory as any, 'searchWithRetry').mockImplementation(async (provider: any) => {
+        return provider.search();
+      });
+
+      const response = await SearchProviderFactory.searchWithFallback({
+        query: 'f1 latest',
+        searchType: 'web',
+      });
+
+      expect(response.provider).toBe('tavily');
+      expect(braveProvider.search).toHaveBeenCalledTimes(1);
+      expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
+    });
+
+    it('should honor explicit provider and not attempt fallback', async () => {
+      const braveProvider = { search: vi.fn().mockResolvedValue({ provider: 'brave' }) };
+      const tavilyProvider = { search: vi.fn().mockResolvedValue({ provider: 'tavily' }) };
+
+      vi.spyOn(SearchProviderFactory, 'loadSettings').mockReturnValue({
+        primaryProvider: 'tavily',
+        fallbackProvider: 'google',
+        tavily: { apiKey: 'tavily' },
+        brave: { apiKey: 'brave' },
+      } as any);
+
+      vi.spyOn(SearchProviderFactory as any, 'getProviderExecutionOrder').mockReturnValue([
+        'brave',
+        'tavily',
+      ]);
+
+      const getConfigSpy = vi.spyOn(SearchProviderFactory as any, 'getProviderConfig');
+      getConfigSpy.mockImplementation((providerType: string) => ({ type: providerType }));
+
+      const createProviderSpy = vi.spyOn(SearchProviderFactory as any, 'createProviderFromConfig');
+      createProviderSpy.mockImplementation((config: any) => {
+        if (config.type === 'brave') return braveProvider;
+        return tavilyProvider;
+      });
+
+      const searchRetrySpy = vi.spyOn(SearchProviderFactory as any, 'searchWithRetry');
+      searchRetrySpy.mockImplementation(async (provider: any) => provider.search());
+
+      const response = await SearchProviderFactory.searchWithFallback({
+        query: 'f1 latest',
+        searchType: 'web',
+        provider: 'tavily',
+      });
+
+      expect(response.provider).toBe('tavily');
+      expect(searchRetrySpy).toHaveBeenCalledTimes(1);
+      expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
+      expect(braveProvider.search).not.toHaveBeenCalled();
+    });
+  });
 });

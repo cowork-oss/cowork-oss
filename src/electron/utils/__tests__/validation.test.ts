@@ -107,6 +107,15 @@ describe('TaskCreateSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('validates with session temp workspace ID', () => {
+    const result = TaskCreateSchema.safeParse({
+      title: 'Test Task',
+      prompt: 'Do something',
+      workspaceId: '__temp_workspace__:session-123',
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('rejects invalid workspaceId', () => {
     const result = TaskCreateSchema.safeParse({
       title: 'Test Task',

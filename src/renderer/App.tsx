@@ -10,7 +10,7 @@ import { BrowserView } from './components/BrowserView';
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { NotificationPanel } from './components/NotificationPanel';
-import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, SuccessCriteria, UpdateInfo, ThemeMode, VisualTheme, AccentColor, QueueStatus, ToastNotification, TEMP_WORKSPACE_ID } from '../shared/types';
+import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, UpdateInfo, ThemeMode, VisualTheme, AccentColor, QueueStatus, ToastNotification, isTempWorkspaceId } from '../shared/types';
 
 
 // Helper to get effective theme based on system preference
@@ -22,6 +22,12 @@ function getEffectiveTheme(themeMode: ThemeMode): 'light' | 'dark' {
 }
 
 type AppView = 'main' | 'settings' | 'browser';
+const MAX_RENDERER_TASK_EVENTS = 600;
+
+function capTaskEvents(events: TaskEvent[]): TaskEvent[] {
+  if (events.length <= MAX_RENDERER_TASK_EVENTS) return events;
+  return events.slice(-MAX_RENDERER_TASK_EVENTS);
+}
 
 export function App() {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
@@ -284,7 +290,7 @@ export function App() {
     const initWorkspace = async () => {
       if (!currentWorkspace) {
         try {
-          const tempWorkspace = await window.electronAPI.getTempWorkspace();
+          const tempWorkspace = await window.electronAPI.getTempWorkspace({ createNew: true });
           setCurrentWorkspace(tempWorkspace);
         } catch (error) {
           console.error('Failed to initialize temp workspace:', error);
@@ -312,9 +318,10 @@ export function App() {
 
     const loadTaskWorkspace = async () => {
       try {
-        const resolved = task.workspaceId === TEMP_WORKSPACE_ID
-          ? await window.electronAPI.getTempWorkspace()
-          : await window.electronAPI.selectWorkspace(task.workspaceId);
+        let resolved: Workspace | null = await window.electronAPI.selectWorkspace(task.workspaceId);
+        if (!resolved && isTempWorkspaceId(task.workspaceId)) {
+          resolved = await window.electronAPI.getTempWorkspace();
+        }
         if (!cancelled && resolved) {
           setCurrentWorkspace(resolved);
         }
@@ -331,7 +338,7 @@ export function App() {
 
   // Track recency when the active workspace changes
   useEffect(() => {
-    if (!currentWorkspace || currentWorkspace.id === TEMP_WORKSPACE_ID) return;
+    if (!currentWorkspace || currentWorkspace.isTemp || isTempWorkspaceId(currentWorkspace.id)) return;
     window.electronAPI.touchWorkspace(currentWorkspace.id).catch((error: unknown) => {
       console.error('Failed to update workspace recency:', error);
     });
@@ -384,7 +391,8 @@ export function App() {
       }
 
       const newStatus = event.type === 'task_status' ? event.payload?.status : statusMap[event.type];
-      if (newStatus) {
+      const isAutoApprovalRequested = event.type === 'approval_requested' && event.payload?.autoApproved === true;
+      if (newStatus && !isAutoApprovalRequested) {
         setTasks(prev => prev.map(t =>
           t.id === event.taskId ? { ...t, status: newStatus } : t
         ));
@@ -394,7 +402,7 @@ export function App() {
         void window.electronAPI.resumeTask(event.taskId);
       }
 
-      if (event.type === 'task_paused' || event.type === 'approval_requested') {
+      if (event.type === 'task_paused' || (event.type === 'approval_requested' && !isAutoApprovalRequested)) {
         const isApproval = event.type === 'approval_requested';
         const task = tasksRef.current.find(t => t.id === event.taskId);
         const baseTitle = isApproval ? 'Approval needed' : 'Quick check-in';
@@ -475,7 +483,7 @@ export function App() {
 
       // Add event to events list if it's for the selected task
       if (event.taskId === selectedTaskId) {
-        setEvents(prev => [...prev, event]);
+        setEvents(prev => capTaskEvents([...prev, event]));
       }
     });
 
@@ -493,7 +501,7 @@ export function App() {
     const loadHistoricalEvents = async () => {
       try {
         const historicalEvents = await window.electronAPI.getTaskEvents(selectedTaskId);
-        setEvents(historicalEvents);
+        setEvents(capTaskEvents(historicalEvents));
       } catch (error) {
         console.error('Failed to load historical events:', error);
         setEvents([]);
@@ -549,16 +557,31 @@ export function App() {
     }
   };
 
-  const handleCreateTask = async (title: string, prompt: string, options?: { successCriteria?: SuccessCriteria; maxAttempts?: number }) => {
+  const handleCreateTask = async (
+    title: string,
+    prompt: string,
+    options?: {
+      autonomousMode?: boolean;
+    }
+  ) => {
     if (!currentWorkspace) return;
+    if (options?.autonomousMode) {
+      const shouldContinue = window.confirm(
+        'Autonomous mode allows the agent to proceed without manual confirmation on gated actions. Continue?'
+      );
+      if (!shouldContinue) return;
+    }
+
+    const agentConfig = options?.autonomousMode
+      ? { allowUserInput: false, autonomousMode: true }
+      : undefined;
 
     try {
       const task = await window.electronAPI.createTask({
         title,
         prompt,
         workspaceId: currentWorkspace.id,
-        ...(options?.successCriteria && { successCriteria: options.successCriteria }),
-        ...(options?.maxAttempts && { maxAttempts: options.maxAttempts }),
+        ...(agentConfig && { agentConfig }),
       });
 
       setTasks(prev => [task, ...prev]);
@@ -625,6 +648,17 @@ export function App() {
 
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? '...' : '');
     await handleCreateTask(title, prompt);
+  };
+
+  const handleNewSession = async () => {
+    setSelectedTaskId(null);
+    setEvents([]);
+    try {
+      const tempWorkspace = await window.electronAPI.getTempWorkspace({ createNew: true });
+      setCurrentWorkspace(tempWorkspace);
+    } catch (error) {
+      console.error('Failed to switch to temp workspace for new session:', error);
+    }
   };
 
   const handleModelChange = (modelKey: string) => {
@@ -799,6 +833,7 @@ export function App() {
                 tasks={tasks}
                 selectedTaskId={selectedTaskId}
                 onSelectTask={setSelectedTaskId}
+                onNewSession={handleNewSession}
                 onOpenSettings={() => setCurrentView('settings')}
                 onOpenMissionControl={() => {
                   setSettingsTab('missioncontrol');

@@ -202,13 +202,13 @@ export class SearchProviderFactory {
 
     // Auto-detect and select providers if primaryProvider is not set
     if (!settings.primaryProvider) {
-      const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
-      if (configuredProviders.length > 0) {
-        settings.primaryProvider = configuredProviders[0];
-        console.log(`[SearchProviderFactory] Auto-selected primary provider: ${configuredProviders[0]}`);
-        if (configuredProviders.length > 1 && !settings.fallbackProvider) {
-          settings.fallbackProvider = configuredProviders[1];
-          console.log(`[SearchProviderFactory] Auto-selected fallback provider: ${configuredProviders[1]}`);
+      const orderedProviders = this.getProviderExecutionOrder(settings);
+      if (orderedProviders.length > 0) {
+        settings.primaryProvider = orderedProviders[0];
+        console.log(`[SearchProviderFactory] Auto-selected primary provider: ${orderedProviders[0]}`);
+        if (orderedProviders.length > 1 && !settings.fallbackProvider) {
+          settings.fallbackProvider = orderedProviders[1];
+          console.log(`[SearchProviderFactory] Auto-selected fallback provider: ${orderedProviders[1]}`);
         }
       }
     }
@@ -358,42 +358,47 @@ export class SearchProviderFactory {
       throw new Error('No search provider configured');
     }
 
-    // Try primary provider
-    try {
-      const primaryConfig = this.getProviderConfig(primaryType);
-      const primaryProvider = this.createProviderFromConfig(primaryConfig);
-      return await this.searchWithRetry(primaryProvider, query);
-    } catch (primaryError: any) {
-      console.error(`Primary search provider (${primaryType}) failed:`, primaryError.message);
+    if (query.provider) {
+      const providerConfig = this.getProviderConfig(primaryType);
+      const provider = this.createProviderFromConfig(providerConfig);
+      return await this.searchWithRetry(provider, query);
+    }
 
-      // If a specific provider was requested, don't fallback
-      if (query.provider) {
-        throw primaryError;
-      }
+    const providersToTry = this.getProviderExecutionOrder(settings);
+    if (!providersToTry.length) {
+      throw new Error('No search provider configured');
+    }
 
-      // Try fallback provider if configured
-      const fallbackType = settings.fallbackProvider;
-      if (fallbackType && fallbackType !== primaryType) {
-        console.log(`Attempting fallback to ${fallbackType}...`);
-        try {
-          const fallbackConfig = this.getProviderConfig(fallbackType);
-          const fallbackProvider = this.createProviderFromConfig(fallbackConfig);
-          const response = await this.searchWithRetry(fallbackProvider, query);
-          // Indicate this came from fallback
-          console.log(`Fallback search with ${fallbackType} succeeded`);
-          return response;
-        } catch (fallbackError: any) {
-          console.error(`Fallback search provider (${fallbackType}) also failed:`, fallbackError.message);
-          // Throw the original error
-          throw new Error(
-            `Primary provider (${primaryType}) failed: ${primaryError.message}. ` +
-            `Fallback provider (${fallbackType}) also failed: ${fallbackError.message}`
-          );
+    const providerErrors: Array<{ provider: SearchProviderType; error: string }> = [];
+
+    for (let i = 0; i < providersToTry.length; i++) {
+      const providerType = providersToTry[i];
+
+      try {
+        const providerConfig = this.getProviderConfig(providerType);
+        const provider = this.createProviderFromConfig(providerConfig);
+        return await this.searchWithRetry(provider, query);
+      } catch (error: any) {
+        const message = error?.message || 'Search provider request failed';
+        providerErrors.push({ provider: providerType, error: message });
+        console.error(`Search provider (${providerType}) failed:`, message);
+
+        const nextProvider = providersToTry[i + 1];
+        if (nextProvider) {
+          console.log(`Attempting fallback to ${nextProvider}...`);
         }
       }
-
-      throw primaryError;
     }
+
+    if (providerErrors.length === 1) {
+      throw new Error(providerErrors[0].error);
+    }
+
+    throw new Error(
+      `Search failed after trying all configured providers: ${providerErrors
+        .map((entry) => `${entry.provider}: ${entry.error}`)
+        .join('; ')}`
+    );
   }
 
   /**
@@ -445,6 +450,42 @@ export class SearchProviderFactory {
    */
   static isAnyProviderConfigured(): boolean {
     return this.getAvailableProviders().some((p) => p.configured);
+  }
+
+  /**
+   * Build the provider execution order for automatic search fallback.
+   * - If Brave is configured and multiple providers are available, prefer Brave first.
+   * - Then preserve explicit primary/fallback ordering when available.
+   * - Fill remaining providers from the detected configured list.
+   */
+  private static getProviderExecutionOrder(settings: SearchSettings): SearchProviderType[] {
+    const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
+    if (configuredProviders.length <= 1) {
+      return configuredProviders;
+    }
+
+    const orderedProviders: SearchProviderType[] = [];
+    const addProviderIfConfigured = (provider?: SearchProviderType | null) => {
+      if (provider && configuredProviders.includes(provider) && !orderedProviders.includes(provider)) {
+        orderedProviders.push(provider);
+      }
+    };
+
+    // Respect explicit primary/fallback preference where available.
+    addProviderIfConfigured(settings.primaryProvider);
+    addProviderIfConfigured(settings.fallbackProvider);
+
+    // Fill in any remaining configured providers.
+    for (const provider of configuredProviders) {
+      addProviderIfConfigured(provider);
+    }
+
+    // Prefer Brave when available and multiple providers are configured.
+    if (orderedProviders.length > 1 && orderedProviders.includes('brave')) {
+      return ['brave', ...orderedProviders.filter((provider) => provider !== 'brave')];
+    }
+
+    return orderedProviders;
   }
 
   /**

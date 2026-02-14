@@ -285,11 +285,13 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
         task_cancelled: 'cancelled',
       };
 
-      if (event.type === 'task_created') {
-        const isNewTask = !tasksRef.current.some((task) => task.id === event.taskId);
-        if (isNewTask && currentWorkspaceId) {
-          // Fetch the task and add it if it belongs to current workspace
-          window.electronAPI.getTask(event.taskId)
+        const isAutoApprovalRequested = event.type === 'approval_requested' && event.payload?.autoApproved === true;
+
+        if (event.type === 'task_created') {
+          const isNewTask = !tasksRef.current.some((task) => task.id === event.taskId);
+          if (isNewTask && currentWorkspaceId) {
+            // Fetch the task and add it if it belongs to current workspace
+            window.electronAPI.getTask(event.taskId)
             .then((incoming) => {
               if (!incoming) return;
               if (incoming.workspaceId === currentWorkspaceId) {
@@ -305,13 +307,13 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
         return;
       }
 
-      const newStatus = event.type === 'task_status' ? event.payload?.status : statusMap[event.type];
-      if (newStatus) {
-        setTasks((prev) =>
-          prev.map((task) =>
-            task.id === event.taskId ? { ...task, status: newStatus, updatedAt: Date.now() } : task
-          )
-        );
+        const newStatus = event.type === 'task_status' ? event.payload?.status : statusMap[event.type];
+        if (newStatus && !isAutoApprovalRequested) {
+          setTasks((prev) =>
+            prev.map((task) =>
+              task.id === event.taskId ? { ...task, status: newStatus, updatedAt: Date.now() } : task
+            )
+          );
       }
     });
 

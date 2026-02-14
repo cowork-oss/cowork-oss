@@ -8,6 +8,7 @@ import {
   ApprovalRequest,
   Skill,
   WorkspacePermissions,
+  isTempWorkspaceId,
 } from '../../shared/types';
 
 /**
@@ -137,6 +138,7 @@ export class WorkspaceRepository {
       createdAt: row.created_at,
       lastUsedAt: row.last_used_at ?? undefined,
       permissions: mergedPermissions,
+      isTemp: isTempWorkspaceId(typeof row.id === 'string' ? row.id : undefined),
     };
   }
 }
@@ -394,7 +396,7 @@ export class TaskRepository {
       budgetTokens: row.budget_tokens || undefined,
       budgetCost: row.budget_cost || undefined,
       error: row.error || undefined,
-      // Goal Mode fields
+      // Verification/retry metadata
       successCriteria: row.success_criteria ? safeJsonParse(row.success_criteria, undefined, 'task.successCriteria') : undefined,
       maxAttempts: row.max_attempts || undefined,
       currentAttempt: row.current_attempt || undefined,

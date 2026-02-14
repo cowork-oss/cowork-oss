@@ -8,6 +8,13 @@ interface TaskViewProps {
   task: Task | undefined;
 }
 
+const MAX_TASK_VIEW_EVENTS = 600;
+
+function capTaskViewEvents(events: TaskEvent[]): TaskEvent[] {
+  if (events.length <= MAX_TASK_VIEW_EVENTS) return events;
+  return events.slice(-MAX_TASK_VIEW_EVENTS);
+}
+
 export function TaskView({ task }: TaskViewProps) {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [pendingApproval, setPendingApproval] = useState<any>(null);
@@ -22,10 +29,10 @@ export function TaskView({ task }: TaskViewProps) {
     // Subscribe to task events
     const unsubscribe = window.electronAPI.onTaskEvent((event: TaskEvent) => {
       if (event.taskId === task.id) {
-        setEvents(prev => [...prev, event]);
+        setEvents(prev => capTaskViewEvents([...prev, event]));
 
         // Check if approval is requested
-        if (event.type === 'approval_requested') {
+        if (event.type === 'approval_requested' && event.payload?.autoApproved !== true) {
           setPendingApproval(event.payload.approval);
         } else if (event.type === 'approval_granted' || event.type === 'approval_denied') {
           setPendingApproval(null);

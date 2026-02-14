@@ -320,6 +320,9 @@ export class ChannelGateway {
 
     // Listen for approval requests - forward to Discord/Telegram
     const onApprovalRequested = (data: { taskId: string; approval: any }) => {
+      if (data?.approval?.autoApproved) {
+        return;
+      }
       this.router.sendApprovalRequest(data.taskId, data.approval);
     };
     agentDaemon.on('approval_requested', onApprovalRequested);

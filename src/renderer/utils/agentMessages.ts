@@ -459,7 +459,7 @@ const PERSONA_MESSAGE_OVERRIDES: Partial<Record<PersonaId, Partial<Record<Messag
     taskBlocked: 'I need your ok to continue.',
     planCreated: 'I sketched a path forward.',
     stepStarted: 'Taking care of: {detail}',
-    stepCompleted: 'That step\'s done.',
+    stepCompleted: 'Step complete: {detail}',
     error: 'I ran into a snag.',
     approval: 'Can you confirm this for me?',
     verifying: 'Double-checking...',

@@ -387,6 +387,7 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_channel_users_allowed ON channel_users(allowed);
       CREATE INDEX IF NOT EXISTS idx_channel_sessions_channel ON channel_sessions(channel_id);
       CREATE INDEX IF NOT EXISTS idx_channel_sessions_task ON channel_sessions(task_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_sessions_workspace ON channel_sessions(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_channel_sessions_state ON channel_sessions(state);
       CREATE INDEX IF NOT EXISTS idx_channel_messages_session ON channel_messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_channel_messages_chat ON channel_messages(chat_id);
@@ -574,7 +575,7 @@ export class DatabaseManager {
     this.initializeMemoryFTS();
     this.initializeMarkdownMemoryFTS();
 
-    // Run migrations for Goal Mode columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
+    // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
 
     // Seed default models if table is empty
@@ -639,15 +640,15 @@ export class DatabaseManager {
   }
 
   private runMigrations() {
-    // Migration: Add Goal Mode columns to tasks table
+    // Migration: Add task-retry tracking columns to tasks table
     // SQLite ALTER TABLE ADD COLUMN fails if column exists, so we catch and ignore
-    const goalModeColumns = [
+    const taskRetryColumns = [
       'ALTER TABLE tasks ADD COLUMN success_criteria TEXT',
       'ALTER TABLE tasks ADD COLUMN max_attempts INTEGER DEFAULT 3',
       'ALTER TABLE tasks ADD COLUMN current_attempt INTEGER DEFAULT 1',
     ];
 
-    for (const sql of goalModeColumns) {
+    for (const sql of taskRetryColumns) {
       try {
         this.db.exec(sql);
       } catch {

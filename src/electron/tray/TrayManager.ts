@@ -19,9 +19,16 @@ import { DatabaseManager } from '../database/schema';
 import { TaskRepository, WorkspaceRepository } from '../database/repositories';
 import { AgentDaemon } from '../agent/daemon';
 import { QuickInputWindow } from './QuickInputWindow';
-import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
+import {
+  TEMP_WORKSPACE_ID_PREFIX,
+  TEMP_WORKSPACE_NAME,
+  TEMP_WORKSPACE_ROOT_DIR_NAME,
+  Workspace,
+  isTempWorkspaceId,
+} from '../../shared/types';
 import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 import { getUserDataDir } from '../utils/user-data-dir';
+import { pruneTempWorkspaces } from '../utils/temp-workspace';
 
 const LEGACY_SETTINGS_FILE = 'tray-settings.json';
 
@@ -291,72 +298,77 @@ export class TrayManager {
    */
   private async getOrCreateTempWorkspace(): Promise<Workspace> {
     if (!this.dbManager) throw new Error('Database not available');
+    if (!this.workspaceRepo) throw new Error('Workspace repository not available');
 
     const db = this.dbManager.getDatabase();
-
-    // Check if temp workspace exists
-    const existing = this.workspaceRepo?.findById(TEMP_WORKSPACE_ID);
-    const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    const permissions = existing
-      ? {
-          ...existing.permissions,
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: existing.permissions.shell ?? false,
-          unrestrictedFileAccess: true,
-        }
-      : {
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          shell: false,
-          unrestrictedFileAccess: true,
-        };
-
-    if (existing) {
-      if (!existing.permissions.unrestrictedFileAccess) {
-        this.workspaceRepo?.updatePermissions(existing.id, permissions);
+    const ensureTempWorkspace = (workspaceId: string, workspacePath: string, existing?: Workspace): Workspace => {
+      if (!fs.existsSync(workspacePath)) {
+        fs.mkdirSync(workspacePath, { recursive: true });
       }
 
-      if (existing.path === tempDir) {
-        return { ...existing, permissions, isTemp: true };
-      }
-    }
+      const createdAt = existing?.createdAt ?? Date.now();
+      const lastUsedAt = Date.now();
+      const permissions = {
+        ...(existing?.permissions ?? {}),
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: existing?.permissions?.shell ?? false,
+        unrestrictedFileAccess: true,
+      };
 
-    // Create workspace record
-    const tempWorkspace: Workspace = {
-      id: TEMP_WORKSPACE_ID,
-      name: TEMP_WORKSPACE_NAME,
-      path: tempDir,
-      createdAt: Date.now(),
-      permissions,
-      isTemp: true,
+      const stmt = db.prepare(`
+        INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          path = excluded.path,
+          last_used_at = excluded.last_used_at,
+          permissions = excluded.permissions
+      `);
+      stmt.run(
+        workspaceId,
+        TEMP_WORKSPACE_NAME,
+        workspacePath,
+        createdAt,
+        lastUsedAt,
+        JSON.stringify(permissions)
+      );
+
+      return {
+        id: workspaceId,
+        name: TEMP_WORKSPACE_NAME,
+        path: workspacePath,
+        createdAt,
+        lastUsedAt,
+        permissions,
+        isTemp: true,
+      };
     };
 
-    const stmt = db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, permissions)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        path = excluded.path,
-        created_at = excluded.created_at,
-        permissions = excluded.permissions
-    `);
-    stmt.run(
-      tempWorkspace.id,
-      tempWorkspace.name,
-      tempWorkspace.path,
-      tempWorkspace.createdAt,
-      JSON.stringify(tempWorkspace.permissions)
-    );
+    const existing = this.workspaceRepo.findAll().find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id));
+    let workspace: Workspace;
+    if (existing) {
+      workspace = ensureTempWorkspace(existing.id, existing.path, existing);
+    } else {
+      const key = `tray-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+      const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
+      const tempDir = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
+      workspace = ensureTempWorkspace(workspaceId, tempDir);
+    }
 
-    return tempWorkspace;
+    try {
+      pruneTempWorkspaces({
+        db,
+        tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
+        currentWorkspaceId: workspace.id,
+      });
+    } catch (error) {
+      console.warn('[TrayManager] Failed to prune temp workspaces:', error);
+    }
+
+    return workspace;
   }
 
   /**
@@ -381,7 +393,9 @@ export class TrayManager {
       let wsId = workspaceId;
       if (!wsId) {
         // Get the first non-temp workspace, or use temp workspace as fallback
-        const workspaces = this.workspaceRepo.findAll().filter(w => w.id !== TEMP_WORKSPACE_ID);
+        const workspaces = this.workspaceRepo
+          .findAll()
+          .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
         if (workspaces.length > 0) {
           wsId = workspaces[0].id;
         } else {
@@ -747,12 +761,14 @@ export class TrayManager {
    * Get workspaces from database (excluding temp workspace)
    */
   private getWorkspaces(): Array<{ id: string; name: string; path: string }> {
-    if (!this.dbManager) return [];
+    if (!this.workspaceRepo) return [];
 
     try {
-      const db = this.dbManager.getDatabase();
-      const stmt = db.prepare('SELECT id, name, path FROM workspaces WHERE id != ? ORDER BY name');
-      return stmt.all(TEMP_WORKSPACE_ID) as Array<{ id: string; name: string; path: string }>;
+      return this.workspaceRepo
+        .findAll()
+        .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
+        .map(({ id, name, path: workspacePath }) => ({ id, name, path: workspacePath }))
+        .sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
       console.error('[TrayManager] Failed to get workspaces:', error);
       return [];
