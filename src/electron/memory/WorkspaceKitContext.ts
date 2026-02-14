@@ -20,7 +20,7 @@ const MAX_TOTAL_CHARS = 16000;
 // Optional "map" files for faster codebase orientation. These are NOT part of the kit directory.
 const MAP_FILES: Array<{ relPath: string; title: string }> = [
   { relPath: 'docs/CODEBASE_MAP.md', title: 'Codebase Map' },
-  { relPath: 'docs/ARCHITECTURE.md', title: 'Architecture Notes' },
+  { relPath: 'docs/architecture.md', title: 'Architecture Notes' },
   { relPath: 'ARCHITECTURE.md', title: 'Architecture Notes (Root)' },
 ];
 

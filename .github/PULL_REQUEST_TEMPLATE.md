@@ -58,7 +58,7 @@ Fixes #
 - [ ] I have performed a self-review of my code
 - [ ] I have commented my code, particularly in hard-to-understand areas
 - [ ] I have made corresponding changes to the documentation
-- [ ] I updated `docs/ARCHITECTURE.md` if this PR changes capabilities, defaults, or architecture
+- [ ] I updated `docs/architecture.md` if this PR changes capabilities, defaults, or architecture
 - [ ] My changes generate no new warnings
 - [ ] I have considered security implications of my changes
 - [ ] Any dependent changes have been merged and published

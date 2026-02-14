@@ -36,12 +36,14 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.85
+### What’s new in 0.3.86
 
-- **Hoisted Electron setup fix**: `npm run setup` now detects Electron in both local and parent `node_modules`, avoiding unnecessary fallback installs on npm-hoisted layouts.
-- **Lower-memory native recovery**: missing `better-sqlite3` install/rebuild now runs from the install root, reducing large dependency reify spikes during first install on macOS.
-- **Release guardrails tightened**: release smoke tests now assert setup behavior on installed packages, and package publish jobs are gated on release validation.
-- **Version sync**: bumped to `0.3.85`.
+- **Agent execution reliability**: task execution now emits long-running tool heartbeats, improves recovery behavior, and adds shell-permission preflight prompts when command execution is required.
+- **Safer shell automation**: `run_command` now supports single-approval bundles for safe command sequences and redacts sensitive output patterns (seed phrases/private keys).
+- **Canvas + Control Plane expansion**: added ACP delegation endpoints plus new canvas checkpoint/list/restore APIs across control-plane, IPC, and tool surfaces.
+- **Gateway + UX upgrades**: channel defaults now support default/allowed agent-role routing, plus renderer improvements for Talk Mode, task activity signaling, and language preferences (`en`, `ja`, `zh`).
+- **SkillHub registry + docs/mobile additions**: static GitHub-backed skill catalog support, bundled registry snapshots, VitePress docs scaffolding, and mobile companion app scaffolds.
+- **Install simulation safety**: you can now disable OS keychain usage in isolated test environments with `COWORK_DISABLE_OS_KEYCHAIN=1` to avoid macOS keychain reset prompts.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
@@ -90,6 +92,8 @@ For strict reproducibility on low-memory machines:
 export COWORK_SETUP_JOBS=1
 export COWORK_SETUP_NATIVE_OUTER_ATTEMPTS=10
 export COWORK_SETUP_NATIVE_SHELL_ATTEMPTS=10
+# Optional for fully isolated HOME tests: bypass OS keychain integration
+export COWORK_DISABLE_OS_KEYCHAIN=1
 npm run --prefix node_modules/cowork-os setup
 ```
 
@@ -101,6 +105,9 @@ npm run --prefix node_modules/cowork-os setup
   - `npm init -y`  
   - `npm install --ignore-scripts /path/to/cowork-os-<version>.tgz`
   - `npm run --prefix node_modules/cowork-os setup`
+- If you run with an isolated `HOME` and see a macOS **Keychain Not Found** dialog, choose **Cancel**.
+  - Do not use **Reset To Defaults** in this flow.
+  - Prefer setting `COWORK_DISABLE_OS_KEYCHAIN=1` for disposable install simulations.
 - If you already have a global install, verify with `coworkd-node --version` and avoid launching without dependency setup on first run.
 
 You can also install globally and launch directly:

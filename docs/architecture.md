@@ -480,7 +480,7 @@ See also:
 
 ## Keeping This File Updated (Process)
 
-Update `docs/ARCHITECTURE.md` when you change:
+Update `docs/architecture.md` when you change:
 - Supported messaging channels, channel security modes, pairing/allowlist behavior
 - Tool names, tool groups, approval rules, sandboxing behavior, guardrails
 - LLM/search provider support or settings
