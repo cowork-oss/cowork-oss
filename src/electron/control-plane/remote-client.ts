@@ -7,6 +7,7 @@
 
 import WebSocket from 'ws';
 import crypto from 'crypto';
+import tls from 'tls';
 import type {
   RemoteGatewayConfig,
   RemoteGatewayStatus,
@@ -167,9 +168,27 @@ export class RemoteGatewayClient {
 
     try {
       // Create a temporary connection for testing
-      const testWs = new WebSocket(this.config.url, {
+      const testOptions: WebSocket.ClientOptions = {
         handshakeTimeout: 10000,
-      });
+      };
+
+      // Apply TLS fingerprint validation for test connections too
+      if (this.config.tlsFingerprint && this.config.url.startsWith('wss://')) {
+        const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, '');
+        testOptions.checkServerIdentity = (_hostname: string, cert: tls.PeerCertificate) => {
+          const certFingerprint = cert.fingerprint256
+            .toLowerCase()
+            .replace(/:/g, '');
+          if (certFingerprint !== expectedFingerprint) {
+            return new Error(
+              `TLS fingerprint mismatch: expected ${expectedFingerprint}, got ${certFingerprint}`
+            );
+          }
+          return undefined;
+        };
+      }
+
+      const testWs = new WebSocket(this.config.url, testOptions);
 
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
@@ -238,10 +257,27 @@ export class RemoteGatewayClient {
 
         console.log(`[RemoteGateway] Connecting to ${this.config.url}`);
 
-        this.ws = new WebSocket(this.config.url, {
+        const wsOptions: WebSocket.ClientOptions = {
           handshakeTimeout: 10000,
-          // TODO: Add TLS fingerprint validation for wss:// connections
-        });
+        };
+
+        // TLS certificate fingerprint pinning for wss:// connections
+        if (this.config.tlsFingerprint && this.config.url.startsWith('wss://')) {
+          const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, '');
+          wsOptions.checkServerIdentity = (_hostname: string, cert: tls.PeerCertificate) => {
+            const certFingerprint = cert.fingerprint256
+              .toLowerCase()
+              .replace(/:/g, '');
+            if (certFingerprint !== expectedFingerprint) {
+              return new Error(
+                `TLS fingerprint mismatch: expected ${expectedFingerprint}, got ${certFingerprint}`
+              );
+            }
+            return undefined;
+          };
+        }
+
+        this.ws = new WebSocket(this.config.url, wsOptions);
 
         const connectionTimeout = setTimeout(() => {
           if (this.state === 'connecting') {

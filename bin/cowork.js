@@ -152,13 +152,27 @@ function prepareAndLaunchApp() {
     process.exit(1);
   }
 
-  const electronBinary = resolveElectronBinary();
+  const launchAfterSetup = () => {
+    const electronBinary = resolveElectronBinary();
+    if (!electronBinary) {
+      console.error(
+        '[cowork-os] Electron runtime is still missing after setup. Reinstall with:\n' +
+          '  npm install --ignore-scripts --no-audit --no-fund cowork-os@latest\n'
+      );
+      process.exit(1);
+    }
+    if (isBetterSqliteReady(electronBinary)) {
+      launchApp(electronBinary);
+      return;
+    }
+    runNativeSetup(() => launchAfterSetup());
+  };
+
+  let electronBinary = resolveElectronBinary();
   if (!electronBinary) {
-    console.error(
-      '[cowork-os] Electron runtime is missing. Reinstall with:\n' +
-      '  npm install cowork-os@latest\n'
-    );
-    process.exit(1);
+    console.log('[cowork-os] Electron runtime is missing. Running setup...');
+    runNativeSetup(() => launchAfterSetup());
+    return;
   }
 
   if (isBetterSqliteReady(electronBinary)) {

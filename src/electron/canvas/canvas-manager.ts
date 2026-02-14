@@ -476,6 +476,26 @@ export class CanvasManager {
         this.stopWatcher(sessionId);
       });
 
+      // Forward console messages from canvas to the renderer
+      window.webContents.on('console-message', (_event, level, message) => {
+        const levelMap: Record<number, 'log' | 'warn' | 'error' | 'info'> = {
+          0: 'log',   // Verbose/debug → log
+          1: 'info',
+          2: 'warn',
+          3: 'error',
+        };
+        this.emitEvent({
+          type: 'console_message',
+          sessionId,
+          taskId: session.taskId,
+          timestamp: Date.now(),
+          console: {
+            level: levelMap[level] || 'log',
+            message,
+          },
+        });
+      });
+
       const mode = this.getSessionMode(session);
       let targetUrl = this.getCanvasUrl(sessionId);
       if (mode === 'browser' && session.url) {

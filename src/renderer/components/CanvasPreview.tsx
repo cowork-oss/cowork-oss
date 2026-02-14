@@ -406,6 +406,19 @@ export function CanvasPreview({ session, onClose, forceSnapshot = false, onOpenB
             setSessionStatus(event.session.status);
           }
           break;
+
+        case 'console_message':
+          if (event.console) {
+            setConsoleLogs((prev) => [
+              ...prev,
+              {
+                type: event.console!.level,
+                message: event.console!.message,
+                timestamp: event.timestamp,
+              },
+            ]);
+          }
+          break;
       }
     });
 
@@ -644,10 +657,6 @@ export function CanvasPreview({ session, onClose, forceSnapshot = false, onOpenB
   const handleGoLive = useCallback(() => {
     setHistoryIndex(-1);
   }, []);
-
-  // TODO: Implement console capture from canvas window via IPC
-  // The addConsoleLog function can be added when canvas console forwarding is implemented
-  // Example usage: addConsoleLog('log', 'Message from canvas');
 
   // Clear console logs
   const handleClearConsole = useCallback(() => {

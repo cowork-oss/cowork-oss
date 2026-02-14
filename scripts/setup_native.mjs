@@ -235,8 +235,8 @@ function main() {
       }`
     );
 
-    // 2) Prefer the lightest path: ask better-sqlite3 to install a prebuild for Electron.
-    // If a matching prebuild exists, this avoids compiling from source (which is where macOS SIGKILLs happen).
+    // 2) Prefer the Electron-targeted rebuild for better-sqlite3.
+    // This keeps binaries aligned with Electron ABI and avoids Node/host ABI mismatches.
     if (electronVersion) {
       const electronEnv = {
         ...env,
@@ -259,7 +259,7 @@ function main() {
       }
 
       console.log(
-        "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; falling back to electron-rebuild."
+        "[cowork] better-sqlite3 did not load after Electron-targeted rebuild; falling back to electron-rebuild path with inferred settings."
       );
     } else {
       console.log(

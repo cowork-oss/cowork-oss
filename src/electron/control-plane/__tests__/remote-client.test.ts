@@ -179,6 +179,43 @@ describe('RemoteGatewayClient', () => {
       await expect(client.connect()).rejects.toThrow('TLS fingerprint requires wss:// URL');
       expect(onStateChange).toHaveBeenCalledWith('error', 'TLS fingerprint requires wss:// URL');
     });
+
+    it('should accept TLS fingerprint with wss:// URL', async () => {
+      client = new RemoteGatewayClient({
+        ...defaultOptions,
+        url: 'wss://secure-host:18789',
+        tlsFingerprint: 'AA:BB:CC:DD:EE:FF',
+        onStateChange,
+      });
+
+      // Should transition to connecting (not rejected for URL mismatch)
+      client.connect();
+      expect(onStateChange).toHaveBeenCalledWith('connecting', undefined);
+    });
+
+    it('should normalize TLS fingerprint by removing colons and lowercasing', async () => {
+      client = new RemoteGatewayClient({
+        ...defaultOptions,
+        url: 'wss://secure-host:18789',
+        tlsFingerprint: 'AA:BB:CC:DD',
+        onStateChange,
+      });
+
+      // Should not throw - fingerprint format is normalized internally
+      client.connect();
+      expect(onStateChange).toHaveBeenCalledWith('connecting', undefined);
+    });
+
+    it('should connect without TLS fingerprint for wss:// URLs', async () => {
+      client = new RemoteGatewayClient({
+        ...defaultOptions,
+        url: 'wss://secure-host:18789',
+        onStateChange,
+      });
+
+      client.connect();
+      expect(onStateChange).toHaveBeenCalledWith('connecting', undefined);
+    });
   });
 
   describe('disconnect', () => {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.76] - 2026-02-14
+
+### Fixed
+- **Installability restoration**: pinned `electron` to `40.2.1` so first-time installs from `npm` pull the known-good Electron patch and avoid `SIGKILL` during `node_modules/electron/install.js` on affected macOS environments.
+- **README alignment**: clarified the first-time CLI install path to reflect the exact commands users should run from a fresh temporary folder.
+
 ## [0.3.75] - 2026-02-14
 
 ### Fixed
@@ -521,6 +527,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.76 | 2026-02-14 | Pinned Electron to 40.2.1 for first-run installability and aligned README CLI flow |
 | 0.3.75 | 2026-02-14 | Restored 0.3.71-compatible Electron lockfile for installability and release confidence |
 | 0.3.73 | 2026-02-14 | Release automation hardening and task/workspace validation fixes |
 | 0.3.72 | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation |
@@ -533,7 +540,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.75...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.76...HEAD
+[0.3.76]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.76
 [0.3.75]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.75
 [0.3.73]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.73
 [0.3.72]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.72

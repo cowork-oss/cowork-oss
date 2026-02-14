@@ -36,11 +36,11 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.75
+### What’s new in 0.3.76
 
-- **Release pipeline reliability**: restored the working Electron patch-level lock from `v0.3.71` so install flow remains reliable in default `npm install` paths.
-- **Default install resilience**: default `npm install` behavior is now usable again with fewer SIGKILL exits during `electron/install.js` on macOS low-memory installs.
-- **Release + CI alignment**: kept installability changes aligned with the existing release publish workflow and release notes process.
+- **Installability fix**: pinned `electron` to `40.2.1` so default `npm install` in a fresh environment pulls a working Electron patch and avoids common `SIGKILL` paths during `electron/install.js`.
+- **CLI-first install verification**: verified the exact `/tmp/cowork-run` commands from README as the supported first-run path.
+- **Release alignment**: synced `CHANGELOG.md` release notes and `setup` behavior with the same installability expectations before publish.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
@@ -67,7 +67,10 @@ Use this flow to test like a first-time user in a clean folder:
 # Install into a local folder
 mkdir -p /tmp/cowork-run
 cd /tmp/cowork-run
-npm install cowork-os@latest --no-audit --no-fund
+npm install --ignore-scripts cowork-os@latest --no-audit --no-fund
+
+# Prepare native runtime (Electron binary + native module cache)
+npm run --prefix node_modules/cowork-os setup
 
 # Ensure no previously running CoWork instance is active
 pkill -f '/cowork-os' || true
@@ -76,20 +79,24 @@ pkill -f '/cowork-os' || true
 npx cowork-os
 ```
 
+This is the first install path users should try on macOS:
+
+> If you run plain `npm install cowork-os@latest`, macOS can still intermittently kill lifecycle scripts during dependency extraction. Use the `--ignore-scripts` flow above and `npm run --prefix node_modules/cowork-os setup` every time before first launch.
+
 #### Install reliability notes (macOS / low-memory environments)
 
-- If install fails with `SIGKILL` during `node_modules/electron/install.js`, use a two-step install:
-  - `npm install --ignore-scripts cowork-os@latest --no-audit --no-fund`
-  - `npm run setup` (from the install directory) before launching the CLI
+- If setup is interrupted by `SIGKILL`, close other memory-heavy apps and rerun:
+  - `npm run --prefix node_modules/cowork-os setup`
 - For local package testing, use the same `--ignore-scripts` flow with the tarball:
   - `npm init -y`  
   - `npm install --ignore-scripts /path/to/cowork-os-<version>.tgz`
+  - `npm run --prefix node_modules/cowork-os setup`
 - If you already have a global install, verify with `coworkd-node --version` and avoid launching without dependency setup on first run.
 
 You can also install globally and launch directly:
 
 ```bash
-npm install -g cowork-os
+npm install -g --ignore-scripts --no-audit --no-fund cowork-os
 
 # Optional: verify installed version
 npm list -g cowork-os --depth=0

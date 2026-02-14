@@ -684,11 +684,15 @@ interface CanvasA2UIAction {
 }
 
 interface CanvasEvent {
-  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action';
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message';
   sessionId: string;
   taskId: string;
   session?: CanvasSession;
   action?: CanvasA2UIAction;
+  console?: {
+    level: 'log' | 'warn' | 'error' | 'info';
+    message: string;
+  };
   timestamp: number;
 }
 

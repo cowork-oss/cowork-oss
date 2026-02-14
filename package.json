@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.75",
+  "version": "0.3.76",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -74,7 +74,7 @@
     "@whiskeysockets/baileys"
   ],
   "scripts": {
-    "setup": "npm install --no-audit --no-fund && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
+    "setup": "npm install --no-audit --no-fund --omit=dev && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
     "setup:native": "sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s",
     "setup:server": "npm install && npm rebuild --ignore-scripts=false better-sqlite3",
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
@@ -87,7 +87,8 @@
     "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "package": "npm run build && electron-builder",
-    "lint": "eslint src --ext ts,tsx",
+    "lint": "oxlint src -c .oxlintrc.json --tsconfig tsconfig.json",
+    "lint:eslint": "eslint src --ext ts,tsx",
     "skills:validate-routing": "node scripts/qa/validate-skills-routing.mjs",
     "type-check": "tsc --noEmit",
     "test": "npm run skills:validate-routing && vitest run",
@@ -110,7 +111,7 @@
     "chokidar": "^5.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.1",
-    "electron": "^40.1.0",
+    "electron": "40.2.1",
     "electron-updater": "^6.3.9",
     "eventsource": "^4.1.0",
     "exceljs": "^4.4.0",
@@ -157,6 +158,7 @@
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
+    "oxlint": "^1.47.0",
     "typescript": "^5.7.3",
     "vite": "^7.3.1",
     "vite-plugin-electron": "^0.29.0",

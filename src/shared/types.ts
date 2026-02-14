@@ -3588,7 +3588,7 @@ export interface CanvasA2UIAction {
  */
 export interface CanvasEvent {
   /** Event type */
-  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened';
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message';
   /** Session ID */
   sessionId: string;
   /** Associated task ID */
@@ -3597,6 +3597,11 @@ export interface CanvasEvent {
   session?: CanvasSession;
   /** A2UI action data (for a2ui_action events) */
   action?: CanvasA2UIAction;
+  /** Console message data (for console_message events) */
+  console?: {
+    level: 'log' | 'warn' | 'error' | 'info';
+    message: string;
+  };
   /** Timestamp */
   timestamp: number;
 }
