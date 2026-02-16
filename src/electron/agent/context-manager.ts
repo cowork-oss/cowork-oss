@@ -216,6 +216,21 @@ export class ContextManager {
   }
 
   /**
+   * Get the model's estimated total context window.
+   */
+  getModelTokenLimit(): number {
+    return this.maxTokens;
+  }
+
+  /**
+   * Estimate how many output tokens remain for a request, given current input.
+   */
+  estimateMaxOutputTokens(messages: LLMMessage[], systemPrompt: string = ''): number {
+    const inputTokens = estimateTotalTokens(messages, systemPrompt);
+    return Math.max(1, this.maxTokens - inputTokens);
+  }
+
+  /**
    * Compact messages to fit within token limit
    * Preserves recent messages and summarizes older ones
    */

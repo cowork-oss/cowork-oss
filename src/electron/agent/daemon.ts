@@ -21,6 +21,11 @@ import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
 import { MemoryService } from '../memory/MemoryService';
+import { UserProfileService } from '../memory/UserProfileService';
+import { RelationshipMemoryService } from '../memory/RelationshipMemoryService';
+import { PersonalityManager } from '../settings/personality-manager';
+import { IntentRoute, IntentRouter } from './strategy/IntentRouter';
+import { DerivedTaskStrategy, TaskStrategyService } from './strategy/TaskStrategyService';
 import type { AgentTeamOrchestrator } from '../agents/AgentTeamOrchestrator';
 
 // Memory management constants
@@ -191,6 +196,66 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  private sameAgentConfig(a?: AgentConfig, b?: AgentConfig): boolean {
+    return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+  }
+
+  private deriveTaskStrategy(input: {
+    title: string;
+    prompt: string;
+    agentConfig?: AgentConfig;
+  }): {
+    route: IntentRoute;
+    strategy: DerivedTaskStrategy;
+    prompt: string;
+    agentConfig: AgentConfig;
+    promptChanged: boolean;
+    agentConfigChanged: boolean;
+  } {
+    const route = IntentRouter.route(input.title, input.prompt);
+    const strategy = TaskStrategyService.derive(route, input.agentConfig);
+    const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
+    const relationshipContext = RelationshipMemoryService.buildPromptContext({
+      maxPerLayer: 2,
+      maxChars: 1200,
+    });
+    const prompt = TaskStrategyService.decoratePrompt(input.prompt, route, strategy, relationshipContext);
+    return {
+      route,
+      strategy,
+      prompt,
+      agentConfig,
+      promptChanged: prompt !== input.prompt,
+      agentConfigChanged: !this.sameAgentConfig(input.agentConfig, agentConfig),
+    };
+  }
+
+  private applyRuntimeTaskStrategy(task: Task): {
+    task: Task;
+    route: IntentRoute;
+    strategy: DerivedTaskStrategy;
+    promptChanged: boolean;
+    agentConfigChanged: boolean;
+  } {
+    const derived = this.deriveTaskStrategy({
+      title: task.title,
+      prompt: task.prompt,
+      agentConfig: task.agentConfig,
+    });
+    const nextTask: Task =
+      derived.promptChanged || derived.agentConfigChanged
+        ? { ...task, prompt: derived.prompt, agentConfig: derived.agentConfig }
+        : task;
+
+    return {
+      task: nextTask,
+      route: derived.route,
+      strategy: derived.strategy,
+      promptChanged: derived.promptChanged,
+      agentConfigChanged: derived.agentConfigChanged,
+    };
+  }
+
   /**
    * Initialize the daemon - call after construction to set up queue
    */
@@ -303,6 +368,20 @@ export class AgentDaemon extends EventEmitter {
 
     // Ensure @mentions are recorded for deferred dispatch regardless of task creation entrypoint.
     this.maybeCaptureMentionedAgentRoleIds(effectiveTask);
+    const runtimeStrategy = this.applyRuntimeTaskStrategy(effectiveTask);
+    const executionTask = runtimeStrategy.task;
+    if (runtimeStrategy.agentConfigChanged) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: executionTask.agentConfig });
+      } catch (error) {
+        console.warn('[AgentDaemon] Failed to persist runtime strategy agent config:', error);
+      }
+    }
+    if (runtimeStrategy.promptChanged || runtimeStrategy.agentConfigChanged) {
+      this.logEvent(effectiveTask.id, 'log', {
+        message: `Execution strategy active: intent=${runtimeStrategy.route.intent}, mode=${runtimeStrategy.strategy.conversationMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}`,
+      });
+    }
 
     const wasQueued = effectiveTask.status === 'queued';
     if (wasQueued) {
@@ -313,9 +392,9 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Get workspace details
-    const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
+    const workspace = this.workspaceRepo.findById(executionTask.workspaceId);
     if (!workspace) {
-      throw new Error(`Workspace ${effectiveTask.workspaceId} not found`);
+      throw new Error(`Workspace ${executionTask.workspaceId} not found`);
     }
     console.log(`[AgentDaemon] Workspace found: ${workspace.name}`);
 
@@ -323,7 +402,7 @@ export class AgentDaemon extends EventEmitter {
     let executor: TaskExecutor;
     try {
       console.log(`[AgentDaemon] Creating TaskExecutor...`);
-      executor = new TaskExecutor(effectiveTask, workspace, this);
+      executor = new TaskExecutor(executionTask, workspace, this);
       console.log(`[AgentDaemon] TaskExecutor created successfully`);
     } catch (error: any) {
       console.error(`[AgentDaemon] Task ${effectiveTask.id} failed to initialize:`, error);
@@ -347,7 +426,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Update task status
     this.taskRepo.update(effectiveTask.id, { status: 'planning', error: undefined });
-    this.logEvent(effectiveTask.id, 'task_created', { task: effectiveTask });
+    this.logEvent(effectiveTask.id, 'task_created', { task: executionTask });
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
     // Start execution (non-blocking)
@@ -378,14 +457,24 @@ export class AgentDaemon extends EventEmitter {
     budgetTokens?: number;
     budgetCost?: number;
   }): Promise<Task> {
-    const task = this.taskRepo.create({
+    const derived = this.deriveTaskStrategy({
       title: params.title,
       prompt: params.prompt,
+      agentConfig: params.agentConfig,
+    });
+    const task = this.taskRepo.create({
+      title: params.title,
+      prompt: derived.prompt,
       status: 'pending',
       workspaceId: params.workspaceId,
-      agentConfig: params.agentConfig,
+      agentConfig: derived.agentConfig,
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
+    });
+    this.logEvent(task.id, 'log', {
+      message: `Intent routed: ${derived.route.intent} (${derived.strategy.conversationMode})`,
+      confidence: Number(derived.route.confidence.toFixed(2)),
+      signals: derived.route.signals,
     });
 
     // Start the task (will be queued if necessary)
@@ -686,7 +775,7 @@ export class AgentDaemon extends EventEmitter {
     // Task is running - cancel it
     const cached = this.activeTasks.get(taskId);
     if (cached) {
-      await cached.executor.cancel();
+      await cached.executor.cancel('user');
       this.activeTasks.delete(taskId);
     }
 
@@ -972,6 +1061,7 @@ export class AgentDaemon extends EventEmitter {
       step_completed: 'observation',
       step_failed: 'error',
       assistant_message: 'observation',
+      user_message: 'observation',
       user_feedback: 'decision',
       plan_created: 'decision',
       plan_revised: 'decision',
@@ -995,6 +1085,28 @@ export class AgentDaemon extends EventEmitter {
     const isSubAgentTask = (task.agentType ?? 'main') === 'sub' || !!task.parentTaskId;
     const retainMemory = task.agentConfig?.retainMemory ?? !isSubAgentTask;
     if (!retainMemory) return;
+    const gatewayContext = task.agentConfig?.gatewayContext;
+    const isSharedGatewayContext = gatewayContext === 'group' || gatewayContext === 'public';
+    const allowProfileIngest = !isSharedGatewayContext || task.agentConfig?.allowSharedContextMemory === true;
+    if (allowProfileIngest) {
+      if (type === 'user_message') {
+        const text =
+          (typeof payload?.message === 'string' ? payload.message : '') ||
+          (typeof payload?.content === 'string' ? payload.content : '');
+        if (text) {
+          UserProfileService.ingestUserMessage(text, taskId);
+        }
+      } else if (type === 'user_feedback') {
+        UserProfileService.ingestUserFeedback(
+          typeof payload?.decision === 'string' ? payload.decision : undefined,
+          typeof payload?.reason === 'string' ? payload.reason : undefined,
+          taskId
+        );
+      }
+    }
+    if (isSharedGatewayContext && task.agentConfig?.allowSharedContextMemory !== true) {
+      return;
+    }
 
     // Build content string based on event type
     let content = '';
@@ -1008,6 +1120,12 @@ export class AgentDaemon extends EventEmitter {
       content = `Tool error for ${payload.tool || payload.name}: ${payload.error}`;
     } else if (type === 'assistant_message') {
       content = payload.content || payload.message || JSON.stringify(payload);
+    } else if (type === 'user_message') {
+      content = payload.message || payload.content || JSON.stringify(payload);
+    } else if (type === 'user_feedback') {
+      const decision = payload?.decision ? `Decision: ${payload.decision}` : 'Feedback received';
+      const reason = payload?.reason ? `\nReason: ${payload.reason}` : '';
+      content = `${decision}${reason}`;
     } else if (type === 'plan_created' || type === 'plan_revised') {
       content = `Plan ${type === 'plan_revised' ? 'revised' : 'created'}:\n${JSON.stringify(payload.plan || payload, null, 2)}`;
     } else if (type === 'step_completed') {
@@ -1029,7 +1147,6 @@ export class AgentDaemon extends EventEmitter {
       content = content.slice(0, 5000) + '\n[... truncated]';
     }
 
-    const gatewayContext = task.agentConfig?.gatewayContext;
     const forcePrivate = gatewayContext === 'group' || gatewayContext === 'public';
     await MemoryService.capture(task.workspaceId, taskId, memoryType, content, forcePrivate);
   }
@@ -1918,6 +2035,7 @@ export class AgentDaemon extends EventEmitter {
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */
   completeTask(taskId: string, resultSummary?: string): void {
+    const existingTask = this.taskRepo.findById(taskId);
     const updates: Partial<Task> = {
       status: 'completed',
       completedAt: Date.now(),
@@ -1939,6 +2057,25 @@ export class AgentDaemon extends EventEmitter {
       message: 'Task completed successfully',
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
     });
+    try {
+      const isTopLevelTask = existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? 'main') === 'main';
+      if (isTopLevelTask) {
+        const workspaceName = this.workspaceRepo.findById(existingTask.workspaceId)?.name;
+        PersonalityManager.recordTaskCompleted(workspaceName);
+        const gatewayContext = existingTask.agentConfig?.gatewayContext ?? 'private';
+        const canCaptureRelationshipMemory =
+          gatewayContext === 'private' || existingTask.agentConfig?.allowSharedContextMemory === true;
+        if (canCaptureRelationshipMemory) {
+          RelationshipMemoryService.recordTaskCompletion(
+            existingTask.title,
+            typeof updates.resultSummary === 'string' ? updates.resultSummary : undefined,
+            taskId
+          );
+        }
+      }
+    } catch (error) {
+      console.warn('[AgentDaemon] Failed to record relationship milestone:', error);
+    }
     if (this.teamOrchestrator) {
       void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
     }
@@ -2035,7 +2172,7 @@ export class AgentDaemon extends EventEmitter {
       if (cached) {
         try {
           console.log(`[AgentDaemon] Cancelling running task: ${taskId}`);
-          await cached.executor.cancel();
+          await cached.executor.cancel('system');
           this.activeTasks.delete(taskId);
         } catch (error) {
           console.error(`[AgentDaemon] Error cancelling task ${taskId}:`, error);
@@ -2058,7 +2195,7 @@ export class AgentDaemon extends EventEmitter {
     if (cached) {
       try {
         // Cancel the task (this cleans up browser sessions, etc.)
-        await cached.executor.cancel();
+        await cached.executor.cancel('timeout');
         this.activeTasks.delete(taskId);
       } catch (error) {
         console.error(`[AgentDaemon] Error cancelling timed out task ${taskId}:`, error);
@@ -2120,7 +2257,7 @@ export class AgentDaemon extends EventEmitter {
     // Cancel all active tasks and wait for them to complete
     const cancelPromises: Promise<void>[] = [];
     this.activeTasks.forEach((cached, taskId) => {
-      const promise = cached.executor.cancel().catch(err => {
+      const promise = cached.executor.cancel('shutdown').catch(err => {
         console.error(`Error cancelling task ${taskId}:`, err);
       });
       cancelPromises.push(promise);
