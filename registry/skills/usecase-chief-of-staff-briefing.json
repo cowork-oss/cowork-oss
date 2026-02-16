@@ -1,0 +1,66 @@
+{
+  "id": "usecase-chief-of-staff-briefing",
+  "name": "Chief of Staff Briefing",
+  "description": "Build a morning/evening executive brief from calendar, inbox, tasks, and optional ops signals.",
+  "icon": "🧭",
+  "category": "Use Cases",
+  "prompt": "Chief-of-staff briefing workflow.\n\nGoal\n- Produce a single high-signal brief that helps the user decide what to do next.\n\nInputs\n- Timeframe: {{timeframe}}\n- Audience style: {{audience_style}}\n- Include optional signals: {{include_optional_signals}}\n- Delivery style: {{delivery_style}}\n\nSteps\n1) Collect core signals:\n   - Calendar events and conflicts for \"{{timeframe}}\".\n   - Inbox items that likely need action.\n   - Reminders/tasks/commitments due soon.\n2) If \"{{include_optional_signals}}\" is \"yes\", include optional signals only when tools are connected:\n   - Weather context for travel/meetings.\n   - GitHub/MCP engineering alerts (urgent mentions, failing checks).\n   - Revenue/payment signals (for example Stripe via MCP).\n3) Produce sections:\n   - Executive Summary (3-6 bullets)\n   - Calendar Risks & Prep\n   - Inbox Priorities\n   - Task/Reminder Deadlines\n   - Optional Ops Signals (only if available)\n   - Recommended Next Actions (ordered by urgency)\n4) Add a \"Missing Data\" section for unavailable integrations.\n5) If delivery is requested to a channel, draft the message and STOP before sending.\n\nRules\n- Do not fabricate unavailable data.\n- Keep output short, mobile-readable, and decision-oriented.\n",
+  "parameters": [
+    {
+      "name": "timeframe",
+      "type": "select",
+      "description": "Time horizon for the briefing",
+      "required": false,
+      "default": "morning",
+      "options": [
+        "morning",
+        "today",
+        "tomorrow",
+        "week"
+      ]
+    },
+    {
+      "name": "audience_style",
+      "type": "select",
+      "description": "How executive vs detailed the brief should be",
+      "required": false,
+      "default": "executive",
+      "options": [
+        "executive",
+        "concise",
+        "detailed"
+      ]
+    },
+    {
+      "name": "include_optional_signals",
+      "type": "select",
+      "description": "Include weather/ops/revenue signals when connectors exist",
+      "required": false,
+      "default": "yes",
+      "options": [
+        "yes",
+        "no"
+      ]
+    },
+    {
+      "name": "delivery_style",
+      "type": "select",
+      "description": "Formatting style for final output",
+      "required": false,
+      "default": "mobile",
+      "options": [
+        "mobile",
+        "report"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to build a morning or daily executive brief from calendar, inbox, tasks, and optional ops signals.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Chief of Staff Briefing: one high-signal brief plus prioritized next actions.",
+      "successCriteria": "Delivers a concise brief with explicit data availability boundaries and clear recommended actions."
+    }
+  }
+}

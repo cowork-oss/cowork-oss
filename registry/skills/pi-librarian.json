@@ -1,0 +1,94 @@
+{
+  "id": "pi-librarian",
+  "name": "Pi-librarian",
+  "description": "GitHub research subagent for Pi that uses gh workflows to find and cite relevant repo files before implementation.",
+  "icon": "📚",
+  "category": "Tools",
+  "prompt": "# pi-librarian\n\nUse this skill for GitHub repository research with citations.\n\nInputs:\n- Query: {{query}}\n- Repo hints: {{repo_hints}}\n- Owner hints: {{owner_hints}}\n- Max search results: {{max_search_results}}\n\nPreflight:\n1) Confirm `pi` is available: `pi --version`\n2) Confirm GitHub CLI auth: `gh auth status`\n3) If needed, install once: `pi install npm:pi-librarian`\n\nExecution (one-shot, deterministic):\n`pi --no-session --tools read,grep,find,ls,bash -e npm:pi-librarian -p \"Use the librarian tool for GitHub research. Query: {{query}}. Repo hints: {{repo_hints}}. Owner hints: {{owner_hints}}. maxSearchResults: {{max_search_results}}. Return candidate repos, cited file paths with line ranges, and unresolved gaps. If access fails (403/404), report it explicitly.\" | tee {artifactDir}/librarian-report.md`\n\nThen create `{artifactDir}/librarian-summary.md` with:\n- top candidate repositories\n- key files/snippets and why they matter\n- implementation recommendations\n- unresolved risks or unknowns",
+  "parameters": [
+    {
+      "name": "query",
+      "type": "string",
+      "description": "What to research across GitHub repos",
+      "required": true
+    },
+    {
+      "name": "repo_hints",
+      "type": "string",
+      "description": "Optional repo list hints, e.g. owner/repo pairs",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "owner_hints",
+      "type": "string",
+      "description": "Optional owner/org hints",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "max_search_results",
+      "type": "number",
+      "description": "Maximum gh search results to request",
+      "required": false,
+      "default": 20
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "bins": [
+      "pi",
+      "gh"
+    ]
+  },
+  "install": [
+    {
+      "id": "npm",
+      "kind": "npm",
+      "package": "@mariozechner/pi-coding-agent",
+      "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
+      "bins": [
+        "pi"
+      ]
+    },
+    {
+      "id": "librarian-package",
+      "kind": "npm",
+      "package": "pi-librarian",
+      "label": "Install Librarian package for Pi (pi install npm:pi-librarian)"
+    },
+    {
+      "id": "gh-brew",
+      "kind": "brew",
+      "formula": "gh",
+      "label": "Install GitHub CLI (brew install gh)",
+      "bins": [
+        "gh"
+      ],
+      "os": [
+        "darwin"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "homepage": "https://www.npmjs.com/package/pi-librarian",
+    "tags": [
+      "pi",
+      "subagent",
+      "github",
+      "research"
+    ],
+    "routing": {
+      "useWhen": "Use when users ask to research external GitHub repositories, compare implementation patterns, or gather cited repo evidence before coding.",
+      "dontUseWhen": "Do not use for local-workspace-only discovery or when GitHub access is unnecessary; use pi-finder-subagent instead.",
+      "outputs": "A cited GitHub research report in {artifactDir}/librarian-report.md plus an actionable summary in {artifactDir}/librarian-summary.md.",
+      "successCriteria": "Librarian returns concrete repositories, file paths with citations, and clear unknowns/access limits that guide implementation decisions.",
+      "expectedArtifacts": [
+        "librarian-report.md",
+        "librarian-summary.md"
+      ]
+    }
+  }
+}

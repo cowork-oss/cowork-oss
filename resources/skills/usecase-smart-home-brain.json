@@ -1,0 +1,56 @@
+{
+  "id": "usecase-smart-home-brain",
+  "name": "Smart Home Brain",
+  "description": "Coordinate smart-home actions across existing integrations with clear dry-run and safety confirmation.",
+  "icon": "🏠",
+  "category": "Use Cases",
+  "prompt": "Smart home orchestration workflow.\n\nGoal\n- Execute a user-requested smart-home routine through available connectors with minimal friction and strict safeguards.\n\nInputs\n- User intent: {{intent}}\n- Home profile: {{home_profile}}\n- Confirmation policy: {{confirmation_policy}}\n- Quiet hours: {{quiet_hours}}\n\nSteps\n1) Discover available smart-home capabilities (MCP connectors, channel tools, or local integrations).\n2) Map the request \"{{intent}}\" into concrete device actions.\n3) Validate constraints:\n   - Respect quiet hours \"{{quiet_hours}}\".\n   - Avoid contradictory actions (for example heat + windows open).\n4) Present a dry-run plan before state changes:\n   - Device/action list\n   - Expected result\n   - Reversal plan\n5) If approved, execute actions through available tools and report per-device status.\n6) If required connectors are missing, provide a setup checklist and fallback manual steps.\n\nRules\n- Never execute risky physical actions without explicit confirmation.\n- Never claim a device action succeeded without tool evidence.\n- Keep logs concise and easy to audit.\n",
+  "parameters": [
+    {
+      "name": "intent",
+      "type": "string",
+      "description": "Natural-language smart home request",
+      "required": true
+    },
+    {
+      "name": "home_profile",
+      "type": "select",
+      "description": "Home mode context",
+      "required": false,
+      "default": "home",
+      "options": [
+        "home",
+        "away",
+        "night",
+        "vacation"
+      ]
+    },
+    {
+      "name": "confirmation_policy",
+      "type": "select",
+      "description": "When to require explicit confirmation",
+      "required": false,
+      "default": "risky-only",
+      "options": [
+        "always",
+        "risky-only"
+      ]
+    },
+    {
+      "name": "quiet_hours",
+      "type": "string",
+      "description": "Local quiet-hours window",
+      "required": false,
+      "default": "22:00-07:00"
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to control or coordinate multiple smart-home devices through natural language.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Smart Home Brain: dry-run action plan, execution status, and fallback setup instructions when integrations are missing.",
+      "successCriteria": "Safely coordinates smart-home actions with explicit confirmation boundaries and no fabricated execution claims."
+    }
+  }
+}

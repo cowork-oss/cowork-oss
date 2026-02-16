@@ -1,0 +1,66 @@
+{
+  "id": "pi-finder-subagent",
+  "name": "Pi-finder-subagent",
+  "description": "Read-only local workspace scout subagent for Pi. Use it to narrow context to relevant files/snippets before implementation.",
+  "icon": "🧭",
+  "category": "Tools",
+  "prompt": "# pi-finder-subagent\n\nUse this skill to scout the current workspace before writing code.\n\nInputs:\n- Query: {{query}}\n- Scope hint: {{scope_hint}}\n\nPreflight:\n1) Confirm `pi` is available: `pi --version`\n2) If needed, install once: `pi install npm:pi-finder-subagent`\n\nExecution (one-shot, deterministic):\n`pi --no-session --tools read,grep,find,ls,bash -e npm:pi-finder-subagent -p \"Use the finder tool to scout this workspace. Query: {{query}}. Scope hint: {{scope_hint}}. Return max 12 relevant files with line ranges, key evidence snippets, and unknowns.\" | tee {artifactDir}/finder-report.md`\n\nOutput requirements:\n- Return a concise ranked shortlist of files + line ranges.\n- Include explicit unknowns/gaps.\n- Keep output focused on implementation-relevant context only.",
+  "parameters": [
+    {
+      "name": "query",
+      "type": "string",
+      "description": "What to find in the local workspace",
+      "required": true
+    },
+    {
+      "name": "scope_hint",
+      "type": "string",
+      "description": "Optional directories/files/symbols to prioritize",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "bins": [
+      "pi"
+    ]
+  },
+  "install": [
+    {
+      "id": "npm",
+      "kind": "npm",
+      "package": "@mariozechner/pi-coding-agent",
+      "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
+      "bins": [
+        "pi"
+      ]
+    },
+    {
+      "id": "finder-package",
+      "kind": "npm",
+      "package": "pi-finder-subagent",
+      "label": "Install Finder package for Pi (pi install npm:pi-finder-subagent)"
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "homepage": "https://www.npmjs.com/package/pi-finder-subagent",
+    "tags": [
+      "pi",
+      "subagent",
+      "context",
+      "code-search"
+    ],
+    "routing": {
+      "useWhen": "Use when users ask to scout the local repository, identify relevant files/snippets, or reduce context before coding.",
+      "dontUseWhen": "Do not use for remote GitHub-first research across external repositories; use pi-librarian instead.",
+      "outputs": "A cited local-file shortlist with line ranges plus a saved report at {artifactDir}/finder-report.md.",
+      "successCriteria": "Finder completes with concrete file paths, line ranges, and focused next steps that reduce implementation context.",
+      "expectedArtifacts": [
+        "finder-report.md"
+      ]
+    }
+  }
+}

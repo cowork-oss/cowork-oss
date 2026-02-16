@@ -1,0 +1,56 @@
+{
+  "id": "usecase-inbox-manager",
+  "name": "Inbox Manager",
+  "description": "Triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
+  "icon": "📥",
+  "category": "Use Cases",
+  "prompt": "Inbox manager workflow.\n\nGoal\n- Turn inbox overload into a prioritized action plan with safe draft automation.\n\nInputs\n- Mode: {{mode}}\n- Message limit: {{message_limit}}\n- Time window: {{time_window}}\n- Output format: {{output_format}}\n\nSteps\n1) Collect inbox data (prefer gmail_action, fallback to email_imap_unread, fallback to Email channel history).\n2) Pull up to {{message_limit}} messages in window \"{{time_window}}\".\n3) Classify each item into: urgent, today, this-week, no-action.\n4) Extract:\n   - Reply-needed messages\n   - Cleanup candidates (newsletter/promotions)\n   - Commitments/follow-ups that should become reminders\n5) Produce output in \"{{output_format}}\" including:\n   - Priority triage table\n   - Draft replies for high-priority items\n   - Suggested unsubscribe/archive actions\n   - Suggested recurring automations (for example morning triage, newsletter digest)\n6) STOP BEFORE EXECUTING EXTERNAL ACTIONS.\n   - Do not send, archive, label, delete, unsubscribe, or contact anyone until I explicitly confirm.\n\nMode behavior:\n- triage: maximize sorting and prioritization accuracy.\n- autopilot: include stronger cleanup + drafting recommendations.\n- followups: focus on commitments and messages that require response.\n",
+  "parameters": [
+    {
+      "name": "mode",
+      "type": "select",
+      "description": "Inbox manager mode",
+      "required": false,
+      "default": "triage",
+      "options": [
+        "triage",
+        "autopilot",
+        "followups"
+      ]
+    },
+    {
+      "name": "message_limit",
+      "type": "number",
+      "description": "Maximum number of messages to inspect",
+      "required": false,
+      "default": 120
+    },
+    {
+      "name": "time_window",
+      "type": "string",
+      "description": "Lookback window (e.g., \"24h\", \"3d\")",
+      "required": false,
+      "default": "24h"
+    },
+    {
+      "name": "output_format",
+      "type": "select",
+      "description": "How to format the final report",
+      "required": false,
+      "default": "priority-table",
+      "options": [
+        "priority-table",
+        "bullets"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to triage inbox, draft replies, and suggest cleanup automations with strict confirmation gates.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Inbox Manager: prioritized inbox plan, safe draft replies, and explicit next-step actions.",
+      "successCriteria": "Produces actionable inbox triage with clear confirmation boundaries and no fabricated tool-side behavior."
+    }
+  }
+}

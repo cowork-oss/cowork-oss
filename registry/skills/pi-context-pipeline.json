@@ -1,0 +1,114 @@
+{
+  "id": "pi-context-pipeline",
+  "name": "Pi-context-pipeline",
+  "description": "Orchestrate pi-finder and optional pi-librarian to produce a compact context pack and Codex kickoff prompt before coding.",
+  "icon": "🧵",
+  "category": "Tools",
+  "prompt": "# pi-context-pipeline\n\nUse this skill to reduce context bloat before implementation.\n\nInputs:\n- Query: {{query}}\n- Local scope hint: {{scope_hint}}\n- Repo hints: {{repo_hints}}\n- Owner hints: {{owner_hints}}\n- Run librarian: {{run_librarian}}\n- Max search results: {{max_search_results}}\n\nPreflight:\n1) Confirm `pi` is available: `pi --version`\n2) Ensure packages are available (install once if missing):\n   - `pi install npm:pi-finder-subagent`\n   - `pi install npm:pi-librarian`\n\nStep 1: Local scout with Finder\nRun:\n`pi --no-session --tools read,grep,find,ls,bash -e npm:pi-finder-subagent -p \"Use the finder tool to scout this workspace. Query: {{query}}. Scope hint: {{scope_hint}}. Return max 12 relevant files with line ranges, key snippets, and unresolved unknowns.\" | tee {artifactDir}/finder-report.md`\n\nStep 2: Optional GitHub scout with Librarian\nIf `{{run_librarian}}` is true OR `{{repo_hints}}`/`{{owner_hints}}` are non-empty, run:\n1) `gh auth status`\n2) `pi --no-session --tools read,grep,find,ls,bash -e npm:pi-librarian -p \"Use the librarian tool for GitHub research. Query: {{query}}. Repo hints: {{repo_hints}}. Owner hints: {{owner_hints}}. maxSearchResults: {{max_search_results}}. Return candidate repos, cited file paths with line ranges, and unresolved access gaps.\" | tee {artifactDir}/librarian-report.md`\nIf librarian is not needed, create `{artifactDir}/librarian-report.md` with: `Skipped: local context was sufficient.`\n\nStep 3: Build context pack for coding handoff\nCreate `{artifactDir}/context-pack.md` with:\n- task intent (2-4 lines)\n- local file shortlist (max 12, each with file path + line range + why)\n- remote evidence summary (if any)\n- unknowns/risks that still need verification\n- strict read order for the coding model (ordered file list)\n\nCreate `{artifactDir}/codex-kickoff.txt` containing only a ready-to-run coding prompt:\n- objective\n- the ordered file list from context pack\n- explicit guardrails (\"avoid unrelated files\", \"ask if blockers\")\n- expected output format (changes + tests)\n\nOutput requirements:\n- Keep reports concise and actionable.\n- Prefer citations over prose.\n- Do not include unrelated files or speculative references.",
+  "parameters": [
+    {
+      "name": "query",
+      "type": "string",
+      "description": "What to implement or investigate",
+      "required": true
+    },
+    {
+      "name": "scope_hint",
+      "type": "string",
+      "description": "Optional local directories/files/symbols to prioritize",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "repo_hints",
+      "type": "string",
+      "description": "Optional external repo hints (owner/repo list)",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "owner_hints",
+      "type": "string",
+      "description": "Optional org/user hints for GitHub research",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "run_librarian",
+      "type": "boolean",
+      "description": "Whether to include GitHub research in addition to local scouting",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "max_search_results",
+      "type": "number",
+      "description": "Maximum GitHub search results requested by librarian",
+      "required": false,
+      "default": 20
+    }
+  ],
+  "enabled": true,
+  "requires": {
+    "bins": [
+      "pi"
+    ]
+  },
+  "install": [
+    {
+      "id": "npm",
+      "kind": "npm",
+      "package": "@mariozechner/pi-coding-agent",
+      "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
+      "bins": [
+        "pi"
+      ]
+    },
+    {
+      "id": "finder-package",
+      "kind": "npm",
+      "package": "pi-finder-subagent",
+      "label": "Install Finder package for Pi (pi install npm:pi-finder-subagent)"
+    },
+    {
+      "id": "librarian-package",
+      "kind": "npm",
+      "package": "pi-librarian",
+      "label": "Install Librarian package for Pi (pi install npm:pi-librarian)"
+    },
+    {
+      "id": "gh-brew",
+      "kind": "brew",
+      "formula": "gh",
+      "label": "Install GitHub CLI for librarian mode (brew install gh)",
+      "bins": [
+        "gh"
+      ],
+      "os": [
+        "darwin"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "tags": [
+      "pi",
+      "context",
+      "subagent",
+      "codex"
+    ],
+    "routing": {
+      "useWhen": "Use when users want a Finder plus Librarian pre-coding pipeline that narrows context and prepares a coding handoff prompt.",
+      "dontUseWhen": "Do not use for direct coding changes that are already scoped to a few known files.",
+      "outputs": "A local scout report, optional GitHub scout report, a compact context pack, and a Codex kickoff prompt under {artifactDir}.",
+      "successCriteria": "Produces focused artifacts with cited files/lines and a clean coding handoff that avoids unrelated context reads.",
+      "expectedArtifacts": [
+        "finder-report.md",
+        "librarian-report.md",
+        "context-pack.md",
+        "codex-kickoff.txt"
+      ]
+    }
+  }
+}

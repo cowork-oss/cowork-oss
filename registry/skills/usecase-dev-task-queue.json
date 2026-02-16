@@ -1,0 +1,53 @@
+{
+  "id": "usecase-dev-task-queue",
+  "name": "Dev Task Queue",
+  "description": "Create and run an agent-ready development queue from issues/PRs with progress checkpoints.",
+  "icon": "🛠️",
+  "category": "Use Cases",
+  "prompt": "Developer task queue workflow.\n\nGoal\n- Turn incoming engineering work into a prioritized queue that agents can execute with visible progress.\n\nInputs\n- Repository: {{repository}}\n- Scope filter: {{scope_filter}}\n- Max parallel tasks: {{max_parallel_tasks}}\n- Progress delivery channel: {{progress_channel}}\n\nSteps\n1) Pull candidate work items for repo \"{{repository}}\" (issues/PR comments/backlog tasks) using available GitHub/MCP tools.\n2) Filter by \"{{scope_filter}}\" and estimate complexity/risk.\n3) Build a queue with:\n   - Priority order\n   - Suggested owner (agent/human)\n   - Acceptance criteria\n   - Dependency notes\n4) Start execution batches with at most {{max_parallel_tasks}} active tasks.\n5) For each task, post progress checkpoints and blockers to \"{{progress_channel}}\" when possible.\n6) For code changes, summarize diffs and STOP before merge/deploy unless explicitly approved.\n7) Output queue state snapshot and next recommended batch.\n\nRules\n- Never merge, deploy, or close issues without explicit confirmation.\n- Keep status updates concise and verifiable.\n- If integrations are missing, provide setup steps and continue with a local plan.\n",
+  "parameters": [
+    {
+      "name": "repository",
+      "type": "string",
+      "description": "Repo slug or URL",
+      "required": true
+    },
+    {
+      "name": "scope_filter",
+      "type": "string",
+      "description": "Optional scope (label, milestone, area, keyword)",
+      "required": false,
+      "default": "open high-priority items"
+    },
+    {
+      "name": "max_parallel_tasks",
+      "type": "number",
+      "description": "Maximum active tasks in parallel",
+      "required": false,
+      "default": 3
+    },
+    {
+      "name": "progress_channel",
+      "type": "select",
+      "description": "Where progress updates should be formatted for",
+      "required": false,
+      "default": "slack",
+      "options": [
+        "slack",
+        "telegram",
+        "discord",
+        "email",
+        "none"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to queue software tasks for agent execution with progress updates and safe merge/deploy gating.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Dev Task Queue: prioritized queue, execution status, and explicit approval checkpoints.",
+      "successCriteria": "Builds a practical task queue with visible progress and no unsafe autonomous merge/deploy actions."
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "usecase-figure-it-out-agent",
+  "name": "Figure It Out Agent",
+  "description": "Run resilient multi-tool problem solving with explicit fallback strategy and auditable execution notes.",
+  "icon": "🧩",
+  "category": "Use Cases",
+  "prompt": "Fallback orchestration workflow.\n\nGoal\n- Complete a hard task reliably by switching tools/methods when the first approach fails.\n\nInputs\n- Objective: {{objective}}\n- Fallback budget: {{fallback_budget}}\n- External-action policy: {{external_action_policy}}\n- Completion bar: {{completion_bar}}\n\nExecution contract\n1) Attempt the most direct approach for \"{{objective}}\".\n2) If it fails, diagnose why and choose the next best method using available tools.\n3) Repeat until success or fallback budget ({{fallback_budget}} attempts) is exhausted.\n4) Keep a concise run log per attempt:\n   - Attempt number\n   - Tool/method used\n   - Observed result\n   - Why it failed or succeeded\n5) If blocked, present the best partial result plus a concrete handoff plan.\n\nSafety rules\n- Respect \"{{external_action_policy}}\" for phone calls, purchases, bookings, and other irreversible actions.\n- Never claim success without evidence from tool output.\n- STOP before committing external irreversible actions unless explicitly approved.\n\nFinal output\n- Completion status against \"{{completion_bar}}\"\n- What worked / what failed\n- Recommended next step (automatic or human handoff)\n",
+  "parameters": [
+    {
+      "name": "objective",
+      "type": "string",
+      "description": "Task objective to complete",
+      "required": true
+    },
+    {
+      "name": "fallback_budget",
+      "type": "number",
+      "description": "Maximum fallback attempts after primary attempt",
+      "required": false,
+      "default": 3
+    },
+    {
+      "name": "external_action_policy",
+      "type": "select",
+      "description": "Policy for external irreversible actions",
+      "required": false,
+      "default": "ask-first",
+      "options": [
+        "ask-first",
+        "never"
+      ]
+    },
+    {
+      "name": "completion_bar",
+      "type": "select",
+      "description": "How strict to be before calling task complete",
+      "required": false,
+      "default": "fully-complete",
+      "options": [
+        "fully-complete",
+        "best-effort"
+      ]
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to solve a task autonomously with fallback behavior when tools fail.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Figure It Out Agent: attempt log, verified result status, and fallback handoff plan when blocked.",
+      "successCriteria": "Applies explicit fallback logic, reports evidence-based outcomes, and preserves approval boundaries for risky actions."
+    }
+  }
+}
