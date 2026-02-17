@@ -5,7 +5,7 @@
  * Supports Socket Mode for real-time messaging without exposing webhooks.
  */
 
-import { App, LogLevel } from '@slack/bolt';
+import { App, LogLevel, SocketModeReceiver } from '@slack/bolt';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -56,11 +56,22 @@ export class SlackAdapter implements ChannelAdapter {
     this.setStatus('connecting');
 
     try {
-      // Create Bolt app instance with Socket Mode
+      // Create SocketModeReceiver with relaxed ping/pong timeouts.
+      // Default 5s pong / 30s ping timeouts are too aggressive and cause
+      // excessive reconnection churn, especially on unstable networks.
+      const receiver = new SocketModeReceiver({
+        appToken: this.config.appToken,
+        logLevel: LogLevel.WARN,
+      });
+
+      // SocketModeReceiver doesn't expose ping/pong timeout options, so we
+      // set them directly on the underlying SocketModeClient before start().
+      (receiver.client as any).clientPingTimeout = 15000; // 15s (default: 5s)
+      (receiver.client as any).serverPingTimeout = 60000; // 60s (default: 30s)
+
       this.app = new App({
         token: this.config.botToken,
-        appToken: this.config.appToken,
-        socketMode: true,
+        receiver,
         logLevel: LogLevel.WARN,
       });
 

@@ -154,6 +154,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private shouldReconnect = true;
   private selfChatIgnoreLogAt = 0;
 
+  // Connection flap detection
+  private recentDisconnects: number[] = [];
+  private readonly FLAP_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly FLAP_THRESHOLD = 5; // disconnects in window to trigger flap detection
+  private readonly FLAP_BACKOFF_MS = 60000; // 60s delay when flapping detected
+  private readonly MIN_STABLE_DURATION_MS = 60000; // 60s = "stable" connection
+
   private readonly DEFAULT_BACKOFF: BackoffConfig = {
     initialDelay: 2000,
     maxDelay: 30000,
@@ -285,12 +292,20 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
       // Handle connection updates
       this.sock.ev.on('connection.update', (update) => {
-        this.handleConnectionUpdate(update);
+        try {
+          this.handleConnectionUpdate(update);
+        } catch (error) {
+          console.error('Unhandled error in WhatsApp connection update handler:', error);
+          this.handleError(error instanceof Error ? error : new Error(String(error)), 'connectionUpdate');
+        }
       });
 
       // Handle incoming messages
       this.sock.ev.on('messages.upsert', (upsert) => {
-        this.handleMessagesUpsert(upsert);
+        this.handleMessagesUpsert(upsert).catch((error) => {
+          console.error('Unhandled error in WhatsApp message upsert handler:', error);
+          this.handleError(error instanceof Error ? error : new Error(String(error)), 'messagesUpsert');
+        });
       });
 
       // Start deduplication cleanup
@@ -339,13 +354,24 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // Handle connection open
     if (connection === 'open') {
       this.currentQr = undefined;
+
+      // Check if previous connection was stable before resetting backoff
+      const prevConnectedAt = this.connectedAtMs;
+      const wasStable = prevConnectedAt > 0 && (Date.now() - prevConnectedAt) >= this.MIN_STABLE_DURATION_MS;
+
       this.connectedAtMs = Date.now();
       this._selfJid = this.sock?.user?.id;
       this._selfE164 = this._selfJid ? this.jidToE164(this._selfJid) ?? undefined : undefined;
 
       console.log(`WhatsApp connected as ${this._selfE164 || this._selfJid}`);
       this.setStatus('connected');
-      this.resetBackoff();
+
+      // Only fully reset backoff if the previous connection was stable or this is the first connection.
+      // This prevents the backoff counter from resetting during rapid disconnect/reconnect cycles.
+      if (wasStable || prevConnectedAt === 0) {
+        this.resetBackoff();
+        this.recentDisconnects = [];
+      }
 
       // Send available presence
       this.sock?.sendPresenceUpdate('available').catch(() => {});
@@ -354,6 +380,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // Handle connection close
     if (connection === 'close') {
       this.currentQr = undefined;
+      this.trackDisconnect();
       const statusCode = this.getStatusCode(lastDisconnect?.error);
 
       if (statusCode === DisconnectReason.loggedOut) {
@@ -363,10 +390,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
         this.clearCredentials().catch(() => {});
       } else if (statusCode === DisconnectReason.restartRequired) {
         console.log('WhatsApp restart required, reconnecting...');
-        this.attemptReconnection();
+        this.attemptReconnection().catch((error) => {
+          console.error('WhatsApp reconnection failed:', error);
+        });
       } else {
         console.log(`WhatsApp connection closed (status: ${statusCode}), attempting reconnection...`);
-        this.attemptReconnection();
+        this.attemptReconnection().catch((error) => {
+          console.error('WhatsApp reconnection failed:', error);
+        });
       }
     }
   }
@@ -658,6 +689,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     // Clear caches
     this.processedMessages.clear();
     this.groupMetaCache.clear();
+    this.recentDisconnects = [];
     this.currentQr = undefined;
 
     if (this.sock) {
@@ -1246,7 +1278,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
     this.isReconnecting = true;
     this.backoffAttempt++;
 
-    const delay = this.calculateBackoffDelay(config);
+    let delay = this.calculateBackoffDelay(config);
+
+    // If connection is flapping (repeated rapid disconnects), enforce a longer minimum delay
+    if (this.isConnectionFlapping()) {
+      delay = Math.max(delay, this.FLAP_BACKOFF_MS);
+      console.warn(`WhatsApp: Connection flapping detected (${this.recentDisconnects.length} disconnects in ${Math.round(this.FLAP_WINDOW_MS / 60000)}min), using ${Math.round(delay / 1000)}s backoff`);
+    }
+
     console.log(`WhatsApp: Reconnection attempt ${this.backoffAttempt}/${config.maxAttempts} in ${delay}ms`);
 
     this.backoffTimer = setTimeout(async () => {
@@ -1292,6 +1331,25 @@ export class WhatsAppAdapter implements ChannelAdapter {
       clearTimeout(this.backoffTimer);
       this.backoffTimer = undefined;
     }
+  }
+
+  /**
+   * Track a disconnect event for flap detection
+   */
+  private trackDisconnect(): void {
+    const now = Date.now();
+    this.recentDisconnects.push(now);
+    // Trim entries outside the flap window
+    this.recentDisconnects = this.recentDisconnects.filter(
+      (ts) => now - ts < this.FLAP_WINDOW_MS
+    );
+  }
+
+  /**
+   * Check if the connection is flapping (too many disconnects in a short window)
+   */
+  private isConnectionFlapping(): boolean {
+    return this.recentDisconnects.length >= this.FLAP_THRESHOLD;
   }
 
   /**
