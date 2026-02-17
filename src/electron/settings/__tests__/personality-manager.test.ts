@@ -497,8 +497,8 @@ describe('PersonalityManager - agent name', () => {
       const prompt = PersonalityManager.getIdentityPrompt();
 
       expect(prompt).toContain('who am I');
-      expect(prompt).toContain("USER's information");
-      expect(prompt).toContain('NOT system info');
+      expect(prompt).toContain("USER's stored name");
+      expect(prompt).toContain('NOT system-derived info');
     });
 
     it('should include instructions to ask for name when user is unknown', () => {
