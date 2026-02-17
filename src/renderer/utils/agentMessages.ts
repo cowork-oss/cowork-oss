@@ -168,7 +168,7 @@ export type UiCopyKey =
   | 'mentionUnknownAgent'
   | 'fileLoading'
   | 'canvasLoading'
-  | 'inputPlaceholderQueued';
+;
 
 const UI_COPY: Record<UiCopyKey, string> = {
   taskViewEmptyTitle: 'No session selected',
@@ -299,7 +299,6 @@ const UI_COPY: Record<UiCopyKey, string> = {
   mentionUnknownAgent: 'Unknown Agent',
   fileLoading: 'Loading file...',
   canvasLoading: 'Loading canvas...',
-  inputPlaceholderQueued: 'Message queued...',
 };
 
 const PERSONA_UI_OVERRIDES: Partial<Record<PersonaId, Partial<Record<UiCopyKey, string>>>> = {
@@ -417,7 +416,6 @@ const PERSONA_UI_OVERRIDES: Partial<Record<PersonaId, Partial<Record<UiCopyKey, 
     mentionUnknownAgent: 'Unknown agent',
     fileLoading: 'Opening file...',
     canvasLoading: 'Preparing canvas...',
-    inputPlaceholderQueued: 'Message queued — I\'ll get to it shortly...',
   },
 };
 

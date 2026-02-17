@@ -80,6 +80,10 @@ export class AgentDaemon extends EventEmitter {
   private retryCounts: Map<string, number> = new Map();
   private readonly maxTaskRetries = 2;
   private readonly retryDelayMs = 30 * 1000;
+  /** Session-level auto-approve: when true, all approval requests are auto-granted.
+   *  Set via IPC when the user clicks "Approve all" in the UI.
+   *  Persists for the app lifetime (survives HMR/renderer reloads). */
+  private sessionAutoApproveAll = false;
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -907,12 +911,44 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Request approval from user for an action
    */
+  setSessionAutoApproveAll(enabled: boolean): void {
+    this.sessionAutoApproveAll = enabled;
+    console.log(`[AgentDaemon] Session auto-approve ${enabled ? 'ENABLED' : 'DISABLED'}`);
+  }
+
+  getSessionAutoApproveAll(): boolean {
+    return this.sessionAutoApproveAll;
+  }
+
   async requestApproval(
     taskId: string,
     type: string,
     description: string,
     details: any
   ): Promise<boolean> {
+    // Session-level auto-approve (set via "Approve all" UI button)
+    if (this.sessionAutoApproveAll) {
+      const approval = this.approvalRepo.create({
+        taskId,
+        type: type as any,
+        description,
+        details,
+        status: 'approved',
+        requestedAt: Date.now(),
+      });
+      this.approvalRepo.update(approval.id, 'approved');
+      this.logEvent(taskId, 'approval_requested', {
+        approval,
+        autoApproved: true,
+      });
+      this.logEvent(taskId, 'approval_granted', {
+        approvalId: approval.id,
+        autoApproved: true,
+        reason: 'session_auto_approve',
+      });
+      return true;
+    }
+
     const task = this.taskRepo.findById(taskId);
     if (task?.agentConfig?.autonomousMode) {
       const approval = this.approvalRepo.create({

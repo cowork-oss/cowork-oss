@@ -168,11 +168,20 @@ export class EditTools {
         },
       });
 
-      // Emit file modified event
+      // Emit file modified event with edit preview
+      const oldPreview = old_string.length > 80 ? old_string.slice(0, 80) + '...' : old_string;
+      const newPreview = new_string.length > 80 ? new_string.slice(0, 80) + '...' : new_string;
+      const oldLineCount = old_string.split('\n').length;
+      const newLineCount = new_string.split('\n').length;
+      const netLines = newLineCount - oldLineCount;
+
       this.daemon.logEvent(this.taskId, 'file_modified', {
         path: file_path,
         type: 'edit',
         replacements,
+        oldPreview,
+        newPreview,
+        netLines,
       });
 
       return {

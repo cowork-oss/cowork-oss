@@ -425,6 +425,9 @@ export function App() {
     setSessionAutoApproveAll(true);
     dismissToast(APPROVAL_WARNING_TOAST_ID);
 
+    // Persist to main process so it survives HMR / renderer state resets
+    void window.electronAPI.setSessionAutoApprove(true);
+
     const pendingApprovalIds = Array.from(pendingApprovalsRef.current.keys());
     for (const approvalId of pendingApprovalIds) {
       void handleApprovalResponse(approvalId, true);
@@ -468,6 +471,18 @@ export function App() {
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
+
+  // Restore session auto-approve state from main process (survives HMR and renderer resets)
+  useEffect(() => {
+    window.electronAPI.getSessionAutoApprove().then((enabled: boolean) => {
+      if (enabled) {
+        setSessionAutoApproveAll(true);
+        sessionAutoApproveAllRef.current = true;
+      }
+    }).catch(() => {
+      // Ignore — main process may not support this yet
+    });
+  }, []);
 
   // Subscribe to all task events to update task status
   useEffect(() => {

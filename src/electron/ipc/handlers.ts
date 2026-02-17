@@ -1142,6 +1142,15 @@ export async function setupIpcHandlers(
     await agentDaemon.respondToApproval(validated.approvalId, validated.approved);
   });
 
+  // Session auto-approve handlers
+  ipcMain.handle(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, async (_, enabled: boolean) => {
+    agentDaemon.setSessionAutoApproveAll(!!enabled);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET, async () => {
+    return agentDaemon.getSessionAutoApproveAll();
+  });
+
   // Artifact handlers
   ipcMain.handle(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
     return artifactRepo.findByTaskId(taskId);

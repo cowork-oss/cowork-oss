@@ -44,8 +44,8 @@ export class IntentRouter {
     add('advice', 3, 'advice-question', /\b(how should i|what should i|what do you suggest|recommend|advice)\b/.test(lower));
     add('planning', 3, 'strategy-language', /\b(strategy|roadmap|positioning|go to market|gtm|target segment|messaging|kpi|objective)\b/.test(lower));
     add('planning', 2, 'planning-language', /\b(plan|planning|phase|milestone|timeline)\b/.test(lower));
-    add('execution', 3, 'action-verb', /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement)\b/.test(lower));
-    add('execution', 2, 'execution-target', /\b(file|folder|repo|project|command|script|code|app|database|test|workspace)\b/.test(lower));
+    add('execution', 3, 'action-verb', /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement|check|read|review|find|analyze|examine|inspect|list|show|scan|look|update|modify|delete|remove|rename|move|copy|test|verify|continue)\b/.test(lower));
+    add('execution', 2, 'execution-target', /\b(files?|folders?|repos?|projects?|commands?|scripts?|code|apps?|databases?|tests?|workspaces?|docs?|documents?|directories?|packages?)\b/.test(lower));
     add('execution', 2, 'path-or-command', /`[^`]+`|\/[a-z0-9_.\-\/]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower));
     add('advice', 1, 'question-form', /\?/.test(text));
 

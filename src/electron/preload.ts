@@ -44,6 +44,8 @@ const IPC_CHANNELS = {
   WORKSPACE_TOUCH: 'workspace:touch',
   WORKSPACE_GET_TEMP: 'workspace:getTemp',
   APPROVAL_RESPOND: 'approval:respond',
+  APPROVAL_SESSION_AUTO_APPROVE_SET: 'approval:sessionAutoApprove:set',
+  APPROVAL_SESSION_AUTO_APPROVE_GET: 'approval:sessionAutoApprove:get',
   ARTIFACT_LIST: 'artifact:list',
   ARTIFACT_PREVIEW: 'artifact:preview',
   SKILL_LIST: 'skill:list',
@@ -1660,6 +1662,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Approval APIs
   respondToApproval: (data: any) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
+  setSessionAutoApprove: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, enabled),
+  getSessionAutoApprove: () => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET),
 
   // Artifact APIs
   listArtifacts: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARTIFACT_LIST, taskId),
@@ -2596,6 +2600,8 @@ export interface ElectronAPI {
   touchWorkspace: (id: string) => Promise<any>;
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) => Promise<any>;
   respondToApproval: (data: any) => Promise<void>;
+  setSessionAutoApprove: (enabled: boolean) => Promise<void>;
+  getSessionAutoApprove: () => Promise<boolean>;
   listArtifacts: (taskId: string) => Promise<any[]>;
   previewArtifact: (id: string) => Promise<any>;
   listSkills: () => Promise<any[]>;

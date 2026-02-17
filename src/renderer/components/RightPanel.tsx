@@ -173,7 +173,13 @@ export function RightPanel({ task, workspace, events, tasks = [], queueStatus, o
       }
     });
 
-    return Array.from(fileMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+    return Array.from(fileMap.values())
+      .filter(f => {
+        // Filter out directories – only show actual files
+        const name = f.path.split('/').pop() || f.path;
+        return name.includes('.');
+      })
+      .sort((a, b) => b.timestamp - a.timestamp);
   }, [events]);
 
   // Extract tool usage from events

@@ -581,10 +581,21 @@ export class FileTools {
       // Write file
       await fs.writeFile(fullPath, content, 'utf-8');
 
+      // Build content preview (full content up to 20KB cap)
+      const MAX_PREVIEW_CHARS = 20_000;
+      const lines = content.split('\n');
+      let preview = content.length > MAX_PREVIEW_CHARS ? content.slice(0, MAX_PREVIEW_CHARS) : content;
+      const previewTruncated = content.length > MAX_PREVIEW_CHARS;
+      const ext = path.extname(relativePath).toLowerCase().replace('.', '');
+
       // Log artifact
       this.daemon.logEvent(this.taskId, 'file_created', {
         path: relativePath,
         size: content.length,
+        lineCount: lines.length,
+        contentPreview: preview,
+        previewTruncated,
+        language: ext,
       });
 
       return {

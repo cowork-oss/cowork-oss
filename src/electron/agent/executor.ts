@@ -26,6 +26,7 @@ import { calculateCost, formatCost } from './llm/pricing';
 import { getCustomSkillLoader } from './custom-skill-loader';
 import { MemoryService } from '../memory/MemoryService';
 import { UserProfileService } from '../memory/UserProfileService';
+import { IntentRouter } from './strategy/IntentRouter';
 import { buildWorkspaceKitContext } from '../memory/WorkspaceKitContext';
 import { MemoryFeaturesManager } from '../settings/memory-features-manager';
 import { InputSanitizer, OutputFilter } from './security';
@@ -771,12 +772,16 @@ ${transcript}
   private readonly maxGlobalTurns: number = 100; // Configurable global limit
   private llmCallSequence: number = 0;
   private softDeadlineTriggered: boolean = false;
+  /** Short log tag including first 8 chars of task ID for parent/child task traceability */
+  private readonly logTag: string;
 
   constructor(
     private task: Task,
     private workspace: Workspace,
     private daemon: AgentDaemon
   ) {
+    const shortId = task.id.slice(0, 8);
+    this.logTag = `[Executor:${shortId}]`;
     this.lastUserMessage = task.prompt;
     this.recoveryRequestActive = this.isRecoveryIntent(this.lastUserMessage);
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
@@ -946,7 +951,15 @@ ${transcript}
   private resolveConversationMode(prompt: string): 'task' | 'chat' {
     const mode = this.task.agentConfig?.conversationMode ?? 'hybrid';
     if (mode === 'task') return 'task';
-    if (mode === 'chat') return 'chat';
+    if (mode === 'chat') {
+      // Allow follow-ups to escalate from chat to task if the message
+      // clearly requires tool use (re-route through IntentRouter)
+      const reroute = IntentRouter.route('', prompt);
+      if (reroute.intent === 'execution' || reroute.intent === 'mixed') {
+        return 'task';
+      }
+      return 'chat';
+    }
     return this.isCompanionPrompt(prompt) ? 'chat' : 'task';
   }
 
@@ -1019,7 +1032,10 @@ ${transcript}
       this.conversationHistory = [...messages, { role: 'assistant', content: [{ type: 'text', text: assistantText }] }];
       this.saveConversationSnapshot();
       this.daemon.logEvent(this.task.id, 'follow_up_completed', { message: 'Follow-up message processed (chat mode)' });
-      if (previousStatus) {
+      if (previousStatus === 'failed') {
+        this.daemon.updateTask(this.task.id, { status: 'completed', error: null, completedAt: Date.now() });
+        this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Completed via follow-up' });
+      } else if (previousStatus) {
         this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
         this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
       }
@@ -1040,7 +1056,7 @@ ${transcript}
         this.daemon.updateTaskStatus(this.task.id, previousStatus as any);
         this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
       }
-      console.error('[TaskExecutor] Chat-mode follow-up failed, using fallback:', error);
+      console.error(`${this.logTag} Chat-mode follow-up failed, using fallback:`, error);
     }
   }
 
@@ -1057,7 +1073,7 @@ ${transcript}
   ): Promise<any> {
     const llmCallId = ++this.llmCallSequence;
     console.log(
-      `[TaskExecutor][LLM ${llmCallId}] start: ${operation} (max attempts: ${maxRetries + 1})`
+      `${this.logTag}[LLM ${llmCallId}] start: ${operation} (max attempts: ${maxRetries + 1})`
     );
     let lastError: Error | null = null;
 
@@ -1067,7 +1083,7 @@ ${transcript}
       try {
         if (attempt > 0) {
           const delay = calculateBackoffDelay(attempt - 1);
-          console.log(`[TaskExecutor] Retry attempt ${attempt}/${maxRetries} for ${operation} after ${delay}ms`);
+          console.log(`${this.logTag} Retry attempt ${attempt}/${maxRetries} for ${operation} after ${delay}ms`);
           this.daemon.logEvent(this.task.id, 'llm_retry', {
             operation,
             attempt,
@@ -1095,7 +1111,7 @@ ${transcript}
         this.recordObservedOutputThroughput(outputTokens, elapsedMs);
 
         console.log(
-          `[TaskExecutor][LLM ${llmCallId}] success: ${operation} ` +
+          `${this.logTag}[LLM ${llmCallId}] success: ${operation} ` +
           `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, stopReason=${stopReason || 'unknown'}, blocks=${contentBlocks}` +
           `${totalTokens !== undefined ? `, tokens=${totalTokens}` : ''})`
         );
@@ -1115,7 +1131,7 @@ ${transcript}
           isNonRetryableError(error.message)
         ) {
           console.log(
-            `[TaskExecutor][LLM ${llmCallId}] terminal failure: ${operation} ` +
+            `${this.logTag}[LLM ${llmCallId}] terminal failure: ${operation} ` +
             `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, cancellation=${isCancellation}) -> ${errorMessage}`
           );
           throw error;
@@ -1142,13 +1158,13 @@ ${transcript}
 
         if (!isRetryable || attempt === maxRetries) {
           console.log(
-            `[TaskExecutor][LLM ${llmCallId}] terminal failure: ${operation} ` +
+            `${this.logTag}[LLM ${llmCallId}] terminal failure: ${operation} ` +
             `(attempt ${attemptNumber}/${maxRetries + 1}, ${elapsedMs}ms, retryable=${isRetryable}) -> ${errorMessage}`
           );
           throw error;
         }
 
-        console.log(`[TaskExecutor] ${operation} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+        console.log(`${this.logTag} ${operation} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
       }
     }
 
@@ -1612,7 +1628,7 @@ ${transcript}
     if (toolName === 'read_file' && input?.path) {
       const check = this.fileOperationTracker.checkFileRead(input.path);
       if (check.blocked) {
-        console.log(`[TaskExecutor] Blocking redundant file read: ${input.path}`);
+        console.log(`${this.logTag} Blocking redundant file read: ${input.path}`);
         if (check.cachedResult) {
           return {
             blocked: true,
@@ -1629,7 +1645,7 @@ ${transcript}
     if (toolName === 'list_directory' && input?.path) {
       const check = this.fileOperationTracker.checkDirectoryListing(input.path);
       if (check.blocked && check.cachedFiles) {
-        console.log(`[TaskExecutor] Returning cached directory listing for: ${input.path}`);
+        console.log(`${this.logTag} Returning cached directory listing for: ${input.path}`);
         return {
           blocked: true,
           reason: check.reason,
@@ -1663,7 +1679,7 @@ ${transcript}
 
         const check = this.fileOperationTracker.checkFileCreation(filename);
         if (check.isDuplicate) {
-          console.log(`[TaskExecutor] Warning: Duplicate file creation detected: ${filename}`);
+          console.log(`${this.logTag} Warning: Duplicate file creation detected: ${filename}`);
           // Don't block, but log warning - the LLM might have a good reason
           this.daemon.logEvent(this.task.id, 'tool_warning', {
             tool: toolName,
@@ -1897,14 +1913,14 @@ ${transcript}
           input.sourcePath = lastDoc;
           modified = true;
           inference = `Inferred sourcePath="${lastDoc}" from recently created document`;
-          console.log(`[TaskExecutor] Parameter inference: ${inference}`);
+          console.log(`${this.logTag} Parameter inference: ${inference}`);
         }
       }
 
       // Provide helpful example for newContent if missing
       if (!input?.newContent || !Array.isArray(input.newContent) || input.newContent.length === 0) {
         // Can't infer content, but log helpful message
-        console.log(`[TaskExecutor] edit_document called without newContent - LLM needs to provide content blocks`);
+        console.log(`${this.logTag} edit_document called without newContent - LLM needs to provide content blocks`);
       }
 
       return { input, modified, inference: modified ? inference : undefined };
@@ -1937,15 +1953,15 @@ ${transcript}
             input.content = input[alt];
             modified = true;
             inference = `Normalized ${alt} -> content`;
-            console.log(`[TaskExecutor] Parameter inference for canvas_push: ${inference}`);
+            console.log(`${this.logTag} Parameter inference for canvas_push: ${inference}`);
             break;
           }
         }
 
         // Log all available keys for debugging if content still missing
         if (!input?.content) {
-          console.error(`[TaskExecutor] canvas_push missing 'content' parameter. Input keys: ${Object.keys(input || {}).join(', ')}`);
-          console.error(`[TaskExecutor] canvas_push full input:`, JSON.stringify(input, null, 2));
+          console.error(`${this.logTag} canvas_push missing 'content' parameter. Input keys: ${Object.keys(input || {}).join(', ')}`);
+          console.error(`${this.logTag} canvas_push full input:`, JSON.stringify(input, null, 2));
         }
       }
 
@@ -2093,16 +2109,28 @@ ${transcript}
 
   private inferRequiredArtifactExtensions(): string[] {
     const prompt = `${this.task.title}\n${this.task.prompt}`.toLowerCase();
+
+    // Only infer artifact extensions when the prompt indicates *creating* output,
+    // not just reading/referencing existing files.  Without this gate, a subtask
+    // like "Read the file Document.md and find headings" would falsely require
+    // a .md artifact because the filename contains ".md".
+    const hasCreateIntent = /\b(create|build|write|generate|produce|draft|prepare|save|export|compile)\b/.test(prompt);
+    if (!hasCreateIntent) return [];
+
+    // Strip file paths/names to avoid matching extensions inside filenames.
+    // e.g. "Read /path/to/Founding_Document.md" should not match .md
+    const stripped = prompt.replace(/\/\S+/g, ' ').replace(/\w+\.\w{2,5}\b/g, ' ');
+
     const extensions = new Set<string>();
 
-    if (/\bpdf\b|\.pdf\b/.test(prompt)) extensions.add('.pdf');
-    if (/\bdocx\b|\.docx\b|\bword document\b/.test(prompt)) extensions.add('.docx');
-    if (/\bmarkdown\b|\.md\b|\bmd file\b/.test(prompt)) extensions.add('.md');
-    if (/\bcsv\b|\.csv\b/.test(prompt)) extensions.add('.csv');
-    if (/\bxlsx\b|\.xlsx\b|\bexcel\b|\bspreadsheet\b/.test(prompt)) extensions.add('.xlsx');
-    if (/\bjson\b|\.json\b/.test(prompt)) extensions.add('.json');
-    if (/\btxt\b|\.txt\b|\btext file\b/.test(prompt)) extensions.add('.txt');
-    if (/\bpptx\b|\.pptx\b|\bpowerpoint\b|\bslides?\b/.test(prompt)) extensions.add('.pptx');
+    if (/\bpdf\b|\.pdf\b/.test(stripped)) extensions.add('.pdf');
+    if (/\bdocx\b|\.docx\b|\bword document\b/.test(stripped)) extensions.add('.docx');
+    if (/\bmarkdown\b|\.md\b|\bmd file\b/.test(stripped)) extensions.add('.md');
+    if (/\bcsv\b|\.csv\b/.test(stripped)) extensions.add('.csv');
+    if (/\bxlsx\b|\.xlsx\b|\bexcel\b|\bspreadsheet\b/.test(stripped)) extensions.add('.xlsx');
+    if (/\bjson\b|\.json\b/.test(stripped)) extensions.add('.json');
+    if (/\btxt\b|\.txt\b|\btext file\b/.test(stripped)) extensions.add('.txt');
+    if (/\bpptx\b|\.pptx\b|\bpowerpoint\b|\bslides?\b/.test(stripped)) extensions.add('.pptx');
 
     return Array.from(extensions);
   }
@@ -2549,12 +2577,12 @@ ${transcript}
       .filter(tool => !disabledTools.includes(tool.name));
     if (filtered.length !== allTools.length) {
       console.log(
-        `[TaskExecutor] Filtered out ${allTools.length - filtered.length} tools by policy/denials`
+        `${this.logTag} Filtered out ${allTools.length - filtered.length} tools by policy/denials`
       );
     }
 
     if (disabledTools.length > 0) {
-      console.log(`[TaskExecutor] Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(', ')}`);
+      console.log(`${this.logTag} Filtered out ${disabledTools.length} disabled tools: ${disabledTools.join(', ')}`);
     }
 
     if (!this.isVisualCanvasTask()) {
@@ -2571,13 +2599,13 @@ ${transcript}
     // First, try to restore from a saved conversation snapshot
     // This provides full conversation context including tool results, web content, etc.
     if (this.restoreFromSnapshot(events)) {
-      console.log('[TaskExecutor] Successfully restored conversation from snapshot');
+      console.log(`${this.logTag} Successfully restored conversation from snapshot`);
       return;
     }
 
     // Fallback: Build a summary of the previous conversation from events
     // This is used for backward compatibility with tasks that don't have snapshots
-    console.log('[TaskExecutor] No snapshot found, falling back to event-based summary');
+    console.log(`${this.logTag} No snapshot found, falling back to event-based summary`);
     const conversationParts: string[] = [];
 
     // Add the original task as context
@@ -2722,7 +2750,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Warn if snapshot is getting large
       if (estimatedSize > 5 * 1024 * 1024) { // > 5MB
-        console.warn(`[TaskExecutor] Large snapshot (${sizeMB}MB) - consider conversation compaction`);
+        console.warn(`${this.logTag} Large snapshot (${sizeMB}MB) - consider conversation compaction`);
       }
 
       this.daemon.logEvent(this.task.id, 'conversation_snapshot', {
@@ -2730,13 +2758,13 @@ You are continuing a previous conversation. The context from the previous conver
         estimatedSizeBytes: estimatedSize,
       });
 
-      console.log(`[TaskExecutor] Saved conversation snapshot with ${serializedHistory.length} messages (~${sizeMB}MB) for task ${this.task.id}`);
+      console.log(`${this.logTag} Saved conversation snapshot with ${serializedHistory.length} messages (~${sizeMB}MB) for task ${this.task.id}`);
 
       // Prune old snapshots to prevent database bloat (keep only the most recent)
       this.pruneOldSnapshots();
     } catch (error) {
       // Don't fail the task if snapshot saving fails
-      console.error('[TaskExecutor] Failed to save conversation snapshot:', error);
+      console.error(`${this.logTag} Failed to save conversation snapshot:`, error);
     }
   }
 
@@ -2799,7 +2827,7 @@ You are continuing a previous conversation. The context from the previous conver
       this.daemon.pruneOldSnapshots?.(this.task.id);
     } catch (error) {
       // Non-critical - don't fail if pruning fails
-      console.debug('[TaskExecutor] Failed to prune old snapshots:', error);
+      console.debug(`${this.logTag} Failed to prune old snapshots:`, error);
     }
   }
 
@@ -2819,7 +2847,7 @@ You are continuing a previous conversation. The context from the previous conver
     const payload = latestSnapshot.payload;
 
     if (!payload?.conversationHistory || !Array.isArray(payload.conversationHistory)) {
-      console.warn('[TaskExecutor] Snapshot found but conversationHistory is invalid');
+      console.warn(`${this.logTag} Snapshot found but conversationHistory is invalid`);
       return false;
     }
 
@@ -2859,10 +2887,10 @@ You are continuing a previous conversation. The context from the previous conver
       // The system prompt contains time-sensitive data (e.g., "Current time: ...")
       // that would be stale. Let sendMessage() generate a fresh system prompt.
 
-      console.log(`[TaskExecutor] Restored conversation from snapshot with ${this.conversationHistory.length} messages (saved at ${new Date(payload.timestamp).toISOString()})`);
+      console.log(`${this.logTag} Restored conversation from snapshot with ${this.conversationHistory.length} messages (saved at ${new Date(payload.timestamp).toISOString()})`);
       return true;
     } catch (error) {
-      console.error('[TaskExecutor] Failed to restore from snapshot:', error);
+      console.error(`${this.logTag} Failed to restore from snapshot:`, error);
       return false;
     }
   }
@@ -3247,14 +3275,14 @@ You are continuing a previous conversation. The context from the previous conver
 
   private requestPlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): boolean {
     if (!this.plan) {
-      console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
+      console.warn(`${this.logTag} Cannot revise plan - no plan exists`);
       return false;
     }
 
     // Check plan revision limit to prevent infinite loops
     this.planRevisionCount++;
     if (this.planRevisionCount > this.maxPlanRevisions) {
-      console.warn(`[TaskExecutor] Plan revision limit reached (${this.maxPlanRevisions}). Ignoring revision request.`);
+      console.warn(`${this.logTag} Plan revision limit reached (${this.maxPlanRevisions}). Ignoring revision request.`);
       this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
         reason: `Maximum plan revisions (${this.maxPlanRevisions}) reached. The current approach may not be working - consider completing with available results or trying a fundamentally different strategy.`,
         attemptedRevision: reason,
@@ -3271,7 +3299,7 @@ You are continuing a previous conversation. The context from the previous conver
    */
   private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): boolean {
     if (!this.plan) {
-      console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
+      console.warn(`${this.logTag} Cannot revise plan - no plan exists`);
       return false;
     }
 
@@ -3293,7 +3321,7 @@ You are continuing a previous conversation. The context from the previous conver
         clearedCount = this.plan.steps.filter(s => s.status === 'pending').length;
         this.plan.steps = this.plan.steps.filter(s => s.status !== 'pending');
       }
-      console.log(`[TaskExecutor] Cleared ${clearedCount} pending steps from plan`);
+      console.log(`${this.logTag} Cleared ${clearedCount} pending steps from plan`);
     }
 
     // If no new steps and we just cleared, we're done
@@ -3306,7 +3334,7 @@ You are continuing a previous conversation. The context from the previous conver
         revisionNumber: this.planRevisionCount,
         revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
       });
-      console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): cleared ${clearedCount} steps. Reason: ${reason}`);
+      console.log(`${this.logTag} Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): cleared ${clearedCount} steps. Reason: ${reason}`);
       return true;
     }
 
@@ -3328,7 +3356,7 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     if (duplicateApproach) {
-      console.warn('[TaskExecutor] Blocking plan revision - similar approach already failed');
+      console.warn(`${this.logTag} Blocking plan revision - similar approach already failed`);
       this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
         reason: 'Similar steps have already failed. The current approach is not working - try a fundamentally different strategy.',
         attemptedRevision: reason,
@@ -3341,7 +3369,7 @@ You are continuing a previous conversation. The context from the previous conver
     if (this.plan.steps.length + newSteps.length > MAX_TOTAL_STEPS) {
       const allowedNewSteps = MAX_TOTAL_STEPS - this.plan.steps.length;
       if (allowedNewSteps <= 0) {
-        console.warn(`[TaskExecutor] Maximum total steps limit (${MAX_TOTAL_STEPS}) reached. Cannot add more steps.`);
+        console.warn(`${this.logTag} Maximum total steps limit (${MAX_TOTAL_STEPS}) reached. Cannot add more steps.`);
         this.daemon.logEvent(this.task.id, 'plan_revision_blocked', {
           reason: `Maximum total steps (${MAX_TOTAL_STEPS}) reached. Complete the task with current progress or simplify the approach.`,
           attemptedSteps: newSteps.length,
@@ -3350,7 +3378,7 @@ You are continuing a previous conversation. The context from the previous conver
         return false;
       }
       // Truncate to allowed number
-      console.warn(`[TaskExecutor] Truncating revision from ${newSteps.length} to ${allowedNewSteps} steps due to limit`);
+      console.warn(`${this.logTag} Truncating revision from ${newSteps.length} to ${allowedNewSteps} steps due to limit`);
       newSteps = newSteps.slice(0, allowedNewSteps);
     }
 
@@ -3382,7 +3410,7 @@ You are continuing a previous conversation. The context from the previous conver
       revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
     });
 
-    console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): ${clearRemaining ? `cleared ${clearedCount} steps, ` : ''}added ${newSteps.length} steps. Reason: ${reason}`);
+    console.log(`${this.logTag} Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): ${clearRemaining ? `cleared ${clearedCount} steps, ` : ''}added ${newSteps.length} steps. Reason: ${reason}`);
     return true;
   }
 
@@ -3410,7 +3438,7 @@ You are continuing a previous conversation. The context from the previous conver
       newWorkspaceName: newWorkspace.name,
     });
 
-    console.log(`[TaskExecutor] Workspace switched: ${oldWorkspacePath} -> ${newWorkspace.path}`);
+    console.log(`${this.logTag} Workspace switched: ${oldWorkspacePath} -> ${newWorkspace.path}`);
   }
 
   /**
@@ -3496,7 +3524,7 @@ You are continuing a previous conversation. The context from the previous conver
       });
 
     } catch (error: any) {
-      console.warn(`[TaskExecutor] Task analysis error (non-fatal): ${error.message}`);
+      console.warn(`${this.logTag} Task analysis error (non-fatal): ${error.message}`);
     }
 
     return { additionalContext: additionalContext || undefined, taskType };
@@ -3814,7 +3842,7 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     if (pruned > 0) {
-      console.log(`[TaskExecutor]   │ Pruned ${pruned} stale tool-error result(s) from context`);
+      console.log(`${this.logTag}   │ Pruned ${pruned} stale tool-error result(s) from context`);
     }
   }
 
@@ -3882,9 +3910,47 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
+   * Extract a short "signature" from a tool call to distinguish genuinely
+   * different operations from degenerate repeats.  For search/grep, the
+   * signature is the file — different patterns on the same file IS a loop.
+   * For read-like tools (sed/cat/head/tail), the signature includes the
+   * line-range arguments so that reading *different* sections of the same
+   * file is NOT treated as a loop.
+   */
+  private extractToolSignature(toolName: string, input: any): string {
+    const file = this.extractToolTarget(toolName, input);
+    if (!file) return '';
+
+    const category = this.normalizeToolCategory(toolName, input);
+
+    // For read-like ops, include the line-range so different sections don't match
+    if (category === 'read') {
+      if ((toolName === 'run_command' || toolName === 'execute_command') && input?.command) {
+        // Extract sed line range like "360,580" or head/tail -n count
+        const rangeMatch = input.command.match(/-n\s+'?(\d+[,p]\d*p?)'?/);
+        const headTailMatch = input.command.match(/(?:head|tail)\s+-(?:n\s*)?(\d+)/);
+        const qualifier = rangeMatch?.[1] || headTailMatch?.[1] || '';
+        return qualifier ? `${file}:${qualifier}` : file;
+      }
+      // Built-in read_file with offset/limit
+      const offset = input?.offset ?? input?.start_line ?? '';
+      const limit = input?.limit ?? input?.end_line ?? '';
+      const qualifier = (offset || limit) ? `${offset}-${limit}` : '';
+      return qualifier ? `${file}:${qualifier}` : file;
+    }
+
+    // For search category, signature is just the file (different patterns = same loop)
+    return file;
+  }
+
+  /**
    * Detect degenerate tool call loops: the model calling the same tool on the
    * same target repeatedly without making meaningful progress.
    * Returns true if a loop is detected and a break message should be injected.
+   *
+   * - search/grep: 3+ calls on the same file (regardless of pattern) = loop
+   * - read/sed/cat: 3+ calls on the same file AND same line range = loop
+   *   (different line ranges = progressive exploration, not a loop)
    */
   private detectToolLoop(
     recentCalls: Array<{ tool: string; target: string }>,
@@ -3893,8 +3959,8 @@ You are continuing a previous conversation. The context from the previous conver
     threshold: number = 3,
   ): boolean {
     const category = this.normalizeToolCategory(toolName, input);
-    const target = this.extractToolTarget(toolName, input);
-    recentCalls.push({ tool: category, target });
+    const signature = this.extractToolSignature(toolName, input);
+    recentCalls.push({ tool: category, target: signature });
 
     // Keep only the last `threshold + 1` entries for memory efficiency
     if (recentCalls.length > threshold + 1) {
@@ -3903,16 +3969,16 @@ You are continuing a previous conversation. The context from the previous conver
 
     if (recentCalls.length < threshold) return false;
 
-    // Check if the last `threshold` calls are all the same tool category on the same target
+    // Check if the last `threshold` calls are all the same tool category with the same signature
     const recent = recentCalls.slice(-threshold);
-    const baseTarget = recent[0].target;
-    if (!baseTarget) return false; // Can't detect loops without a target
+    const baseSig = recent[0].target;
+    if (!baseSig) return false; // Can't detect loops without a target
 
     const baseTool = recent[0].tool;
     const allSameCategory = recent.every(c => c.tool === baseTool);
-    const allSameFile = recent.every(c => c.target === baseTarget);
+    const allSameSignature = recent.every(c => c.target === baseSig);
 
-    return allSameCategory && allSameFile;
+    return allSameCategory && allSameSignature;
   }
 
   private summarizeToolResult(toolName: string, result: any): string | null {
@@ -4122,7 +4188,7 @@ You are continuing a previous conversation. The context from the previous conver
       await this.daemon.dispatchMentionedAgents(this.task.id, this.plan);
       this.dispatchedMentionedAgents = true;
     } catch (error) {
-      console.warn('[TaskExecutor] Failed to dispatch mentioned agents:', error);
+      console.warn(`${this.logTag} Failed to dispatch mentioned agents:`, error);
     }
   }
 
@@ -4649,7 +4715,7 @@ You are continuing a previous conversation. The context from the previous conver
       ];
       const resultSummary = this.buildResultSummary() || assistantText;
       this.finalizeTask(resultSummary);
-      console.error('[TaskExecutor] Companion mode failed, using fallback reply:', error);
+      console.error(`${this.logTag} Companion mode failed, using fallback reply:`, error);
     }
   }
 
@@ -4739,7 +4805,7 @@ You are continuing a previous conversation. The context from the previous conver
       const text = this.extractTextFromLLMContent(response.content || []);
       return String(text || '').trim() || baseSummary || fallbackSummary;
     } catch (recoveryError) {
-      console.warn('[TaskExecutor] Timeout recovery answer generation failed:', recoveryError);
+      console.warn(`${this.logTag} Timeout recovery answer generation failed:`, recoveryError);
       return baseSummary || fallbackSummary;
     }
   }
@@ -4762,7 +4828,7 @@ You are continuing a previous conversation. The context from the previous conver
     try {
       this.finalizeTask(finalText);
     } catch (guardError) {
-      console.warn('[TaskExecutor] Timeout recovery guard blocked strict completion, using best-effort finalization:', guardError);
+      console.warn(`${this.logTag} Timeout recovery guard blocked strict completion, using best-effort finalization:`, guardError);
       this.finalizeTaskBestEffort(
         finalText,
         'Timeout recovery finalized with best-effort answer.'
@@ -4841,7 +4907,7 @@ You are continuing a previous conversation. The context from the previous conver
       // Security: Analyze task prompt for potential injection attempts
       const securityReport = InputSanitizer.analyze(this.task.prompt);
       if (securityReport.threatLevel !== 'none') {
-        console.log(`[TaskExecutor] Security analysis: threat level ${securityReport.threatLevel}`, {
+        console.log(`${this.logTag} Security analysis: threat level ${securityReport.threatLevel}`, {
           taskId: this.task.id,
           impersonation: securityReport.hasImpersonation.detected,
           encoded: securityReport.hasEncodedContent.hasEncoded,
@@ -4897,7 +4963,7 @@ You are continuing a previous conversation. The context from the previous conver
           try {
             this.finalizeTask(quickAnswer);
           } catch (guardError) {
-            console.warn('[TaskExecutor] Short-circuit guard blocked strict completion, using best-effort finalization:', guardError);
+            console.warn(`${this.logTag} Short-circuit guard blocked strict completion, using best-effort finalization:`, guardError);
             this.finalizeTaskBestEffort(
               quickAnswer,
               'Answer-first short-circuit finalized with best-effort answer.'
@@ -5020,7 +5086,7 @@ You are continuing a previous conversation. The context from the previous conver
             return;
           }
         }
-        console.log(`[TaskExecutor] Task cancelled - not logging as error (reason: ${this.cancelReason || 'unknown'})`);
+        console.log(`${this.logTag} Task cancelled - not logging as error (reason: ${this.cancelReason || 'unknown'})`);
         // Status will be updated by the daemon's cancelTask method
         return;
       }
@@ -5473,7 +5539,7 @@ Format your plan as a JSON object with this structure:
       const stepSoftTimeoutId = setTimeout(() => {
         stepSoftTimedOut = true;
         console.log(
-          `[TaskExecutor] Step "${step.description}" reached soft deadline after ${Math.round(softStepTimeoutMs / 1000)}s - switching to best-effort mode`
+          `${this.logTag} Step "${step.description}" reached soft deadline after ${Math.round(softStepTimeoutMs / 1000)}s - switching to best-effort mode`
         );
         this.daemon.logEvent(this.task.id, 'log', {
           message: `Step soft deadline reached (${Math.round(softStepTimeoutMs / 1000)}s): ${step.description}`,
@@ -5482,7 +5548,7 @@ Format your plan as a JSON object with this structure:
         this.abortController = new AbortController();
       }, softStepTimeoutMs);
       const stepTimeoutId = setTimeout(() => {
-        console.log(`[TaskExecutor] Step "${step.description}" timed out after ${STEP_TIMEOUT_MS / 1000}s - aborting`);
+        console.log(`${this.logTag} Step "${step.description}" timed out after ${STEP_TIMEOUT_MS / 1000}s - aborting`);
         // Abort any in-flight LLM requests for this step
         this.abortController.abort();
         // Create new controller for next step
@@ -5634,7 +5700,7 @@ Format your plan as a JSON object with this structure:
     if (failedSteps.length > 0 && unrecoveredFailedSteps.length > 0) {
       // Log warning about failed steps
       const failedDescriptions = unrecoveredFailedSteps.map(s => s.description).join(', ');
-      console.log(`[TaskExecutor] ${unrecoveredFailedSteps.length} unrecovered step(s) failed: ${failedDescriptions}`);
+      console.log(`${this.logTag} ${unrecoveredFailedSteps.length} unrecovered step(s) failed: ${failedDescriptions}`);
 
       // If the only failures are verification steps AND all non-verification steps
       // succeeded, treat as "completed with warnings" rather than hard failure.
@@ -5645,9 +5711,16 @@ Format your plan as a JSON object with this structure:
       const allNonVerificationSucceeded = nonVerificationSteps.length > 0 &&
         nonVerificationSteps.every(s => s.status === 'completed');
 
+      // Check if the final plan step completed — meaning the deliverable was produced
+      // even though some earlier steps failed (e.g. a research step failed but others
+      // gathered enough context for the final output).
+      const lastStep = this.plan.steps[this.plan.steps.length - 1];
+      const finalStepCompleted = lastStep?.status === 'completed';
+      const majorityCompleted = successfulSteps.length > failedSteps.length;
+
       if (onlyVerificationStepsFailed && allNonVerificationSucceeded) {
         console.log(
-          `[TaskExecutor] Only verification step(s) failed but all work steps completed. ` +
+          `${this.logTag} Only verification step(s) failed but all work steps completed. ` +
           `Treating as completed with warnings: ${failedDescriptions}`
         );
         this.daemon.logEvent(this.task.id, 'progress_update', {
@@ -5659,6 +5732,22 @@ Format your plan as a JSON object with this structure:
           hasWarnings: true,
         });
         // Don't throw — allow task to complete
+      } else if (finalStepCompleted && majorityCompleted) {
+        // Final deliverable step completed and most steps succeeded —
+        // treat as completed with warnings rather than hard failure.
+        console.log(
+          `${this.logTag} Final step completed and ${successfulSteps.length}/${this.plan.steps.length} steps succeeded. ` +
+          `Treating as completed with warnings despite failed step(s): ${failedDescriptions}`
+        );
+        this.daemon.logEvent(this.task.id, 'progress_update', {
+          phase: 'execution',
+          completedSteps: successfulSteps.length,
+          totalSteps: this.plan.steps.length,
+          progress: 100,
+          message: `Completed with warnings: ${unrecoveredFailedSteps.length} step(s) failed but final deliverable was produced`,
+          hasWarnings: true,
+        });
+        // Don't throw — allow task to complete with warnings
       } else {
         const totalSteps = this.plan.steps.length;
         const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
@@ -6128,14 +6217,14 @@ TASK / CONVERSATION HISTORY:
       let stepToolCallCount = 0;
 
       console.log(
-        `[TaskExecutor] ▶ Step "${step.description}" started | stepId=${step.id} | maxIter=${maxIterations} | ` +
+        `${this.logTag} ▶ Step "${step.description}" started | stepId=${step.id} | maxIter=${maxIterations} | ` +
         `maxTokensRecoveries=${maxMaxTokensRecoveries}`
       );
 
       while (continueLoop && iterationCount < maxIterations) {
         // Check if task is cancelled or already completed
         if (this.cancelled || this.taskCompleted) {
-          console.log(`[TaskExecutor] Step loop terminated: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+          console.log(`${this.logTag} Step loop terminated: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
           break;
         }
 
@@ -6143,7 +6232,7 @@ TASK / CONVERSATION HISTORY:
         const iterStartTime = Date.now();
         const stepElapsed = ((iterStartTime - stepStartTime) / 1000).toFixed(1);
         console.log(
-          `[TaskExecutor]   ┌ Iteration ${iterationCount}/${maxIterations} | stepElapsed=${stepElapsed}s | ` +
+          `${this.logTag}   ┌ Iteration ${iterationCount}/${maxIterations} | stepElapsed=${stepElapsed}s | ` +
           `toolCalls=${stepToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`
         );
 
@@ -6269,7 +6358,7 @@ TASK / CONVERSATION HISTORY:
         const effectiveMaxTokens_log = this.applyRetryTokenCap(stepMaxTokens, 0, LLM_TIMEOUT_MS, true);
         const effectiveTimeout_log = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, true, effectiveMaxTokens_log);
         console.log(
-          `[TaskExecutor]   │ LLM call start | budget=${stepMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
+          `${this.logTag}   │ LLM call start | budget=${stepMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
           `timeout=${(effectiveTimeout_log / 1000).toFixed(0)}s | tools=${availableTools.length} | ` +
           `msgCount=${messages.length}`
         );
@@ -6297,7 +6386,7 @@ TASK / CONVERSATION HISTORY:
         const textBlocks_log = (response.content || []).filter((c: any) => c.type === 'text');
         const textLen = textBlocks_log.reduce((sum: number, b: any) => sum + (b.text?.length || 0), 0);
         console.log(
-          `[TaskExecutor]   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
+          `${this.logTag}   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
           `toolUseBlocks=${toolUseBlocks.length} | textLen=${textLen} | ` +
           `inputTokens=${response.usage?.inputTokens ?? '?'} | outputTokens=${response.usage?.outputTokens ?? '?'}`
         );
@@ -6327,7 +6416,7 @@ TASK / CONVERSATION HISTORY:
         if (response.stopReason === 'max_tokens') {
           maxTokensRecoveryCount++;
           console.log(
-            `[TaskExecutor] max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
+            `${this.logTag} max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
             `stripping truncated tool calls`
           );
           this.daemon.logEvent(this.task.id, 'max_tokens_recovery', {
@@ -6339,7 +6428,7 @@ TASK / CONVERSATION HISTORY:
 
           if (maxTokensRecoveryCount > maxMaxTokensRecoveries) {
             // Exhausted recovery attempts – mark step failed and break
-            console.log(`[TaskExecutor] max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
+            console.log(`${this.logTag} max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
             stepFailed = true;
             lastFailureReason =
               `Response repeatedly exceeded the output token limit (${maxMaxTokensRecoveries} recovery attempts). ` +
@@ -6563,7 +6652,7 @@ TASK / CONVERSATION HISTORY:
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
-              console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              console.log(`${this.logTag} Skipping disabled tool: ${content.name}`);
               hadToolError = true;
               toolErrors.add(content.name);
               const disabledFailureReason = `Tool ${content.name} failed: ${lastError}`;
@@ -6627,7 +6716,7 @@ TASK / CONVERSATION HISTORY:
 
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
-              console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
+              console.log(`${this.logTag} Tool not available in this context: ${content.name}`);
               const expectedRestriction = this.isToolRestrictedByPolicy(content.name);
               hadToolError = true;
               toolErrors.add(content.name);
@@ -6693,7 +6782,7 @@ TASK / CONVERSATION HISTORY:
             // Check for duplicate tool calls (prevents stuck loops)
             const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
             if (duplicateCheck.isDuplicate) {
-              console.log(`[TaskExecutor] Blocking duplicate tool call: ${content.name}`);
+              console.log(`${this.logTag} Blocking duplicate tool call: ${content.name}`);
               this.daemon.logEvent(this.task.id, 'tool_blocked', {
                 tool: content.name,
                 reason: 'duplicate_call',
@@ -6729,7 +6818,7 @@ TASK / CONVERSATION HISTORY:
 
             // Check for cancellation or completion before executing tool
             if (this.cancelled || this.taskCompleted) {
-              console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              console.log(`${this.logTag} Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
@@ -6744,7 +6833,7 @@ TASK / CONVERSATION HISTORY:
             // Check for redundant file operations
             const fileOpCheck = this.checkFileOperation(content.name, content.input);
             if (fileOpCheck.blocked) {
-              console.log(`[TaskExecutor] Blocking redundant file operation: ${content.name}`);
+              console.log(`${this.logTag} Blocking redundant file operation: ${content.name}`);
               this.daemon.logEvent(this.task.id, 'tool_blocked', {
                 tool: content.name,
                 reason: 'redundant_file_operation',
@@ -6792,7 +6881,7 @@ TASK / CONVERSATION HISTORY:
                 } catch { return '(unserializable)'; }
               })();
               console.log(
-                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" start | ` +
+                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" start | ` +
                 `id=${content.id} | timeout=${toolTimeoutMs}ms | input=${truncatedInput}`
               );
 
@@ -6838,7 +6927,7 @@ TASK / CONVERSATION HISTORY:
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               const toolSucceeded = !(result && result.success === false);
               console.log(
-                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" done | ` +
+                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" done | ` +
                 `duration=${toolExecDuration}s | success=${toolSucceeded} | resultSize=${resultStr.length}`
               );
 
@@ -6954,7 +7043,7 @@ TASK / CONVERSATION HISTORY:
             } catch (error: any) {
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               console.error(
-                `[TaskExecutor]   │ ⚙ Tool #${stepToolCallCount} "${content.name}" EXCEPTION | ` +
+                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" EXCEPTION | ` +
                 `duration=${toolExecDuration}s | error=${error?.message || 'unknown'}`
               );
 
@@ -7010,7 +7099,7 @@ TASK / CONVERSATION HISTORY:
           const successCount = toolResults.filter(r => !r.is_error).length;
           const failCount = toolResults.filter(r => r.is_error).length;
           console.log(
-            `[TaskExecutor]   └ Iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
+            `${this.logTag}   └ Iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
             `stepElapsed=${stepElapsedEnd}s | toolResults=${toolResults.length} (ok=${successCount}, err=${failCount})`
           );
         }
@@ -7029,7 +7118,7 @@ TASK / CONVERSATION HISTORY:
                 if (isLoop) {
                   loopBreakInjected = true;
                   console.log(
-                    `[TaskExecutor]   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
+                    `${this.logTag}   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
                   );
                   messages.push({
                     role: 'user',
@@ -7097,12 +7186,12 @@ TASK / CONVERSATION HISTORY:
             });
             continueLoop = true;
           } else if (shouldStopFromFailures) {
-            console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
+            console.log(`${this.logTag} All tool calls failed, were disabled, or duplicates - stopping iteration`);
             stepFailed = true;
             lastFailureReason = lastFailureReason || 'All required tools are unavailable or failed. Unable to complete this step.';
             continueLoop = false;
           } else if (shouldStopFromHardFailure) {
-            console.log('[TaskExecutor] Hard tool failure detected - stopping iteration');
+            console.log(`${this.logTag} Hard tool failure detected - stopping iteration`);
             stepFailed = true;
             lastFailureReason = lastFailureReason || lastToolErrorReason || 'A hard tool failure prevented completion.';
             continueLoop = false;
@@ -7121,7 +7210,7 @@ TASK / CONVERSATION HISTORY:
           !this.shouldSuppressQuestionPause() &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForQuestion) {
-          console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
+          console.log(`${this.logTag} Assistant asked a question, pausing for user input`);
           awaitingUserInput = true;
           continueLoop = false;
         }
@@ -7294,7 +7383,7 @@ TASK / CONVERSATION HISTORY:
 
         const totalStepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
         console.log(
-          `[TaskExecutor] ✗ Step "${step.description}" FAILED | duration=${totalStepDuration}s | ` +
+          `${this.logTag} ✗ Step "${step.description}" FAILED | duration=${totalStepDuration}s | ` +
           `iterations=${iterationCount} | toolCalls=${stepToolCallCount} | reason=${lastFailureReason}`
         );
         this.daemon.logEvent(this.task.id, 'step_failed', {
@@ -7308,7 +7397,7 @@ TASK / CONVERSATION HISTORY:
         this.getRecoveredFailureStepIdSet().delete(step.id);
         const totalStepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
         console.log(
-          `[TaskExecutor] ✓ Step "${step.description}" completed | duration=${totalStepDuration}s | ` +
+          `${this.logTag} ✓ Step "${step.description}" completed | duration=${totalStepDuration}s | ` +
           `iterations=${iterationCount} | toolCalls=${stepToolCallCount}`
         );
         this.daemon.logEvent(this.task.id, 'step_completed', { step });
@@ -7444,7 +7533,7 @@ TASK / CONVERSATION HISTORY:
         if ((response.content || []).some((c: any) => c && c.type === 'tool_use')) return draft;
         return text;
       } catch (error) {
-        console.warn('[TaskExecutor] Quality refine failed, using draft:', error);
+        console.warn(`${this.logTag} Quality refine failed, using draft:`, error);
         return draft;
       }
     };
@@ -7500,7 +7589,7 @@ TASK / CONVERSATION HISTORY:
         critique = '';
       }
     } catch (error) {
-      console.warn('[TaskExecutor] Quality critique failed, proceeding without critique:', error);
+      console.warn(`${this.logTag} Quality critique failed, proceeding without critique:`, error);
       critique = '';
     }
 
@@ -7554,7 +7643,7 @@ TASK / CONVERSATION HISTORY:
       if ((refineResp.content || []).some((c: any) => c && c.type === 'tool_use')) return draft;
       return text;
     } catch (error) {
-      console.warn('[TaskExecutor] Quality refine failed, using draft:', error);
+      console.warn(`${this.logTag} Quality refine failed, using draft:`, error);
       return draft;
     }
   }
@@ -7615,7 +7704,7 @@ TASK / CONVERSATION HISTORY:
         return extracted;
       }
     } catch (error) {
-      console.error('[TaskExecutor] Failed to auto-generate canvas HTML:', error);
+      console.error(`${this.logTag} Failed to auto-generate canvas HTML:`, error);
     }
 
     return this.buildCanvasFallbackHtml(prompt, 'Auto-generation failed, showing a fallback canvas preview.');
@@ -7961,7 +8050,7 @@ TASK / CONVERSATION HISTORY:
       // For follow-up messages, reset taskCompleted flag to allow processing
       // The user explicitly sent a message, so we should handle it
       if (this.taskCompleted) {
-        console.log(`[TaskExecutor] Processing follow-up message after task completion`);
+        console.log(`${this.logTag} Processing follow-up message after task completion`);
         this.taskCompleted = false;  // Allow this follow-up to be processed
       }
 
@@ -7969,13 +8058,13 @@ TASK / CONVERSATION HISTORY:
       let followUpToolCallCount = 0;
 
       console.log(
-        `[TaskExecutor] ▶ Follow-up message processing started | maxIter=${maxIterations}`
+        `${this.logTag} ▶ Follow-up message processing started | maxIter=${maxIterations}`
       );
 
       while (continueLoop && iterationCount < maxIterations) {
         // Only check cancelled - taskCompleted should not block follow-ups
         if (this.cancelled) {
-          console.log(`[TaskExecutor] sendMessage loop terminated: cancelled=${this.cancelled}`);
+          console.log(`${this.logTag} sendMessage loop terminated: cancelled=${this.cancelled}`);
           break;
         }
 
@@ -7983,7 +8072,7 @@ TASK / CONVERSATION HISTORY:
         const iterStartTime = Date.now();
         const followUpElapsed = ((iterStartTime - followUpStartTime) / 1000).toFixed(1);
         console.log(
-          `[TaskExecutor]   ┌ Follow-up iteration ${iterationCount}/${maxIterations} | elapsed=${followUpElapsed}s | ` +
+          `${this.logTag}   ┌ Follow-up iteration ${iterationCount}/${maxIterations} | elapsed=${followUpElapsed}s | ` +
           `toolCalls=${followUpToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`
         );
 
@@ -8110,7 +8199,7 @@ TASK / CONVERSATION HISTORY:
         const effectiveMaxTokens_log = this.applyRetryTokenCap(followUpMaxTokens, 0, LLM_TIMEOUT_MS, true);
         const effectiveTimeout_log = this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, true, effectiveMaxTokens_log);
         console.log(
-          `[TaskExecutor]   │ LLM call start | budget=${followUpMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
+          `${this.logTag}   │ LLM call start | budget=${followUpMaxTokens} | effectiveMaxTokens=${effectiveMaxTokens_log} | ` +
           `timeout=${(effectiveTimeout_log / 1000).toFixed(0)}s | tools=${availableTools.length} | ` +
           `msgCount=${messages.length}`
         );
@@ -8138,7 +8227,7 @@ TASK / CONVERSATION HISTORY:
         const textBlocks_log = (response.content || []).filter((c: any) => c.type === 'text');
         const textLen = textBlocks_log.reduce((sum: number, b: any) => sum + (b.text?.length || 0), 0);
         console.log(
-          `[TaskExecutor]   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
+          `${this.logTag}   │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
           `toolUseBlocks=${toolUseBlocks.length} | textLen=${textLen} | ` +
           `inputTokens=${response.usage?.inputTokens ?? '?'} | outputTokens=${response.usage?.outputTokens ?? '?'}`
         );
@@ -8152,7 +8241,7 @@ TASK / CONVERSATION HISTORY:
         if (response.stopReason === 'max_tokens') {
           maxTokensRecoveryCount++;
           console.log(
-            `[TaskExecutor] Follow-up: max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
+            `${this.logTag} Follow-up: max_tokens hit (recovery ${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}), ` +
             `stripping truncated tool calls`
           );
           this.daemon.logEvent(this.task.id, 'max_tokens_recovery', {
@@ -8162,7 +8251,7 @@ TASK / CONVERSATION HISTORY:
           });
 
           if (maxTokensRecoveryCount > maxMaxTokensRecoveries) {
-            console.log(`[TaskExecutor] Follow-up: max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
+            console.log(`${this.logTag} Follow-up: max_tokens recovery exhausted after ${maxMaxTokensRecoveries} attempts`);
             const textOnly = (response.content || []).filter((c: any) => c.type === 'text');
             if (textOnly.length > 0) {
               messages.push({ role: 'assistant', content: textOnly });
@@ -8325,7 +8414,7 @@ TASK / CONVERSATION HISTORY:
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
-              console.log(`[TaskExecutor] Skipping disabled tool: ${content.name}`);
+              console.log(`${this.logTag} Skipping disabled tool: ${content.name}`);
               hasHardToolFailureAttempt = true;
               this.daemon.logEvent(this.task.id, 'tool_error', {
                 tool: content.name,
@@ -8351,7 +8440,7 @@ TASK / CONVERSATION HISTORY:
 
             // Validate tool availability before attempting any inference
             if (!availableToolNames.has(content.name)) {
-              console.log(`[TaskExecutor] Tool not available in this context: ${content.name}`);
+              console.log(`${this.logTag} Tool not available in this context: ${content.name}`);
               const expectedRestriction = this.isToolRestrictedByPolicy(content.name);
               if (!expectedRestriction) {
                 hasHardToolFailureAttempt = true;
@@ -8414,7 +8503,7 @@ TASK / CONVERSATION HISTORY:
             // Check for duplicate tool calls (prevents stuck loops)
             const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(content.name, content.input);
             if (duplicateCheck.isDuplicate) {
-              console.log(`[TaskExecutor] Blocking duplicate tool call: ${content.name}`);
+              console.log(`${this.logTag} Blocking duplicate tool call: ${content.name}`);
               this.daemon.logEvent(this.task.id, 'tool_blocked', {
                 tool: content.name,
                 reason: 'duplicate_call',
@@ -8449,7 +8538,7 @@ TASK / CONVERSATION HISTORY:
 
             // Check for cancellation or completion before executing tool
             if (this.cancelled || this.taskCompleted) {
-              console.log(`[TaskExecutor] Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
+              console.log(`${this.logTag} Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`);
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
@@ -8464,7 +8553,7 @@ TASK / CONVERSATION HISTORY:
             // Check for redundant file operations
             const fileOpCheck = this.checkFileOperation(content.name, content.input);
             if (fileOpCheck.blocked) {
-              console.log(`[TaskExecutor] Blocking redundant file operation: ${content.name}`);
+              console.log(`${this.logTag} Blocking redundant file operation: ${content.name}`);
               this.daemon.logEvent(this.task.id, 'tool_blocked', {
                 tool: content.name,
                 reason: 'redundant_file_operation',
@@ -8512,7 +8601,7 @@ TASK / CONVERSATION HISTORY:
                 } catch { return '(unserializable)'; }
               })();
               console.log(
-                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" start | ` +
+                `${this.logTag}   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" start | ` +
                 `id=${content.id} | timeout=${toolTimeoutMs}ms | input=${truncatedInput}`
               );
 
@@ -8532,7 +8621,7 @@ TASK / CONVERSATION HISTORY:
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               const toolSucceeded = !(result && result.success === false);
               console.log(
-                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" done | ` +
+                `${this.logTag}   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" done | ` +
                 `duration=${toolExecDuration}s | success=${toolSucceeded} | resultSize=${resultStr.length}`
               );
 
@@ -8591,7 +8680,7 @@ TASK / CONVERSATION HISTORY:
             } catch (error: any) {
               const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
               console.error(
-                `[TaskExecutor]   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" EXCEPTION | ` +
+                `${this.logTag}   │ ⚙ Tool #${followUpToolCallCount} "${content.name}" EXCEPTION | ` +
                 `duration=${toolExecDuration}s | error=${error?.message || 'unknown'}`
               );
 
@@ -8634,7 +8723,7 @@ TASK / CONVERSATION HISTORY:
           const successCount = toolResults.filter(r => !r.is_error).length;
           const failCount = toolResults.filter(r => r.is_error).length;
           console.log(
-            `[TaskExecutor]   └ Follow-up iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
+            `${this.logTag}   └ Follow-up iteration ${iterationCount} done | iterDuration=${iterDuration}s | ` +
             `elapsed=${followUpElapsedEnd}s | toolResults=${toolResults.length} (ok=${successCount}, err=${failCount})`
           );
         }
@@ -8655,7 +8744,7 @@ TASK / CONVERSATION HISTORY:
                 if (isLoop) {
                   loopBreakInjected = true;
                   console.log(
-                    `[TaskExecutor]   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
+                    `${this.logTag}   │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`
                   );
                   messages.push({
                     role: 'user',
@@ -8718,10 +8807,10 @@ TASK / CONVERSATION HISTORY:
             });
             continueLoop = true;
           } else if (shouldStopFromFailures) {
-            console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
+            console.log(`${this.logTag} All tool calls failed, were disabled, or duplicates - stopping iteration`);
             continueLoop = false;
           } else if (shouldStopFromHardFailure) {
-            console.log('[TaskExecutor] Hard tool failure detected - stopping iteration');
+            console.log(`${this.logTag} Hard tool failure detected - stopping iteration`);
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -8765,7 +8854,7 @@ TASK / CONVERSATION HISTORY:
           !this.shouldSuppressQuestionPause() &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForFollowupQuestion) {
-          console.log('[TaskExecutor] Assistant asked a question during follow-up, pausing for user input');
+          console.log(`${this.logTag} Assistant asked a question during follow-up, pausing for user input`);
           this.waitingForUserInput = true;
           pausedForUserInput = true;
           continueLoop = false;
@@ -8774,7 +8863,7 @@ TASK / CONVERSATION HISTORY:
         // Check if agent wants to end but hasn't provided a text response yet
         // If tools were called but no summary was given, request one
         if (wantsToEnd && !hasTextInThisResponse && hadToolCalls && !hasProvidedTextResponse) {
-          console.log('[TaskExecutor] Agent ending without text response after tool calls - requesting summary');
+          console.log(`${this.logTag} Agent ending without text response after tool calls - requesting summary`);
           messages.push({
             role: 'user',
             content: [{
@@ -8866,8 +8955,11 @@ TASK / CONVERSATION HISTORY:
         return;
       }
 
-      // Restore previous task status (follow-ups should not complete or fail tasks)
-      if (previousStatus) {
+      // If the task was previously failed and the follow-up succeeded, mark as completed
+      if (previousStatus === 'failed') {
+        this.daemon.updateTask(this.task.id, { status: 'completed', error: null, completedAt: Date.now() });
+        this.daemon.logEvent(this.task.id, 'task_completed', { message: 'Completed via follow-up' });
+      } else if (previousStatus) {
         this.daemon.updateTaskStatus(this.task.id, previousStatus);
         this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
       }
@@ -8879,7 +8971,7 @@ TASK / CONVERSATION HISTORY:
         error.message?.includes('aborted');
 
       if (isCancellation) {
-        console.log(`[TaskExecutor] sendMessage cancelled - not logging as error`);
+        console.log(`${this.logTag} sendMessage cancelled - not logging as error`);
         return;
       }
 

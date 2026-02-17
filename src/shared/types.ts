@@ -1722,6 +1722,8 @@ export const IPC_CHANNELS = {
 
   // Approval operations
   APPROVAL_RESPOND: 'approval:respond',
+  APPROVAL_SESSION_AUTO_APPROVE_SET: 'approval:sessionAutoApprove:set',
+  APPROVAL_SESSION_AUTO_APPROVE_GET: 'approval:sessionAutoApprove:get',
 
   // Artifact operations
   ARTIFACT_LIST: 'artifact:list',
