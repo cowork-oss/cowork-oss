@@ -14,6 +14,7 @@ import {
 } from './image-viewer-ocr';
 import { extractPptxContentFromFile } from '../utils/pptx-extractor';
 import { parsePdfBuffer } from '../utils/pdf-parser';
+import ExcelJS from 'exceljs';
 
 import { DatabaseManager } from '../database/schema';
 import {
@@ -587,7 +588,7 @@ export async function setupIpcHandlers(
     const fileName = path.basename(resolvedPath);
 
     // Determine file type
-    const getFileType = (ext: string): 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'html' | 'unsupported' => {
+    const getFileType = (ext: string): 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'xlsx' | 'html' | 'unsupported' => {
       const codeExtensions = ['.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.css', '.scss', '.xml', '.json', '.yaml', '.yml', '.toml', '.sh', '.bash', '.zsh', '.sql', '.graphql', '.vue', '.svelte', '.rb', '.php', '.swift', '.kt', '.scala'];
       const textExtensions = ['.txt', '.log', '.csv', '.env', '.gitignore', '.dockerignore', '.editorconfig', '.prettierrc', '.eslintrc'];
       const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'];
@@ -597,6 +598,7 @@ export async function setupIpcHandlers(
       if (ext === '.docx') return 'docx';
       if (ext === '.pdf') return 'pdf';
       if (ext === '.pptx') return 'pptx';
+      if (ext === '.xlsx' || ext === '.xls') return 'xlsx';
       if (imageExtensions.includes(ext)) return 'image';
       if (codeExtensions.includes(ext)) return 'code';
       if (textExtensions.includes(ext)) return 'text';
@@ -616,6 +618,7 @@ export async function setupIpcHandlers(
     const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5MB
     const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
     const MAX_PPTX_VIEWER_SIZE = 50 * 1024 * 1024; // 50MB before hard-stop
+    const MAX_XLSX_SIZE = 20 * 1024 * 1024; // 20MB for spreadsheets
 
     if (fileType === 'image' && stats.size > MAX_IMAGE_SIZE) {
       return { success: false, error: 'File too large for preview (max 10MB for images)' };
@@ -623,7 +626,10 @@ export async function setupIpcHandlers(
     if (fileType === 'pptx' && stats.size > MAX_PPTX_VIEWER_SIZE) {
       return { success: false, error: 'PPTX file too large for preview (max 50MB)' };
     }
-    if (fileType !== 'image' && fileType !== 'unsupported' && fileType !== 'pptx' && stats.size > MAX_TEXT_SIZE) {
+    if (fileType === 'xlsx' && stats.size > MAX_XLSX_SIZE) {
+      return { success: false, error: 'Spreadsheet too large for extraction (max 20MB)' };
+    }
+    if (fileType !== 'image' && fileType !== 'unsupported' && fileType !== 'pptx' && fileType !== 'xlsx' && stats.size > MAX_TEXT_SIZE) {
       return { success: false, error: 'File too large for preview (max 5MB for text files)' };
     }
 
@@ -689,6 +695,39 @@ export async function setupIpcHandlers(
         case 'pptx':
           content = await extractPptxContentFromFile(resolvedPath);
           break;
+
+        case 'xlsx': {
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.readFile(resolvedPath);
+          const sheetTexts: string[] = [];
+          workbook.eachSheet((worksheet) => {
+            const rows: string[] = [];
+            rows.push(`## Sheet: ${worksheet.name}`);
+            worksheet.eachRow((row, _rowNumber) => {
+              const cells: string[] = [];
+              row.eachCell({ includeEmpty: true }, (cell) => {
+                const val = cell.value;
+                if (val === null || val === undefined) {
+                  cells.push('');
+                } else if (typeof val === 'object' && 'result' in val) {
+                  // Formula cell — use computed result
+                  cells.push(String((val as any).result ?? ''));
+                } else if (typeof val === 'object' && 'richText' in val) {
+                  // Rich text — concatenate text fragments
+                  cells.push((val as any).richText?.map((rt: any) => rt.text).join('') ?? '');
+                } else if (val instanceof Date) {
+                  cells.push(val.toISOString());
+                } else {
+                  cells.push(String(val));
+                }
+              });
+              rows.push(cells.join('\t'));
+            });
+            sheetTexts.push(rows.join('\n'));
+          });
+          content = sheetTexts.join('\n\n');
+          break;
+        }
 
         default:
           return { success: false, error: 'Unsupported file type', fileType: 'unsupported' };
@@ -3673,8 +3712,11 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
     if (!settings.enabled) return;
 
     if (!settings.token?.trim()) {
-      console.warn('[Hooks] Enabled but missing token. Open Settings > Hooks and regenerate the token.');
-      return;
+      // Auto-generate a token if hooks are enabled but token is missing
+      // (e.g. migrated from legacy settings without a token)
+      const token = HooksSettingsManager.regenerateToken();
+      settings.token = token;
+      console.log('[Hooks] Auto-generated missing token for enabled hooks server');
     }
 
     // If already running, just refresh config (covers mapping updates + token overrides).

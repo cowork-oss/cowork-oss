@@ -2491,7 +2491,7 @@ export interface FileViewerResult {
   data?: {
     path: string;
     fileName: string;
-    fileType: 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'html' | 'unsupported';
+    fileType: 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'xlsx' | 'html' | 'unsupported';
     content: string | null;
     htmlContent?: string;
     ocrText?: string;
