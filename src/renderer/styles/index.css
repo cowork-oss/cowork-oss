@@ -70,6 +70,8 @@ button:focus-visible,
   --shadow-glow: 0 0 20px rgba(34, 211, 238, 0.15);
   --gradient-glossy: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 50%);
+  --density-chat-message-intrinsic-size: 80px;
+  --density-timeline-event-intrinsic-size: 40px;
 }
 
 /* ============================================
@@ -557,10 +559,14 @@ button:focus-visible,
 
 /* Scrollbars for light theme */
 .theme-light ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.03);
+  background: transparent;
 }
 
 .theme-light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.theme-light *:hover > ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
 }
 
@@ -615,6 +621,14 @@ button:focus-visible,
 
 .theme-light .file-viewer-action-btn:hover {
   background: rgba(0, 0, 0, 0.1);
+}
+
+.theme-light .file-viewer-xlsx-table tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.theme-light .file-viewer-xlsx-table tbody tr:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 /* Tags and badges */
@@ -1225,6 +1239,10 @@ a,
   overflow: hidden;
   position: relative;
   padding-top: var(--title-bar-height);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease;
 }
 
 /* Removed: double-border effect - using single border only */
@@ -1350,7 +1368,7 @@ a,
 
 .task-item-selected {
   background: var(--color-bg-secondary);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 0 1px var(--color-accent-subtle);
 }
 
 .task-item-selected::before {
@@ -1363,6 +1381,11 @@ a,
   height: 60%;
   background: var(--color-accent);
   border-radius: 0 2px 2px 0;
+}
+
+.task-item-selected .task-item-icon {
+  border-color: var(--color-accent-subtle);
+  color: var(--color-accent);
 }
 
 .task-item-icon {
@@ -1576,6 +1599,7 @@ a,
   position: relative;
   padding-top: var(--title-bar-height);
   /* Space for title bar */
+  transition: margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Removed: double-border effect - using single border only */
@@ -1947,6 +1971,7 @@ a,
   display: flex;
   flex-direction: column;
   gap: 16px;
+  contain: layout style;
 }
 
 /* Timeline Controls */
@@ -2617,8 +2642,14 @@ a,
   max-width: 800px;
   margin: 0 auto;
   background: var(--color-bg-input);
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-lg);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.input-container:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle), 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
 .input-container.drag-over {
@@ -2668,6 +2699,7 @@ a,
   padding: 8px 0;
   font-family: inherit;
   align-self: center;
+  will-change: height;
 }
 
 .input-textarea::-webkit-scrollbar {
@@ -3429,6 +3461,8 @@ a,
   overflow-y: auto;
   position: relative;
   padding-top: var(--title-bar-height);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease;
 }
 
 /* Removed: double-border effect - using single border only */
@@ -4346,10 +4380,10 @@ button {
 }
 
 /* ==================== SCROLLBAR ==================== */
-/* Subtle scrollbars - only visible on hover */
+/* Refined scrollbars - thin and subtle */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -4357,18 +4391,25 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
   transition: background 0.2s ease;
 }
 
-*:hover> ::-webkit-scrollbar-thumb,
-*::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.08);
+*:hover > ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Scrollbar inside sidebar */
+.sidebar ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.04);
+}
+.sidebar:hover ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* ==================== LOADING SPINNER ==================== */
@@ -4797,8 +4838,14 @@ button {
 /* Welcome Input */
 .welcome-input-container {
   background: var(--color-bg-secondary);
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-lg);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.welcome-input-container:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle), 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
 .welcome-input-container.drag-over {
@@ -10072,14 +10119,25 @@ button {
 /* ===== Toast Notifications ===== */
 .toast-container {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   gap: 10px;
   z-index: 10000;
   pointer-events: none;
+}
+
+/* Regular notifications: top-right */
+.toast-container-top-right {
+  top: 16px;
+  right: 16px;
+  align-items: flex-end;
+}
+
+/* Approval / shell-authorization notifications: centered */
+.toast-container-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   align-items: center;
 }
 
@@ -12616,6 +12674,64 @@ button {
 
 .file-viewer-open-btn:hover {
   opacity: 0.9;
+}
+
+/* XLSX spreadsheet table */
+.file-viewer-xlsx {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.file-viewer-xlsx-sheet-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0 0 8px 0;
+}
+
+.file-viewer-xlsx-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.file-viewer-xlsx-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.file-viewer-xlsx-table th,
+.file-viewer-xlsx-table td {
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-viewer-xlsx-table thead th {
+  background: var(--color-bg-tertiary);
+  font-weight: 600;
+  color: var(--color-text);
+  position: sticky;
+  top: 0;
+}
+
+.file-viewer-xlsx-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.file-viewer-xlsx-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.file-viewer-xlsx-table tbody td {
+  color: var(--color-text-secondary);
 }
 
 /* ============================================
@@ -17615,7 +17731,7 @@ button {
 }
 
 .visual-oblivion .cli-input {
-  font-family: var(--font-ui) !important;
+  font-family: var(--font-ui);
   font-size: 14px;
 }
 
@@ -17750,15 +17866,15 @@ button {
 
 .visual-oblivion .cli-action-btn {
   border-radius: var(--radius-md);
-  font-family: var(--font-ui) !important;
-  font-size: 12px !important;
+  font-family: var(--font-ui);
+  font-size: 12px;
   text-transform: none;
 }
 
 .visual-oblivion .cli-more-btn,
 .visual-oblivion .cli-task-menu,
 .visual-oblivion .cli-menu-option {
-  font-family: var(--font-ui) !important;
+  font-family: var(--font-ui);
 }
 
 .visual-oblivion .cli-menu-prefix {
@@ -18201,4 +18317,1476 @@ button {
 .chatgpt-import-result-stat span {
   font-size: 12px;
   color: var(--color-text-tertiary);
+}
+
+/* ==================== UI DENSITY: FOCUSED MODE ==================== */
+
+/* Title bar density toggle button */
+.density-toggle {
+  position: relative;
+}
+.density-toggle.focused svg {
+  opacity: 0.5;
+}
+.density-toggle.full svg {
+  opacity: 1;
+}
+.density-toggle:hover svg {
+  opacity: 1;
+  stroke: var(--color-accent);
+}
+
+.density-focused {
+  --density-chat-message-intrinsic-size: 110px;
+  --density-timeline-event-intrinsic-size: 48px;
+}
+
+/* Overflow menu for focused mode controls */
+.overflow-menu-container {
+  position: relative;
+  display: inline-flex;
+}
+.overflow-menu-btn {
+  background: transparent;
+  border: 1px solid var(--color-border-subtle, rgba(255,255,255,0.08));
+  border-radius: var(--radius-sm, 6px);
+  color: var(--color-text-secondary, #9ca3af);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.overflow-menu-btn:hover,
+.overflow-menu-btn.active {
+  border-color: var(--color-accent, #22d3ee);
+  color: var(--color-accent, #22d3ee);
+}
+.overflow-menu-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  background: var(--color-bg-elevated, #1e1e2e);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border-radius: var(--radius-md, 8px);
+  padding: 4px;
+  min-width: 220px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.overflow-menu-item {
+  padding: 2px 4px;
+}
+.overflow-menu-item .folder-selector,
+.overflow-menu-item .shell-toggle,
+.overflow-menu-item .skills-menu-btn,
+.overflow-menu-item .goal-mode-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  color: var(--color-text-secondary, #9ca3af);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s ease;
+}
+.overflow-menu-item .folder-selector:hover,
+.overflow-menu-item .shell-toggle:hover,
+.overflow-menu-item .skills-menu-btn:hover,
+.overflow-menu-item .goal-mode-toggle:hover {
+  background: var(--color-bg-hover, rgba(255,255,255,0.05));
+  color: var(--color-text-primary, #e5e7eb);
+}
+.overflow-menu-item .goal-mode-toggle {
+  gap: 8px;
+}
+
+/* Subtle model label for focused mode */
+.model-label-container {
+  position: relative;
+  display: inline-flex;
+}
+.model-label-subtle {
+  font-size: 12px;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 6px);
+  border: none;
+  background: transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.model-label-subtle:hover {
+  color: var(--color-accent, #22d3ee);
+  background: var(--color-bg-hover, rgba(255,255,255,0.05));
+}
+.model-label-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  background: var(--color-bg-elevated, #1e1e2e);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border-radius: var(--radius-md, 8px);
+  padding: 4px;
+  min-width: 180px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.model-label-dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 10px;
+  color: var(--color-text-secondary, #9ca3af);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.model-label-dropdown-item:hover {
+  background: var(--color-bg-hover, rgba(255,255,255,0.05));
+  color: var(--color-text-primary, #e5e7eb);
+}
+.model-label-dropdown-item.active {
+  color: var(--color-accent, #22d3ee);
+}
+
+/* Welcome hint text */
+.welcome-hint {
+  text-align: center;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12px;
+  margin: 16px auto 0;
+  line-height: 1.5;
+  max-width: 480px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+.welcome-hint:hover {
+  opacity: 1;
+}
+
+/* Sidebar date group headers */
+.sidebar-date-group {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Focused mode sidebar empty state */
+.sidebar-empty-focused {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+.sidebar-empty-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-empty-message p {
+  font-size: 13px;
+  color: var(--color-text-secondary, #9ca3af);
+  margin: 0;
+  font-family: var(--font-ui);
+}
+.sidebar-empty-message span {
+  font-size: 12px;
+  color: var(--color-text-muted, #6b7280);
+  font-family: var(--font-ui);
+}
+
+/* Show/hide failed sessions toggle */
+.show-failed-toggle {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  margin-left: auto;
+  transition: color 0.15s ease;
+}
+.show-failed-toggle:hover {
+  color: var(--color-accent, #22d3ee);
+}
+
+/* Focused welcome header */
+/* Replace broad .cli-style defaults to avoid terminal-style typography drift. */
+.welcome-content-focused,
+.welcome-content-focused * {
+  font-family: var(--font-ui);
+  letter-spacing: normal;
+}
+
+.welcome-header-focused {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 0 20px;
+}
+.welcome-header-focused .modern-logo {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 4px;
+  filter: drop-shadow(0 2px 8px var(--color-accent-subtle));
+}
+.focused-greeting {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary, #e5e7eb);
+  margin: 0;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+.focused-subtitle {
+  font-size: 14px;
+  color: var(--color-text-muted, #6b7280);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Softer section header in focused mode */
+.focused-cards-header {
+  font-family: var(--font-ui);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+/* Enhanced quick start cards in focused mode */
+.focused-cards {
+  gap: 10px;
+}
+.focused-cards .quick-start-card {
+  padding: 16px 18px;
+  gap: 6px;
+  border-color: var(--color-border-subtle, rgba(255,255,255,0.06));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+.focused-cards .quick-start-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, var(--color-accent-subtle) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.focused-cards .quick-start-card:hover {
+  border-color: var(--color-accent, #22d3ee);
+  box-shadow: 0 0 0 1px var(--color-accent, #22d3ee), 0 4px 16px rgba(0,0,0,0.2);
+  transform: translateY(-2px);
+}
+.focused-cards .quick-start-card:hover::before {
+  opacity: 1;
+}
+.focused-cards .quick-start-card:hover .quick-start-icon {
+  color: var(--color-accent);
+  transform: scale(1.1);
+}
+.focused-cards .quick-start-icon {
+  font-size: 22px;
+  margin-bottom: 4px;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+.focused-cards .quick-start-title {
+  font-size: 14px;
+  font-weight: 600;
+  position: relative;
+}
+.focused-cards .quick-start-desc {
+  display: block;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted, #6b7280);
+  position: relative;
+}
+/* Light theme focused cards */
+.theme-light .focused-cards .quick-start-card {
+  border-color: rgba(0,0,0,0.08);
+}
+.theme-light .focused-cards .quick-start-card:hover {
+  border-color: var(--color-accent, #22d3ee);
+  box-shadow: 0 0 0 1px var(--color-accent, #22d3ee), 0 4px 16px rgba(0,0,0,0.1);
+}
+
+/* Setup & discover card category badges */
+.focused-cards .card-setup .quick-start-title::after,
+.focused-cards .card-discover .quick-start-title::after {
+  content: attr(data-badge);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.focused-cards .card-setup .quick-start-icon {
+  color: var(--color-success, #34d399);
+}
+.focused-cards .card-discover .quick-start-icon {
+  color: var(--color-info, #60a5fa);
+}
+.focused-cards .card-setup:hover .quick-start-icon {
+  color: var(--color-success, #34d399);
+}
+.focused-cards .card-discover:hover .quick-start-icon {
+  color: var(--color-info, #60a5fa);
+}
+.focused-cards .card-setup:hover {
+  border-color: var(--color-success, #34d399);
+  box-shadow: 0 0 0 1px var(--color-success, #34d399), 0 4px 16px rgba(0,0,0,0.2);
+}
+.focused-cards .card-setup::before {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.15) 0%, transparent 60%);
+}
+.focused-cards .card-discover:hover {
+  border-color: var(--color-info, #60a5fa);
+  box-shadow: 0 0 0 1px var(--color-info, #60a5fa), 0 4px 16px rgba(0,0,0,0.2);
+}
+.focused-cards .card-discover::before {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.15) 0%, transparent 60%);
+}
+
+/* "More ideas" shuffle card */
+.focused-cards .card-shuffle {
+  border-style: dashed;
+  border-color: var(--color-border-subtle, rgba(255,255,255,0.08));
+  background: transparent;
+  opacity: 0.7;
+  transition: all 0.25s ease;
+}
+.focused-cards .card-shuffle:hover {
+  opacity: 1;
+  border-color: var(--color-text-muted, #6b7280);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+.focused-cards .card-shuffle:hover::before {
+  opacity: 0;
+}
+.focused-cards .card-shuffle .shuffle-icon {
+  color: var(--color-text-muted, #6b7280);
+  transition: transform 0.3s ease;
+}
+.focused-cards .card-shuffle:hover .shuffle-icon {
+  color: var(--color-accent);
+  transform: rotate(180deg);
+}
+.theme-light .focused-cards .card-shuffle {
+  border-color: rgba(0,0,0,0.1);
+}
+.theme-light .focused-cards .card-shuffle:hover {
+  border-color: rgba(0,0,0,0.25);
+}
+
+/* ---- Focused mode entrance animations ---- */
+@keyframes focusedFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-header-focused {
+  animation: focusedFadeInUp 0.5s ease both;
+}
+
+.focused-cards-header {
+  animation: focusedFadeInUp 0.5s ease 0.15s both;
+}
+
+.focused-cards .quick-start-card {
+  animation: focusedFadeInUp 0.4s ease both;
+}
+.focused-cards .quick-start-card:nth-child(1) { animation-delay: 0.05s; }
+.focused-cards .quick-start-card:nth-child(2) { animation-delay: 0.1s; }
+.focused-cards .quick-start-card:nth-child(3) { animation-delay: 0.15s; }
+.focused-cards .quick-start-card:nth-child(4) { animation-delay: 0.2s; }
+.focused-cards .quick-start-card:nth-child(5) { animation-delay: 0.25s; }
+.focused-cards .quick-start-card:nth-child(6) { animation-delay: 0.3s; }
+.focused-cards .quick-start-card:nth-child(7) { animation-delay: 0.35s; }
+
+.welcome-hint {
+  animation: focusedFadeInUp 0.5s ease 0.4s both;
+}
+
+/* Ensure sidebar date header + task list header align */
+.task-list-header.cli-list-header {
+  display: flex;
+  align-items: center;
+}
+
+/* ==================== FOCUSED MODE: ACTIVE TASK VIEW ==================== */
+
+/* ---- HIDE: elements that add clutter ---- */
+
+/* Hide duplicate header status bar (status already shown in chat bubble) */
+.density-focused .main-header-status {
+  display: none;
+}
+/* Hide verbose/code toggle buttons — just keep View steps */
+.density-focused .verbose-toggle-btn {
+  display: none;
+}
+/* Hide model dropdown in task input — one less thing to look at */
+.density-focused .input-actions .model-dropdown-container {
+  display: none;
+}
+/* Hide talk mode button — advanced feature */
+.density-focused .talk-mode-btn {
+  display: none;
+}
+/* Hide the entire below-actions row (workspace, shell, keyboard hint) */
+.density-focused .input-below-actions {
+  display: none;
+}
+/* Hide footer disclaimer */
+.density-focused .footer-disclaimer {
+  display: none;
+}
+/* Hide right panel Context section entirely — noise for most users */
+.density-focused .right-panel .cli-section:last-of-type {
+  display: none;
+}
+/* Hide right panel footer */
+.density-focused .cli-panel-footer {
+  display: none;
+}
+/* Hide terminal-style prompt characters in right panel */
+.density-focused .cli-section-prompt {
+  display: none;
+}
+/* Hide step numbering in progress list — cleaner */
+.density-focused .cli-progress-num {
+  display: none;
+}
+/* Hide terminal-style section toggles, use cleaner chevron via CSS */
+.density-focused .cli-section-toggle .terminal-only {
+  display: none;
+}
+
+/* ---- CHAT MESSAGES: clean & readable ---- */
+.density-focused .chat-message {
+  margin-bottom: 4px;
+}
+.density-focused .chat-bubble {
+  max-width: 85%;
+  padding: 14px 18px;
+  font-family: var(--font-ui);
+}
+.density-focused .chat-bubble.assistant-bubble {
+  border-radius: 16px 16px 16px 4px;
+  border-color: var(--color-border-subtle);
+}
+.density-focused .chat-bubble.user-bubble {
+  border-radius: 16px 16px 4px 16px;
+}
+.density-focused .chat-bubble-content {
+  font-size: 14.5px;
+  line-height: 1.75;
+  font-family: var(--font-ui);
+}
+.density-focused .chat-bubble-content p {
+  margin-bottom: 12px;
+}
+.density-focused .chat-bubble-content p:last-child {
+  margin-bottom: 0;
+}
+.density-focused .chat-bubble-content code {
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.density-focused .chat-bubble-content pre {
+  border-radius: 8px;
+  padding: 14px;
+  margin: 14px 0;
+}
+/* Status label in last assistant bubble */
+.density-focused .chat-bubble-header {
+  margin-bottom: 8px;
+}
+.density-focused .chat-status {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+}
+
+/* Message actions: collapse to zero height when hidden, show on hover */
+.density-focused .message-actions {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  margin: 0;
+  transition: opacity 0.15s ease, height 0.15s ease;
+}
+.density-focused .chat-message:hover .message-actions {
+  opacity: 1;
+  height: auto;
+  overflow: visible;
+}
+/* Copy button below user messages: also collapse */
+.density-focused .chat-message.user-message > .message-copy-btn {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  transition: opacity 0.15s ease, height 0.15s ease;
+}
+.density-focused .chat-message.user-message:hover > .message-copy-btn {
+  opacity: 1;
+  height: auto;
+  overflow: visible;
+  padding: 4px 8px;
+  margin-top: 4px;
+}
+.density-focused .message-copy-btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+/* ---- MAIN HEADER: minimal ---- */
+.density-focused .main-header {
+  height: 32px;
+  padding: 0 24px;
+}
+.density-focused .main-header-title {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ---- MAIN BODY ---- */
+.density-focused .main-body {
+  padding: 20px 32px;
+}
+.density-focused .task-content {
+  max-width: 780px;
+}
+.density-focused .conversation-flow {
+  gap: 16px;
+}
+
+/* ---- TIMELINE: compact ---- */
+.density-focused .timeline-controls {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.density-focused .view-steps-btn {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 5px 10px;
+}
+.density-focused .timeline-event {
+  grid-template-columns: 14px 1fr;
+  gap: 10px;
+  padding: 4px 0;
+}
+.density-focused .event-dot {
+  width: 7px;
+  height: 7px;
+}
+.density-focused .event-dot.active {
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+.density-focused .event-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.density-focused .event-time {
+  font-family: var(--font-ui);
+  font-size: 10px;
+}
+.density-focused .event-details {
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12px;
+}
+.density-focused .event-header.expandable {
+  border-radius: 6px;
+}
+
+/* ---- RIGHT PANEL: stripped down ---- */
+.density-focused .right-panel {
+  border-left-color: var(--color-border-subtle);
+}
+.density-focused .cli-section-header {
+  padding: 10px 16px;
+}
+.density-focused .cli-section-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text-secondary);
+}
+.density-focused .cli-section-toggle {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.density-focused .cli-progress-item {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.12);
+  gap: 8px;
+}
+.density-focused .cli-progress-item.in_progress {
+  background: var(--color-accent-subtle);
+}
+.density-focused .cli-progress-text {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.density-focused .cli-empty-state {
+  padding: 12px 0;
+}
+.density-focused .cli-status-badge,
+.density-focused .cli-hint {
+  font-family: var(--font-ui);
+}
+.density-focused .cli-file-item {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+.density-focused .cli-file-item:hover {
+  background: var(--color-bg-hover);
+}
+.density-focused .clickable-file-path {
+  font-family: var(--font-ui);
+}
+/* Hide the ascii-tree empty states in right panel */
+.density-focused .cli-tree {
+  display: none;
+}
+
+/* ---- INPUT AREA: minimal ---- */
+.density-focused .main-footer {
+  padding: 10px 24px 12px;
+}
+.density-focused .input-container {
+  border-radius: 14px;
+  max-width: 780px;
+}
+.density-focused .input-row {
+  padding: 8px 14px;
+  gap: 10px;
+}
+.density-focused .input-textarea {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* ---- STATUS BANNERS ---- */
+.density-focused .task-status-banner {
+  border-radius: 10px;
+  font-family: var(--font-ui);
+  margin-bottom: 8px;
+}
+.density-focused .task-status-banner-detail {
+  font-size: 13px;
+}
+
+/* ---- Entrance animation ---- */
+@keyframes focusedMessageFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.density-focused .conversation-flow > *:last-child {
+  animation: focusedMessageFadeIn 0.3s ease both;
+}
+
+/* ---- Light theme ---- */
+.theme-light.density-focused .cli-progress-item {
+  background: rgba(0, 0, 0, 0.04);
+}
+.theme-light.density-focused .cli-progress-item.in_progress {
+  background: var(--color-accent-subtle);
+}
+
+/* ==================== FOCUSED MODE: TITLE BAR ==================== */
+
+/* Hide density toggle — focused mode is always on */
+.density-focused .density-toggle {
+  display: none;
+}
+
+/* ==================== FOCUSED MODE: SIDEBAR ==================== */
+
+/* Hide Mission Control button — advanced feature */
+.density-focused .cli-mission-control-btn {
+  display: none;
+}
+
+/* Hide terminal prompt chars everywhere in sidebar */
+.density-focused .task-list-header .cli-section-prompt,
+.density-focused .sidebar-header .cli-section-prompt,
+.density-focused .new-session-btn .terminal-only {
+  display: none;
+}
+
+/* Sidebar header: cleaner */
+.density-focused .cli-header-actions {
+  gap: 6px;
+}
+.density-focused .task-list-header {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 8px 12px 4px;
+}
+
+/* Hide status icons (identical checkmarks add no info) */
+.density-focused .cli-task-status {
+  display: none;
+}
+/* Hide task numbering */
+.density-focused .cli-task-num {
+  display: none;
+}
+/* Hide agent type badges (SUB, PAR) */
+.density-focused .cli-agent-type {
+  display: none;
+}
+/* Hide tree connector prefixes */
+.density-focused .cli-tree-prefix {
+  display: none;
+}
+
+/* Task items: tight, clean, text-only feel */
+.density-focused .task-item {
+  padding: 6px 12px;
+  gap: 6px;
+  font-family: var(--font-ui);
+  border-radius: 8px;
+  min-height: unset;
+}
+.density-focused .task-item-content {
+  min-width: 0;
+}
+.density-focused .cli-task-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.density-focused .task-item-icon {
+  display: none;
+}
+.density-focused .task-item-meta {
+  display: none;
+}
+.density-focused .task-item-status {
+  display: none;
+}
+
+/* Show ··· menu only on hover */
+.density-focused .task-item-actions {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.density-focused .task-item:hover .task-item-actions {
+  opacity: 1;
+}
+
+/* Cleaner selected state */
+.density-focused .task-item-selected {
+  background: var(--color-accent-subtle);
+  box-shadow: none;
+  border-radius: 8px;
+}
+.density-focused .task-item-selected .cli-task-title {
+  font-weight: 500;
+  color: var(--color-accent);
+}
+.density-focused .task-item-selected::before {
+  width: 3px;
+  height: 50%;
+  border-radius: 0 3px 3px 0;
+}
+
+/* Sub-agent items: slightly indented, no extra chrome */
+.density-focused .task-item-subagent {
+  padding-left: 24px;
+  opacity: 0.7;
+  font-size: 12px;
+}
+.density-focused .task-item-subagent:hover {
+  opacity: 1;
+}
+
+/* Collapse toggle: minimal */
+.density-focused .cli-collapse-btn {
+  font-size: 10px;
+  width: 16px;
+  height: 16px;
+  opacity: 0.4;
+}
+.density-focused .task-item:hover .cli-collapse-btn {
+  opacity: 0.8;
+}
+
+/* Show failed toggle: subtler */
+.density-focused .show-failed-toggle {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  opacity: 0.5;
+}
+.density-focused .show-failed-toggle:hover {
+  opacity: 1;
+}
+
+/* Date group headers */
+.density-focused .sidebar-date-group {
+  font-family: var(--font-ui);
+  text-transform: uppercase;
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  padding: 14px 12px 4px;
+  opacity: 0.6;
+}
+/* First date group needs less top padding */
+.density-focused .sidebar-date-group:first-child {
+  padding-top: 6px;
+}
+
+/* Sidebar footer: compact */
+.density-focused .sidebar-footer {
+  font-family: var(--font-ui);
+  padding: 8px;
+}
+.density-focused .sidebar-footer button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+/* Hide wallet badge in focused mode — keep footer minimal */
+.density-focused .conway-wallet-badge {
+  display: none;
+}
+
+/* ==================== FOCUSED MODE: COMMAND OUTPUT ==================== */
+
+/* Softer container */
+.density-focused .command-output-container {
+  border-radius: 12px;
+  border-color: var(--color-border-subtle);
+  overflow: hidden;
+}
+.density-focused .command-output-header {
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.density-focused .command-output-title .command-text {
+  font-size: 12px;
+}
+/* Hide stdin (terminal prompt) in focused mode */
+.density-focused .command-stdin-container {
+  display: none;
+}
+/* Hide force kill button */
+.density-focused .command-force-kill-btn {
+  display: none;
+}
+/* Softer status badges */
+.density-focused .command-status {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 2px 10px;
+}
+/* Softer output area */
+.density-focused .command-output-content {
+  height: 160px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.1);
+}
+.density-focused .command-output-content pre {
+  font-size: 11px;
+}
+/* Softer stop button */
+.density-focused .command-stop-btn {
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+/* Softer close button */
+.density-focused .command-close-btn {
+  border-radius: 6px;
+}
+
+/* ==================== FOCUSED MODE: SETTINGS ==================== */
+
+/* Settings nav: use UI font */
+.density-focused .settings-nav-item {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+/* Settings content: softer */
+.density-focused .settings-content {
+  font-family: var(--font-ui);
+}
+.density-focused .settings-content h2,
+.density-focused .settings-content h3,
+.density-focused .settings-content h4 {
+  font-family: var(--font-ui);
+}
+.density-focused .settings-content p,
+.density-focused .settings-content label,
+.density-focused .settings-content span,
+.density-focused .settings-content input,
+.density-focused .settings-content select,
+.density-focused .settings-content textarea,
+.density-focused .settings-content button {
+  font-family: var(--font-ui);
+}
+
+/* ==================== FOCUSED MODE: QUICK TASK FAB ==================== */
+
+/* Hide floating action button in focused mode — input is always visible */
+.density-focused .quick-task-fab-container {
+  display: none;
+}
+
+/* ==================== FOCUSED MODE: TOASTS ==================== */
+
+.density-focused .toast-container {
+  font-family: var(--font-ui);
+}
+.density-focused .toast {
+  font-family: var(--font-ui);
+  border-radius: 10px;
+}
+
+/* ==================== FOCUSED MODE: UPDATE BANNER ==================== */
+
+.density-focused .update-banner {
+  font-family: var(--font-ui);
+  border-radius: 0;
+}
+.density-focused .update-banner-content {
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+/* ============ Conway Terminal Settings ============ */
+
+.conway-settings-panel {
+  padding: 0;
+}
+
+.conway-header {
+  margin-bottom: 20px;
+}
+
+.conway-header h2 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.conway-setup-section {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.conway-setup-info h3 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.conway-setup-info p {
+  margin: 0 0 8px 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.conway-feature-list {
+  margin: 0 0 16px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.conway-feature-list strong {
+  color: var(--color-text-primary);
+}
+
+
+.conway-setup-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.conway-setup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+}
+
+.conway-setup-step.active {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.conway-setup-step.completed {
+  color: var(--color-success, #22c55e);
+}
+
+.step-indicator {
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.conway-error {
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  color: var(--color-error, #ef4444);
+  font-size: 13px;
+}
+
+.conway-status-section {
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.conway-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conway-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conway-status-dot.connected {
+  background: var(--color-success, #22c55e);
+}
+
+.conway-status-dot.connecting {
+  background: var(--color-warning, #f59e0b);
+  animation: pulse 1.5s infinite;
+}
+
+.conway-status-dot.error {
+  background: var(--color-error, #ef4444);
+}
+
+.conway-status-dot.disconnected {
+  background: var(--color-text-tertiary);
+}
+
+.conway-status-label {
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.conway-tool-count {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin-left: 4px;
+}
+
+.conway-status-actions {
+  margin-left: auto;
+}
+
+.conway-wallet-card {
+  background: var(--color-surface-secondary, var(--color-bg-secondary));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.conway-wallet-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conway-wallet-address-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.conway-wallet-address {
+  font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  user-select: all;
+}
+
+.conway-copy-btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+}
+
+.conway-copy-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.conway-network-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-text-tertiary);
+  color: var(--color-bg-primary, #fff);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.conway-balance-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.conway-balance-display {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+
+.conway-balance-currency {
+  font-size: 14px;
+  color: var(--color-text-tertiary);
+}
+
+.conway-wallet-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.conway-wallet-warning {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-warning-text, #92400e);
+  background: var(--color-warning-bg, #fef3c7);
+  border: 1px solid var(--color-warning-border, #f59e0b);
+  border-radius: 6px;
+}
+
+.conway-wallet-safety {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-secondary, #f9fafb);
+}
+
+.conway-wallet-safety strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.conway-wallet-safety p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.conway-wallet-safety code {
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--color-bg-tertiary, #e5e7eb);
+  border-radius: 3px;
+}
+
+.conway-history-section {
+  margin-bottom: 16px;
+}
+
+.conway-history-section h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conway-credit-history {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.conway-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.conway-history-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  background: var(--color-bg-primary);
+}
+
+.conway-history-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.conway-tx-type.credit {
+  color: var(--color-success, #22c55e);
+}
+
+.conway-tx-type.debit {
+  color: var(--color-error, #ef4444);
+}
+
+.conway-tx-amount.credit {
+  color: var(--color-success, #22c55e);
+}
+
+.conway-tx-amount.debit {
+  color: var(--color-error, #ef4444);
+}
+
+.conway-tx-desc {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conway-config-section {
+  margin-bottom: 16px;
+}
+
+.conway-config-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conway-config-section h4 {
+  margin: 12px 0 8px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.conway-setting-row {
+  margin-bottom: 8px;
+}
+
+.conway-setting-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.conway-tool-categories {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.conway-danger-section {
+  padding: 16px;
+  border: 1px solid var(--color-error, #ef4444);
+  border-radius: 8px;
+  opacity: 0.8;
+}
+
+.conway-danger-section h3 {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-error, #ef4444);
+}
+
+/* Conway How It Works */
+.conway-how-it-works {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.conway-how-it-works h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conway-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conway-info-item strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--color-text-primary);
+}
+
+.conway-info-item p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+/* Conway Tool Category Rows */
+.conway-category-row label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.conway-category-row input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.conway-category-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conway-category-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.conway-category-desc {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+/* Conway Wallet Badge (Sidebar Footer) */
+.conway-wallet-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: color 0.15s;
+  text-align: left;
+}
+
+.conway-wallet-badge:hover {
+  color: var(--color-text-primary);
+}
+
+.conway-wallet-badge svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.conway-wallet-badge .conway-wallet-balance {
+  font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+  font-size: 11px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }

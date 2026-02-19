@@ -77,6 +77,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
       case 'pdf': return <ThemeIcon emoji="📕" icon={<FileTextIcon size={16} />} />;
       case 'image': return <ThemeIcon emoji="🖼️" icon={<ImageIcon size={16} />} />;
       case 'pptx': return <ThemeIcon emoji="📊" icon={<PresentationIcon size={16} />} />;
+      case 'xlsx': return <ThemeIcon emoji="📊" icon={<FileTextIcon size={16} />} />;
       case 'html': return <ThemeIcon emoji="🌐" icon={<GlobeIcon size={16} />} />;
       default: return <ThemeIcon emoji="📁" icon={<FileIcon size={16} />} />;
     }
@@ -152,6 +153,56 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
             </button>
           </div>
         );
+
+      case 'xlsx': {
+        // Parse tab-separated content produced by the backend:
+        // Sheets separated by "\n\n", each starting with "## Sheet: <name>"
+        const sheets = (fileData.content || '').split('\n\n').map((block) => {
+          const lines = block.split('\n');
+          let name = 'Sheet';
+          let dataLines = lines;
+          if (lines[0]?.startsWith('## Sheet: ')) {
+            name = lines[0].replace('## Sheet: ', '');
+            dataLines = lines.slice(1);
+          }
+          const rows = dataLines.map((line) => line.split('\t'));
+          return { name, rows };
+        });
+
+        return (
+          <div className="file-viewer-xlsx">
+            {sheets.map((sheet, si) => (
+              <div key={si} className="file-viewer-xlsx-sheet">
+                {sheets.length > 1 && (
+                  <h3 className="file-viewer-xlsx-sheet-name">{sheet.name}</h3>
+                )}
+                <div className="file-viewer-xlsx-scroll">
+                  <table className="file-viewer-xlsx-table">
+                    {sheet.rows.length > 0 && (
+                      <thead>
+                        <tr>
+                          {sheet.rows[0].map((cell, ci) => (
+                            <th key={ci}>{cell}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                    )}
+                    <tbody>
+                      {sheet.rows.slice(1).map((row, ri) => (
+                        <tr key={ri}>
+                          {row.map((cell, ci) => (
+                            <td key={ci}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      }
 
       default:
         return (

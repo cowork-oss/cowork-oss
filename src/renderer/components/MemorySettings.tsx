@@ -563,25 +563,25 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         <div className="memory-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
           <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-              {stats.count.toLocaleString()}
+              {(stats.count ?? 0).toLocaleString()}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Memories</div>
           </div>
           <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-              {stats.totalTokens.toLocaleString()}
+              {(stats.totalTokens ?? 0).toLocaleString()}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Tokens</div>
           </div>
           <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-              {stats.compressedCount.toLocaleString()}
+              {(stats.compressedCount ?? 0).toLocaleString()}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Compressed</div>
           </div>
           <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-              {Math.round(stats.compressionRatio * 100)}%
+              {Math.round((stats.compressionRatio ?? 0) * 100)}%
             </div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Ratio</div>
           </div>

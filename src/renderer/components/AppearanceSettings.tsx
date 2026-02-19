@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ThemeMode, AccentColor, VisualTheme, ACCENT_COLORS } from '../../shared/types';
+import { ThemeMode, AccentColor, VisualTheme, UiDensity, ACCENT_COLORS } from '../../shared/types';
 import {
   SUPPORTED_LANGUAGES,
   LANGUAGE_NAMES,
@@ -14,6 +14,8 @@ interface AppearanceSettingsProps {
   onThemeChange: (theme: ThemeMode) => void;
   onVisualThemeChange: (theme: VisualTheme) => void;
   onAccentChange: (accent: AccentColor) => void;
+  uiDensity: UiDensity;
+  onUiDensityChange: (density: UiDensity) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -25,6 +27,8 @@ export function AppearanceSettings({
   onThemeChange,
   onVisualThemeChange,
   onAccentChange,
+  uiDensity,
+  onUiDensityChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
@@ -102,6 +106,39 @@ export function AppearanceSettings({
               <div className="theme-option-preview-line ui-line" />
             </div>
             <span className="theme-option-label">Modern</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Interface Density */}
+      <div className="appearance-section">
+        <h4>Interface density</h4>
+        <p className="settings-description">
+          Focused mode hides advanced controls for a cleaner experience. Full mode shows all controls.
+        </p>
+        <div className="theme-switcher">
+          <button
+            className={`theme-option ${uiDensity === 'focused' ? 'selected' : ''}`}
+            onClick={() => onUiDensityChange('focused')}
+          >
+            <svg className="theme-option-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="5" width="16" height="14" rx="2" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+            </svg>
+            <span className="theme-option-label">Focused</span>
+          </button>
+
+          <button
+            className={`theme-option ${uiDensity === 'full' ? 'selected' : ''}`}
+            onClick={() => onUiDensityChange('full')}
+          >
+            <svg className="theme-option-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <line x1="4" y1="9" x2="20" y2="9" />
+              <line x1="4" y1="14" x2="20" y2="14" />
+              <line x1="12" y1="4" x2="12" y2="20" />
+            </svg>
+            <span className="theme-option-label">Full</span>
           </button>
         </div>
       </div>

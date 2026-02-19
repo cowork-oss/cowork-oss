@@ -93,7 +93,13 @@ export function InlineImagePreview({ filePath, workspacePath, onOpenViewer }: In
 
       {!loading && !error && result?.content && (
         <>
-          <button className="inline-image-preview-button" type="button" onClick={handleOpen} title="Click to preview">
+        <button
+          className="inline-image-preview-button"
+          type="button"
+          onClick={handleOpen}
+          title="Click to preview"
+          aria-label="Open image preview"
+        >
             <img
               src={result.content}
               alt={result.fileName}
@@ -114,4 +120,3 @@ export function InlineImagePreview({ filePath, workspacePath, onOpenViewer }: In
     </div>
   );
 }
-

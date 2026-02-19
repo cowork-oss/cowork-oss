@@ -18,6 +18,7 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   // Form state
   const [channelName, setChannelName] = useState('Email');
   const [securityMode, setSecurityMode] = useState<SecurityMode>('pairing');
+  const [emailProtocol, setEmailProtocol] = useState<'imap-smtp' | 'loom'>('imap-smtp');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [imapHost, setImapHost] = useState('');
@@ -27,6 +28,11 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   const [displayName, setDisplayName] = useState('');
   const [allowedSenders, setAllowedSenders] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
+  const [loomBaseUrl, setLoomBaseUrl] = useState('http://127.0.0.1:8787');
+  const [loomAccessToken, setLoomAccessToken] = useState('');
+  const [loomIdentity, setLoomIdentity] = useState('');
+  const [loomMailboxFolder, setLoomMailboxFolder] = useState('INBOX');
+  const [loomPollInterval, setLoomPollInterval] = useState(30000);
 
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -51,6 +57,8 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
 
         // Load config settings
         if (emailChannel.config) {
+          const protocol = emailChannel.config.protocol === 'loom' ? 'loom' : 'imap-smtp';
+          setEmailProtocol(protocol);
           setEmail(emailChannel.config.email as string || '');
           setPassword(emailChannel.config.password as string || '');
           setImapHost(emailChannel.config.imapHost as string || '');
@@ -61,6 +69,11 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           const senders = emailChannel.config.allowedSenders as string[] || [];
           setAllowedSenders(senders.join(', '));
           setSubjectFilter(emailChannel.config.subjectFilter as string || '');
+          setLoomBaseUrl(emailChannel.config.loomBaseUrl as string || 'http://127.0.0.1:8787');
+          setLoomAccessToken(emailChannel.config.loomAccessToken as string || '');
+          setLoomIdentity(emailChannel.config.loomIdentity as string || '');
+          setLoomMailboxFolder(emailChannel.config.loomMailboxFolder as string || 'INBOX');
+          setLoomPollInterval(emailChannel.config.loomPollInterval as number || 30000);
         }
 
         // Load users for this channel
@@ -98,7 +111,12 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   }, [channel?.id, loadChannel]);
 
   const handleAddChannel = async () => {
-    if (!email.trim() || !password.trim() || !imapHost.trim() || !smtpHost.trim()) {
+    if (emailProtocol === 'loom') {
+      if (!loomBaseUrl.trim() || !loomAccessToken.trim()) {
+        setTestResult({ success: false, error: 'LOOM base URL and access token are required' });
+        return;
+      }
+    } else if (!email.trim() || !password.trim() || !imapHost.trim() || !smtpHost.trim()) {
       setTestResult({ success: false, error: 'Email, password, IMAP host, and SMTP host are required' });
       return;
     }
@@ -116,15 +134,21 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
         type: 'email',
         name: channelName,
         securityMode,
-        emailAddress: email.trim(),
-        emailPassword: password.trim(),
-        emailImapHost: imapHost.trim(),
-        emailImapPort: imapPort,
-        emailSmtpHost: smtpHost.trim(),
-        emailSmtpPort: smtpPort,
+        emailProtocol,
+        emailAddress: emailProtocol === 'imap-smtp' ? email.trim() : undefined,
+        emailPassword: emailProtocol === 'imap-smtp' ? password.trim() : undefined,
+        emailImapHost: emailProtocol === 'imap-smtp' ? imapHost.trim() : undefined,
+        emailImapPort: emailProtocol === 'imap-smtp' ? imapPort : undefined,
+        emailSmtpHost: emailProtocol === 'imap-smtp' ? smtpHost.trim() : undefined,
+        emailSmtpPort: emailProtocol === 'imap-smtp' ? smtpPort : undefined,
         emailDisplayName: displayName.trim() || undefined,
-        emailAllowedSenders: senderList.length > 0 ? senderList : undefined,
-        emailSubjectFilter: subjectFilter.trim() || undefined,
+        emailAllowedSenders: emailProtocol === 'imap-smtp' && senderList.length > 0 ? senderList : undefined,
+        emailSubjectFilter: emailProtocol === 'imap-smtp' ? (subjectFilter.trim() || undefined) : undefined,
+        emailLoomBaseUrl: emailProtocol === 'loom' ? loomBaseUrl.trim() : undefined,
+        emailLoomAccessToken: emailProtocol === 'loom' ? loomAccessToken.trim() : undefined,
+        emailLoomIdentity: emailProtocol === 'loom' ? (loomIdentity.trim() || undefined) : undefined,
+        emailLoomMailboxFolder: emailProtocol === 'loom' ? (loomMailboxFolder.trim() || 'INBOX') : undefined,
+        emailLoomPollInterval: emailProtocol === 'loom' ? loomPollInterval : undefined,
       });
 
       await loadChannel();
@@ -275,6 +299,16 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
     }
   };
 
+  const isLoomMode = emailProtocol === 'loom';
+  const canAddChannel = isLoomMode
+    ? Boolean(loomBaseUrl.trim() && loomAccessToken.trim())
+    : Boolean(email.trim() && password.trim() && imapHost.trim() && smtpHost.trim());
+  const configuredChannelHandle =
+    (typeof channel?.config?.email === 'string' && channel.config.email) ||
+    (typeof channel?.config?.loomIdentity === 'string' && channel.config.loomIdentity) ||
+    (typeof channel?.config?.loomBaseUrl === 'string' && channel.config.loomBaseUrl) ||
+    null;
+
   if (loading) {
     return <div className="settings-loading">Loading Email settings...</div>;
   }
@@ -286,20 +320,8 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
         <div className="settings-section">
           <h3>Connect Email</h3>
           <p className="settings-description">
-            Connect via IMAP/SMTP to receive and send emails. Universal fallback for notifications and communication.
+            Choose IMAP/SMTP for traditional inboxes or LOOM for your agent-native email protocol node.
           </p>
-
-          <div className="settings-callout info">
-            <strong>Quick Setup:</strong>
-            <div style={{ margin: '8px 0', display: 'flex', gap: '8px' }}>
-              <button className="button-secondary" onClick={() => applyPreset('gmail')}>Gmail</button>
-              <button className="button-secondary" onClick={() => applyPreset('outlook')}>Outlook</button>
-              <button className="button-secondary" onClick={() => applyPreset('yahoo')}>Yahoo</button>
-            </div>
-            <p style={{ fontSize: '13px', marginTop: '8px' }}>
-              Note: For Gmail/Outlook, you may need to use an App Password instead of your regular password.
-            </p>
-          </div>
 
           <div className="settings-field">
             <label>Channel Name</label>
@@ -313,77 +335,194 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           </div>
 
           <div className="settings-field">
-            <label>Email Address *</label>
-            <input
-              type="email"
-              className="settings-input"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
+            <label>Protocol</label>
+            <select
+              className="settings-select"
+              value={emailProtocol}
+              onChange={(e) => setEmailProtocol(e.target.value as 'imap-smtp' | 'loom')}
+            >
+              <option value="imap-smtp">IMAP / SMTP (Legacy)</option>
+              <option value="loom">LOOM Protocol</option>
+            </select>
           </div>
 
-          <div className="settings-field">
-            <label>Password *</label>
-            <input
-              type="password"
-              className="settings-input"
-              placeholder="Your password or app password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <p className="settings-hint">
-              For Gmail/Outlook, use an App Password (2FA must be enabled)
-            </p>
-          </div>
+          {!isLoomMode && (
+            <>
+              <div className="settings-callout info">
+                <strong>Quick Setup:</strong>
+                <div style={{ margin: '8px 0', display: 'flex', gap: '8px' }}>
+                  <button className="button-secondary" onClick={() => applyPreset('gmail')}>Gmail</button>
+                  <button className="button-secondary" onClick={() => applyPreset('outlook')}>Outlook</button>
+                  <button className="button-secondary" onClick={() => applyPreset('yahoo')}>Yahoo</button>
+                </div>
+                <p style={{ fontSize: '13px', marginTop: '8px' }}>
+                  Note: For Gmail/Outlook, you may need to use an App Password instead of your regular password.
+                </p>
+              </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div className="settings-field">
-              <label>IMAP Host *</label>
-              <input
-                type="text"
-                className="settings-input"
-                placeholder="imap.example.com"
-                value={imapHost}
-                onChange={(e) => setImapHost(e.target.value)}
-              />
-            </div>
+              <div className="settings-field">
+                <label>Email Address *</label>
+                <input
+                  type="email"
+                  className="settings-input"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
 
-            <div className="settings-field">
-              <label>IMAP Port</label>
-              <input
-                type="number"
-                className="settings-input"
-                placeholder="993"
-                value={imapPort}
-                onChange={(e) => setImapPort(parseInt(e.target.value) || 993)}
-              />
-            </div>
-          </div>
+              <div className="settings-field">
+                <label>Password *</label>
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder="Your password or app password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <p className="settings-hint">
+                  For Gmail/Outlook, use an App Password (2FA must be enabled)
+                </p>
+              </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div className="settings-field">
-              <label>SMTP Host *</label>
-              <input
-                type="text"
-                className="settings-input"
-                placeholder="smtp.example.com"
-                value={smtpHost}
-                onChange={(e) => setSmtpHost(e.target.value)}
-              />
-            </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="settings-field">
+                  <label>IMAP Host *</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="imap.example.com"
+                    value={imapHost}
+                    onChange={(e) => setImapHost(e.target.value)}
+                  />
+                </div>
 
-            <div className="settings-field">
-              <label>SMTP Port</label>
-              <input
-                type="number"
-                className="settings-input"
-                placeholder="587"
-                value={smtpPort}
-                onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
-              />
-            </div>
-          </div>
+                <div className="settings-field">
+                  <label>IMAP Port</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    placeholder="993"
+                    value={imapPort}
+                    onChange={(e) => setImapPort(parseInt(e.target.value) || 993)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="settings-field">
+                  <label>SMTP Host *</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="smtp.example.com"
+                    value={smtpHost}
+                    onChange={(e) => setSmtpHost(e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>SMTP Port</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    placeholder="587"
+                    value={smtpPort}
+                    onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
+                  />
+                </div>
+              </div>
+
+              <div className="settings-field">
+                <label>Allowed Senders (optional)</label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="user@example.com, other@example.com"
+                  value={allowedSenders}
+                  onChange={(e) => setAllowedSenders(e.target.value)}
+                />
+                <p className="settings-hint">
+                  Comma-separated email addresses to accept messages from (leave empty for all)
+                </p>
+              </div>
+
+              <div className="settings-field">
+                <label>Subject Filter (optional)</label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="[CoWork]"
+                  value={subjectFilter}
+                  onChange={(e) => setSubjectFilter(e.target.value)}
+                />
+                <p className="settings-hint">
+                  Only process emails containing this text in the subject
+                </p>
+              </div>
+            </>
+          )}
+
+          {isLoomMode && (
+            <>
+              <div className="settings-field">
+                <label>LOOM Base URL *</label>
+                <input
+                  type="url"
+                  className="settings-input"
+                  placeholder="http://127.0.0.1:8787"
+                  value={loomBaseUrl}
+                  onChange={(e) => setLoomBaseUrl(e.target.value)}
+                />
+              </div>
+
+              <div className="settings-field">
+                <label>LOOM Access Token *</label>
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder="Bearer access token"
+                  value={loomAccessToken}
+                  onChange={(e) => setLoomAccessToken(e.target.value)}
+                />
+              </div>
+
+              <div className="settings-field">
+                <label>LOOM Identity (optional)</label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="loom://agent@example.com"
+                  value={loomIdentity}
+                  onChange={(e) => setLoomIdentity(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="settings-field">
+                  <label>Mailbox Folder</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="INBOX"
+                    value={loomMailboxFolder}
+                    onChange={(e) => setLoomMailboxFolder(e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Poll Interval (ms)</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    placeholder="30000"
+                    value={loomPollInterval}
+                    onChange={(e) => setLoomPollInterval(parseInt(e.target.value) || 30000)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="settings-field">
             <label>Display Name (optional)</label>
@@ -395,35 +534,7 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
               onChange={(e) => setDisplayName(e.target.value)}
             />
             <p className="settings-hint">
-              Name shown in outgoing emails
-            </p>
-          </div>
-
-          <div className="settings-field">
-            <label>Allowed Senders (optional)</label>
-            <input
-              type="text"
-              className="settings-input"
-              placeholder="user@example.com, other@example.com"
-              value={allowedSenders}
-              onChange={(e) => setAllowedSenders(e.target.value)}
-            />
-            <p className="settings-hint">
-              Comma-separated email addresses to accept messages from (leave empty for all)
-            </p>
-          </div>
-
-          <div className="settings-field">
-            <label>Subject Filter (optional)</label>
-            <input
-              type="text"
-              className="settings-input"
-              placeholder="[CoWork]"
-              value={subjectFilter}
-              onChange={(e) => setSubjectFilter(e.target.value)}
-            />
-            <p className="settings-hint">
-              Only process emails containing this text in the subject
+              Name shown in outgoing messages
             </p>
           </div>
 
@@ -458,7 +569,7 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           <button
             className="button-primary"
             onClick={handleAddChannel}
-            disabled={saving || !email.trim() || !password.trim() || !imapHost.trim() || !smtpHost.trim()}
+            disabled={saving || !canAddChannel}
           >
             {saving ? 'Adding...' : 'Add Email'}
           </button>
@@ -467,11 +578,22 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
         <div className="settings-section">
           <h4>Email Features</h4>
           <ul className="setup-instructions">
-            <li>Receive emails via IMAP (polling)</li>
-            <li>Send emails via SMTP</li>
-            <li>Reply threading support</li>
-            <li>Filter by sender or subject</li>
-            <li>Universal - works with any email provider</li>
+            {isLoomMode ? (
+              <>
+                <li>Receive mailbox messages via LOOM gateway API</li>
+                <li>Send via LOOM SMTP submit endpoint</li>
+                <li>Thread and mailbox state mapped to LOOM thread graph</li>
+                <li>Bearer-token authenticated protocol access</li>
+              </>
+            ) : (
+              <>
+                <li>Receive emails via IMAP (polling)</li>
+                <li>Send emails via SMTP</li>
+                <li>Reply threading support</li>
+                <li>Filter by sender or subject</li>
+                <li>Universal - works with any email provider</li>
+              </>
+            )}
           </ul>
         </div>
       </div>
@@ -486,7 +608,7 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           <div className="channel-info">
             <h3>
               {channel.name}
-              {typeof channel.config?.email === 'string' && <span className="bot-username">{channel.config.email}</span>}
+              {configuredChannelHandle && <span className="bot-username">{configuredChannelHandle}</span>}
             </h3>
             <div className={`channel-status ${channel.status}`}>
               {channel.status === 'connected' && '● Connected'}
