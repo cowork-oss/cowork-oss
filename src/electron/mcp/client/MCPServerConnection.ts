@@ -180,7 +180,7 @@ export class MCPServerConnection extends EventEmitter {
       throw new Error(`Tool ${name} not found on server ${this.config.name}`);
     }
 
-    console.log(`[MCPServerConnection] Calling tool ${name} on ${this.config.name}`);
+    console.debug(`[MCPServerConnection] Calling tool ${name} on ${this.config.name}`);
 
     try {
       const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_CALL, {
