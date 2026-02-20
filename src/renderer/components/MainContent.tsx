@@ -2888,13 +2888,6 @@ export function MainContent({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [slashOpen]);
 
-  // Reset slash selected index when options change
-  useEffect(() => {
-    if (slashSelectedIndex >= slashOptions.length) {
-      setSlashSelectedIndex(0);
-    }
-  }, [slashOptions, slashSelectedIndex]);
-
   const findSlashAtCursor = (value: string, cursor: number | null) => {
     if (cursor === null) return null;
     const uptoCursor = value.slice(0, cursor);
@@ -2931,6 +2924,13 @@ export function MainContent({
         skill,
       }));
   }, [slashOpen, slashQuery, customSkills]);
+
+  // Reset slash selected index when options change
+  useEffect(() => {
+    if (slashSelectedIndex >= slashOptions.length) {
+      setSlashSelectedIndex(0);
+    }
+  }, [slashOptions, slashSelectedIndex]);
 
   const updateMentionState = useCallback((value: string, cursor: number | null) => {
     const mention = findMentionAtCursor(value, cursor);
@@ -3071,7 +3071,10 @@ export function MainContent({
   const renderSlashDropdown = () => {
     if (!slashOpen || slashOptions.length === 0) return null;
     return (
-      <div className="mention-autocomplete-dropdown slash-autocomplete-dropdown" ref={slashDropdownRef}>
+      <div
+        className="mention-autocomplete-dropdown slash-autocomplete-dropdown"
+        ref={slashDropdownRef}
+      >
         {slashOptions.map((option, index) => (
           <button
             key={option.id}
@@ -3082,9 +3085,7 @@ export function MainContent({
             }}
             onMouseEnter={() => setSlashSelectedIndex(index)}
           >
-            <span className="mention-autocomplete-icon slash-command-icon">
-              {option.icon}
-            </span>
+            <span className="mention-autocomplete-icon slash-command-icon">{option.icon}</span>
             <div className="mention-autocomplete-details">
               <span className="mention-autocomplete-name">/{option.name}</span>
               {option.description && (
@@ -3130,9 +3131,7 @@ export function MainContent({
           return;
         case "ArrowUp":
           e.preventDefault();
-          setSlashSelectedIndex(
-            (prev) => (prev - 1 + slashOptions.length) % slashOptions.length,
-          );
+          setSlashSelectedIndex((prev) => (prev - 1 + slashOptions.length) % slashOptions.length);
           return;
         case "Enter":
         case "Tab":
@@ -3501,6 +3500,7 @@ export function MainContent({
                     rows={1}
                   />
                   {renderMentionDropdown()}
+                  {renderSlashDropdown()}
                 </div>
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
@@ -4566,6 +4566,7 @@ export function MainContent({
                 rows={1}
               />
               {renderMentionDropdown()}
+              {renderSlashDropdown()}
             </div>
             <div className="input-actions">
               {uiDensity === "focused" && (

@@ -5018,6 +5018,18 @@ button {
   color: var(--color-text-secondary);
 }
 
+/* Slash command autocomplete (reuses mention styles) */
+.slash-autocomplete-dropdown {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.slash-command-icon {
+  background-color: var(--color-bg-hover) !important;
+  font-size: 14px;
+  color: var(--color-text) !important;
+}
+
 .cli-cursor {
   width: 8px;
   height: 18px;
