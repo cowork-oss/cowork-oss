@@ -4703,9 +4703,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       {
         relPath: path.join(kitDirName, "policy", "tools.monty"),
         content:
-          `# Workspace-local tool policy hook\n` +
-          `# Default: allow.\n` +
-          `{"decision": "pass"}\n`,
+          `# Workspace-local tool policy hook\n` + `# Default: allow.\n` + `{"decision": "pass"}\n`,
       },
       {
         relPath: path.join(kitDirName, "MEMORY.md"),
