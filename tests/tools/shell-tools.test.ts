@@ -45,8 +45,8 @@ describe('ShellTools auto-approval', () => {
 
   it('normalizes similar commands to the same signature', () => {
     const shellToolsAny = shellTools as any;
-    const sigA = shellToolsAny.getCommandSignature('sips --resampleWidth 1024 "/Users/mesut/Desktop/A.png" --out "/Users/mesut/Desktop/optimized/A.png"');
-    const sigB = shellToolsAny.getCommandSignature('sips --resampleWidth 1024 "/Users/mesut/Desktop/B.png" --out "/Users/mesut/Desktop/optimized/B.png"');
+    const sigA = shellToolsAny.getCommandSignature('sips --resampleWidth 1024 "/Users/almarion/Desktop/A.png" --out "/Users/almarion/Desktop/optimized/A.png"');
+    const sigB = shellToolsAny.getCommandSignature('sips --resampleWidth 1024 "/Users/almarion/Desktop/B.png" --out "/Users/almarion/Desktop/optimized/B.png"');
     expect(sigA).toBe(sigB);
     expect(sigA).toContain('<arg>');
   });
@@ -66,8 +66,8 @@ describe('ShellTools auto-approval', () => {
 
   it('flags dangerous commands as unsafe for auto-approval', () => {
     const shellToolsAny = shellTools as any;
-    expect(shellToolsAny.isAutoApprovalSafe('rm -rf "/Users/mesut/Desktop/tmp1"')).toBe(false);
-    expect(shellToolsAny.isAutoApprovalSafe('sips --resampleWidth 1024 "/Users/mesut/Desktop/A.png" --out "/Users/mesut/Desktop/optimized/A.png"')).toBe(true);
+    expect(shellToolsAny.isAutoApprovalSafe('rm -rf "/Users/almarion/Desktop/tmp1"')).toBe(false);
+    expect(shellToolsAny.isAutoApprovalSafe('sips --resampleWidth 1024 "/Users/almarion/Desktop/A.png" --out "/Users/almarion/Desktop/optimized/A.png"')).toBe(true);
   });
 
   it('redacts seed phrases from shell output', () => {

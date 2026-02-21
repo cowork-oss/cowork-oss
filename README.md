@@ -62,6 +62,13 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - **Soft-deadline execution control**: long-running steps switch to best-effort finalization before hard timeout to reduce unfinished tasks.
 - **Timeout cancellation recovery**: timeout-triggered cancellation paths now attempt best-effort final answers instead of silent termination.
 - **Relationship memory controls**: new layered memory CRUD and commitment APIs (`open`, `done`, `due soon`) are exposed through IPC/preload and renderer memory settings.
+- **Image attachments for tasks**: images (JPEG, PNG, GIF, WebP) can now be attached when creating tasks or sending follow-up messages; the LLM receives the actual image pixels via vision instead of OCR text only.
+- **Anthropic streaming**: the Anthropic provider now supports streaming responses with real-time token count and elapsed-time progress callbacks, enabling live UI progress indicators.
+- **Bedrock display names**: raw Bedrock model/inference-profile IDs (e.g. `us.anthropic.claude-sonnet-4-6-v1:0`) are now formatted into concise display names (e.g. `Sonnet 4.6 US`); AP regions with numeric suffixes are matched correctly; duplicate default/inference-profile entries are deduplicated.
+- **Executor plan completion**: the `planCompletedEffectively` flag is now set based solely on unrecovered failures, avoiding false negatives; "review" steps containing mutation verbs (e.g. "Review and tighten the article") are no longer misclassified as pure verification; artifact evidence checks accept substantive text responses when no file creation was attempted.
+- **Verbose toggle switch**: the verbose/summary toggle in the step viewer is now a compact on/off switch with proper `role="switch"` accessibility attributes.
+- **Chat bubble overflow fixes**: long URLs and text in chat bubbles no longer break layout; `overflow-wrap`, `word-break`, and `min-width: 0` are applied to bubble content and markdown links.
+- **Follow-up completion events**: chat-only follow-ups on completed tasks now emit `task_completed` instead of a generic `task_status` event, so the renderer correctly recognises the terminal state.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 

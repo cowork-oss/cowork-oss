@@ -133,7 +133,7 @@ describe("readFilesByPatterns", () => {
     const staleAbsolutePath = path.join(
       path.sep,
       "Users",
-      "mesut",
+      "almarion",
       "Desktop",
       "new",
       "new-bitcoin2",

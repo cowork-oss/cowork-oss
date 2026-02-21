@@ -80,7 +80,7 @@ Use this acceptance check after setup:
 4. Confirm timeout handling:
    - If a step times out, the task should still produce a best-effort final answer.
 5. Confirm memory continuity:
-   - Send: `Call me Mesut. I prefer concise responses. Remind me to send investor update tomorrow.`
+   - Send: `Call me almarion. I prefer concise responses. Remind me to send investor update tomorrow.`
    - Open **Settings** > **Memory System** and confirm relationship memory + commitments are visible.
 6. Confirm memory controls:
    - Edit a relationship item, mark a commitment done/reopen, and forget one item.
@@ -123,7 +123,17 @@ Title: Research AI trends
 Description: Search the web for the latest trends in AI for 2024 and create a summary document with the top 5 findings.
 ```
 
-### 6. Browser Automation
+### 6. Image Attachment
+
+Attach an image when creating a task so the LLM can see it directly:
+
+```
+Title: Describe this screenshot
+Description: Look at the attached image and describe what you see. Summarise any text visible in the screenshot.
+Attachment: (click the paperclip icon and select a JPEG, PNG, GIF, or WebP image)
+```
+
+### 7. Browser Automation
 
 ```
 Title: Screenshot a webpage

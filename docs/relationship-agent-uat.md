@@ -49,7 +49,7 @@ Use a prompt likely to create a long synthesis step.
 ## Test 4: Relationship Memory Capture
 
 ### Input
-`Call me Mesut. I prefer concise responses. Remind me to send investor update tomorrow.`
+`Call me almarion. I prefer concise responses. Remind me to send investor update tomorrow.`
 
 ### Expected
 1. Relationship memory includes identity and preference items.
@@ -69,7 +69,18 @@ Use a prompt likely to create a long synthesis step.
 2. Changes persist across restart.
 3. Due-soon list reflects status changes.
 
-## Test 6: Shared Context Safety
+## Test 6: Image Attachment in Task Creation
+
+### Input
+Create a new task with a JPEG or PNG image attached and the prompt:
+`Describe what you see in the attached image.`
+
+### Expected
+1. The LLM response references specific visual content from the image (not generic text).
+2. No "Image skipped" warnings appear in the activity log.
+3. Follow-up messages with additional image attachments are also processed correctly.
+
+## Test 7: Shared Context Safety
 
 ### Setup
 Run equivalent prompts from private and shared channel contexts (if configured).
@@ -80,5 +91,5 @@ Run equivalent prompts from private and shared channel contexts (if configured).
 
 ## Pass Criteria
 
-Release is accepted when all tests above pass with no silent task termination and no regression in completion behavior.
+Release is accepted when all seven tests above pass with no silent task termination and no regression in completion behavior.
 
