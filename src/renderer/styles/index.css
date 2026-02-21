@@ -2267,6 +2267,25 @@ a,
   border-color: rgba(245, 158, 11, 0.3);
 }
 
+.event-details.context-summary {
+  color: var(--color-text-secondary);
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.context-summary-header {
+  font-style: italic;
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.context-summary-body {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .event-line {
   flex: 1;
   width: 2px;

@@ -202,6 +202,8 @@ export type EventType =
   | "agent_completed" // Child agent completed successfully
   | "agent_failed" // Child agent failed
   | "sub_agent_result" // Result summary from child agent
+  // Context management
+  | "context_summarized" // Earlier messages were dropped and summarized
   // Conversation persistence
   | "conversation_snapshot"; // Full conversation history for restoration
 

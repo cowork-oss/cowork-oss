@@ -4,6 +4,7 @@ import { ThemeIcon } from "./ThemeIcon";
 import {
   AlertTriangleIcon,
   BanIcon,
+  BookIcon,
   CheckIcon,
   ClipboardIcon,
   DotIcon,
@@ -107,6 +108,8 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         return <ThemeIcon emoji="✅" icon={<CheckIcon size={16} />} />;
       case "follow_up_completed":
         return <ThemeIcon emoji="✅" icon={<CheckIcon size={16} />} />;
+      case "context_summarized":
+        return <ThemeIcon emoji="📝" icon={<BookIcon size={16} />} />;
       default:
         return <ThemeIcon emoji="•" icon={<DotIcon size={8} />} />;
     }
@@ -161,6 +164,10 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
         return isCompanion ? "All done." : "All done!";
       case "follow_up_completed":
         return "All done!";
+      case "context_summarized": {
+        const count = event.payload.removedCount || 0;
+        return `Earlier context summarized \u2014 ${count} message${count !== 1 ? "s" : ""} compacted`;
+      }
       case "log":
         return event.payload.message;
       default:
@@ -220,6 +227,16 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
             {event.payload.message || "Session was stopped"}
           </div>
         );
+      case "context_summarized":
+        return event.payload.summary ? (
+          <div className="event-details context-summary">
+            <div className="context-summary-header">
+              This session is being continued with a summarized context. The summary below covers the
+              earlier portion of the conversation.
+            </div>
+            <div className="context-summary-body">{event.payload.summary}</div>
+          </div>
+        ) : null;
       default:
         return null;
     }

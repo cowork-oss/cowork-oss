@@ -7224,6 +7224,19 @@ TASK / CONVERSATION HISTORY:
               allowMemoryInjection,
               summaryBlock,
             });
+
+            // Emit UI event so the user can see that context was summarized
+            const summaryText = this.extractPinnedBlockContent(
+              summaryBlock,
+              TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+              TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
+            );
+            this.daemon.logEvent(this.task.id, "context_summarized", {
+              summary: summaryText,
+              removedCount: compaction.meta.removedMessages.count,
+              tokensBefore: compaction.meta.originalTokens,
+              tokensAfter: compaction.meta.removedMessages.tokensAfter,
+            });
           }
         }
 
@@ -9329,6 +9342,19 @@ TASK / CONVERSATION HISTORY:
               taskId: this.task.id,
               allowMemoryInjection,
               summaryBlock,
+            });
+
+            // Emit UI event so the user can see that context was summarized
+            const summaryText = this.extractPinnedBlockContent(
+              summaryBlock,
+              TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+              TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
+            );
+            this.daemon.logEvent(this.task.id, "context_summarized", {
+              summary: summaryText,
+              removedCount: compaction.meta.removedMessages.count,
+              tokensBefore: compaction.meta.originalTokens,
+              tokensAfter: compaction.meta.removedMessages.tokensAfter,
             });
           }
         }
