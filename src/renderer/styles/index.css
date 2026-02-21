@@ -10616,9 +10616,9 @@ button {
   pointer-events: none;
 }
 
-/* Regular notifications: top-right */
+/* Regular notifications: top-right, below window controls */
 .toast-container-top-right {
-  top: 16px;
+  top: 48px;
   right: 16px;
   align-items: flex-end;
 }

@@ -534,7 +534,52 @@ export function App() {
     });
   };
 
+  const reshowPendingApprovalToasts = () => {
+    for (const [id, approval] of pendingApprovalsRef.current) {
+      addToast({
+        id: getApprovalToastId(id),
+        type: "info",
+        title: "Approval needed",
+        message: approval.description || "A task is waiting for your approval.",
+        taskId: approval.taskId,
+        approvalId: approval.id,
+        persistent: true,
+        actions: [
+          {
+            label: "Approve",
+            dismissOnClick: false,
+            callback: () => {
+              void handleApprovalResponse(approval.id, true);
+            },
+          },
+          {
+            label: "Deny",
+            variant: "secondary",
+            dismissOnClick: false,
+            callback: () => {
+              void handleApprovalResponse(approval.id, false);
+            },
+          },
+          {
+            label: "Approve all",
+            variant: "danger",
+            dismissOnClick: false,
+            callback: () => {
+              showApproveAllWarning();
+            },
+          },
+        ],
+      });
+    }
+  };
+
   const showApproveAllWarning = () => {
+    // Dismiss all pending approval toasts so the warning is the only dialog visible
+    const pendingApprovalIds = Array.from(pendingApprovalsRef.current.keys());
+    for (const id of pendingApprovalIds) {
+      dismissToast(getApprovalToastId(id));
+    }
+
     addToast({
       id: APPROVAL_WARNING_TOAST_ID,
       type: "error",
@@ -542,6 +587,8 @@ export function App() {
       message:
         "This will auto-approve every future request in this session. Only enable this if you fully trust the active tasks.",
       persistent: true,
+      // Mark as approval-related so it renders centered
+      approvalId: "__approve-all-warning__",
       actions: [
         {
           label: "I Understand",
@@ -555,6 +602,8 @@ export function App() {
           variant: "secondary",
           callback: () => {
             dismissToast(APPROVAL_WARNING_TOAST_ID);
+            // Re-show pending approval toasts that were hidden
+            reshowPendingApprovalToasts();
           },
         },
       ],
