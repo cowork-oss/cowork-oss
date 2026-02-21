@@ -96,6 +96,14 @@ export class IntentRouter {
       /`[^`]+`|\/[a-z0-9_.\-\/]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower),
     );
     add("advice", 1, "question-form", /\?/.test(text));
+    add(
+      "execution",
+      3,
+      "needs-tool-inspection",
+      /\b(my screen|my display|screenshot|on screen|disk space|storage|battery|cpu|memory|ram|running apps?|running process|installed|clipboard|weather|temperature|stock price|exchange rate|current time|what time)\b/i.test(
+        lower,
+      ),
+    );
 
     const planningLike = scores.planning + scores.advice;
     const executionLike = scores.execution;
