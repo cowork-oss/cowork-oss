@@ -111,4 +111,16 @@ describe("MemoryRepository.search", () => {
     // Called twice: raw and relaxed
     expect(all).toHaveBeenCalledTimes(2);
   });
+
+  it("uses provider-agnostic imported filter SQL", () => {
+    const all = vi.fn(() => []);
+    const prepare = vi.fn(() => ({ all }));
+    const repo = new MemoryRepository({ prepare } as Any);
+
+    repo.searchImportedGlobal("any query", 10, true);
+
+    const sql = String(prepare.mock.calls[0]?.[0] || "");
+    expect(sql).toContain("m.content LIKE '[Imported from %'");
+    expect(sql).not.toContain("ChatGPT");
+  });
 });
