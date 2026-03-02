@@ -558,6 +558,7 @@ const IPC_CHANNELS = {
   MEMORY_IMPORT_CHATGPT: "memory:importChatGPT",
   MEMORY_IMPORT_CHATGPT_PROGRESS: "memory:importChatGPTProgress",
   MEMORY_IMPORT_CHATGPT_CANCEL: "memory:importChatGPTCancel",
+  MEMORY_IMPORT_TEXT: "memory:importFromText",
   MEMORY_GET_IMPORTED_STATS: "memory:getImportedStats",
   MEMORY_FIND_IMPORTED: "memory:findImported",
   MEMORY_DELETE_IMPORTED: "memory:deleteImported",
@@ -1090,7 +1091,13 @@ type CronSchedule =
   | { kind: "every"; everyMs: number; anchorMs?: number }
   | { kind: "cron"; expr: string; tz?: string };
 
-type CronJobStatus = "ok" | "partial_success" | "error" | "skipped" | "timeout";
+type CronJobStatus =
+  | "ok"
+  | "partial_success"
+  | "needs_user_action"
+  | "error"
+  | "skipped"
+  | "timeout";
 type CronDeliveryMode = "direct" | "outbox";
 type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 
@@ -1378,6 +1385,22 @@ interface ChatGPTImportResult {
   skipped: number;
   errors: string[];
   sourceFileHash: string;
+}
+
+interface TextMemoryImportOptions {
+  workspaceId: string;
+  provider: string;
+  pastedText: string;
+  forcePrivate?: boolean;
+}
+
+interface TextMemoryImportResult {
+  success: boolean;
+  entriesDetected: number;
+  memoriesCreated: number;
+  duplicatesSkipped: number;
+  truncated: number;
+  errors: string[];
 }
 
 // Hooks types (inlined for sandboxed preload)
@@ -2748,6 +2771,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_IMPORT_CHATGPT_CANCEL) as Promise<{
       cancelled: boolean;
     }>,
+  importMemoryFromText: (options: TextMemoryImportOptions) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_IMPORT_TEXT, options) as Promise<TextMemoryImportResult>,
 
   // Migration Status APIs
   getMigrationStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_GET_STATUS),
@@ -3211,6 +3236,7 @@ export interface FileViewerResult {
     content: string | null;
     htmlContent?: string;
     ocrText?: string;
+    pdfThumbnailDataUrl?: string;
     size: number;
   };
   error?: string;
@@ -3694,8 +3720,25 @@ export interface ElectronAPI {
     fileSizeLimitEnabled: boolean;
     enforceAllowedDomains: boolean;
     allowedDomains: string[];
+    webSearchMode: "disabled" | "cached" | "live";
+    webSearchMaxUsesPerTask: number;
+    webSearchMaxUsesPerStep: number;
+    webSearchAllowedDomains: string[];
+    webSearchBlockedDomains: string[];
     maxIterationsPerTask: number;
     iterationLimitEnabled: boolean;
+    autoContinuationEnabled: boolean;
+    defaultMaxAutoContinuations: number;
+    defaultMinProgressScore: number;
+    lifetimeTurnCapEnabled: boolean;
+    defaultLifetimeTurnCap: number;
+    compactOnContinuation: boolean;
+    compactionThresholdRatio: number;
+    loopWarningThreshold: number;
+    loopCriticalThreshold: number;
+    globalNoProgressCircuitBreaker: number;
+    sideChannelDuringExecution: "paused" | "limited" | "enabled";
+    sideChannelMaxCallsPerWindow: number;
   }>;
   saveGuardrailSettings: (settings: Any) => Promise<{ success: boolean }>;
   getGuardrailDefaults: () => Promise<{
@@ -3711,8 +3754,25 @@ export interface ElectronAPI {
     fileSizeLimitEnabled: boolean;
     enforceAllowedDomains: boolean;
     allowedDomains: string[];
+    webSearchMode: "disabled" | "cached" | "live";
+    webSearchMaxUsesPerTask: number;
+    webSearchMaxUsesPerStep: number;
+    webSearchAllowedDomains: string[];
+    webSearchBlockedDomains: string[];
     maxIterationsPerTask: number;
     iterationLimitEnabled: boolean;
+    autoContinuationEnabled: boolean;
+    defaultMaxAutoContinuations: number;
+    defaultMinProgressScore: number;
+    lifetimeTurnCapEnabled: boolean;
+    defaultLifetimeTurnCap: number;
+    compactOnContinuation: boolean;
+    compactionThresholdRatio: number;
+    loopWarningThreshold: number;
+    loopCriticalThreshold: number;
+    globalNoProgressCircuitBreaker: number;
+    sideChannelDuringExecution: "paused" | "limited" | "enabled";
+    sideChannelMaxCallsPerWindow: number;
   }>;
   // Appearance Settings
   getAppearanceSettings: () => Promise<{
@@ -3729,6 +3789,7 @@ export interface ElectronAPI {
       | "teal"
       | "coral";
     uiDensity?: "focused" | "full" | "power";
+    timelineVerbosity?: "summary" | "verbose";
     language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -3749,6 +3810,7 @@ export interface ElectronAPI {
       | "teal"
       | "coral";
     uiDensity?: "focused" | "full" | "power";
+    timelineVerbosity?: "summary" | "verbose";
     language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -4301,6 +4363,7 @@ export interface ElectronAPI {
   importChatGPT: (options: ChatGPTImportOptions) => Promise<ChatGPTImportResult>;
   onChatGPTImportProgress: (callback: (progress: ChatGPTImportProgress) => void) => () => void;
   cancelChatGPTImport: () => Promise<{ cancelled: boolean }>;
+  importMemoryFromText: (options: TextMemoryImportOptions) => Promise<TextMemoryImportResult>;
 
   // Migration Status
   getMigrationStatus: () => Promise<MigrationStatus>;
@@ -4675,7 +4738,7 @@ export interface ElectronAPI {
   }) => Promise<AgentPerformanceReview[]>;
   deleteAgentReview: (id: string) => Promise<{ success: boolean }>;
   listEvalSuites: (options?: { windowDays?: number }) => Promise<{
-    suites: Array<(EvalSuite & { caseCount: number; latestRun?: Partial<EvalRun> })>;
+    suites: Array<EvalSuite & { caseCount: number; latestRun?: Partial<EvalRun> }>;
     metrics: EvalBaselineMetrics;
   }>;
   runEvalSuite: (suiteId: string) => Promise<EvalRun>;
