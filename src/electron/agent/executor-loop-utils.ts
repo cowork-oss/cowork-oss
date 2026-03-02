@@ -137,18 +137,18 @@ export function computeToolFailureDecision(opts: {
   shouldInjectRecoveryHint: boolean;
 } {
   const allToolsFailed = opts.toolResults.every((r) => r.is_error);
-  const shouldStopFromFailures =
-    (opts.hasDisabledToolAttempt ||
-      opts.hasDuplicateToolAttempt ||
-      opts.hasUnavailableToolAttempt ||
-      opts.hasHardToolFailureAttempt) &&
-    allToolsFailed;
-  const shouldStopFromHardFailure = opts.hasHardToolFailureAttempt && allToolsFailed;
   const duplicateOnlyFailure =
     opts.hasDuplicateToolAttempt &&
     !opts.hasDisabledToolAttempt &&
     !opts.hasUnavailableToolAttempt &&
     !opts.hasHardToolFailureAttempt;
+  const shouldStopFromFailures =
+    allToolsFailed &&
+    (opts.hasDisabledToolAttempt ||
+      opts.hasUnavailableToolAttempt ||
+      opts.hasHardToolFailureAttempt ||
+      (opts.hasDuplicateToolAttempt && !duplicateOnlyFailure));
+  const shouldStopFromHardFailure = opts.hasHardToolFailureAttempt && allToolsFailed;
   const onlyHardFailures =
     opts.hasHardToolFailureAttempt &&
     !opts.hasDisabledToolAttempt &&
@@ -159,7 +159,6 @@ export function computeToolFailureDecision(opts: {
     opts.allowRecoveryHint &&
     !opts.toolRecoveryHintInjected &&
     opts.iterationCount < opts.maxIterations &&
-    !duplicateOnlyFailure &&
     (opts.hasDisabledToolAttempt ||
       opts.hasDuplicateToolAttempt ||
       opts.hasUnavailableToolAttempt ||
@@ -219,6 +218,10 @@ export function maybeInjectToolLoopBreak(opts: {
   recentToolCalls: ToolLoopCall[];
   messages: LLMMessage[];
   loopBreakInjected: boolean;
+  mutationRequired?: boolean;
+  mutationSatisfied?: boolean;
+  requiredActionText?: string;
+  sanitizeMessageText?: (text: string) => string;
   detectToolLoop: (
     recentToolCalls: ToolLoopCall[],
     toolName: string,
@@ -237,15 +240,19 @@ export function maybeInjectToolLoopBreak(opts: {
     opts.log(
       `  │ ⚠ Loop detected: ${content.name} called ${3}+ times on same target — injecting break message`,
     );
+    const messageText =
+      opts.mutationRequired && !opts.mutationSatisfied
+        ? opts.requiredActionText ||
+          "You are stuck retrying the same target. Switch approach and perform the required write/canvas mutation now."
+        : "You are stuck in a loop calling the same tool repeatedly on the same target without making progress. " +
+          "STOP using this tool and respond directly with what you have found so far. " +
+          "If you need different information, try a completely different approach or tool.";
     opts.messages.push({
       role: "user",
       content: [
         {
           type: "text",
-          text:
-            "You are stuck in a loop calling the same tool repeatedly on the same target without making progress. " +
-            "STOP using this tool and respond directly with what you have found so far. " +
-            "If you need different information, try a completely different approach or tool.",
+          text: opts.sanitizeMessageText ? opts.sanitizeMessageText(messageText) : messageText,
         },
       ],
     });
@@ -260,6 +267,10 @@ export function maybeInjectLowProgressNudge(opts: {
   messages: LLMMessage[];
   lowProgressNudgeInjected: boolean;
   phaseLabel: "step" | "follow-up";
+  mutationRequired?: boolean;
+  mutationSatisfied?: boolean;
+  requiredActionText?: string;
+  sanitizeMessageText?: (text: string) => string;
   windowSize?: number;
   minCallsOnSameTarget?: number;
   log: (message: string) => void;
@@ -348,10 +359,21 @@ export function maybeInjectLowProgressNudge(opts: {
       content: [
         {
           type: "text",
-          text:
-            `${escalationTag}\n` +
-            `Low-progress looping is still occurring on "${topTarget}". ` +
-            "This is your final warning: stop all additional probing and provide the best final answer now, with a blocker list for anything still unknown.",
+          text: (() => {
+            if (opts.mutationRequired && !opts.mutationSatisfied) {
+              const message =
+                `${escalationTag}\n` +
+                `Low-progress looping is still occurring on "${topTarget}". ` +
+                (opts.requiredActionText ||
+                  "This step cannot complete with text-only output. Perform the required write/canvas mutation now.");
+              return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+            }
+            const message =
+              `${escalationTag}\n` +
+              `Low-progress looping is still occurring on "${topTarget}". ` +
+              "This is your final warning: stop all additional probing and provide the best final answer now, with a blocker list for anything still unknown.";
+            return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+          })(),
         },
       ],
     });
@@ -373,9 +395,16 @@ export function maybeInjectLowProgressNudge(opts: {
     content: [
       {
         type: "text",
-        text:
-          `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
-          "Stop additional probing now. Synthesize the best answer from current evidence, and explicitly list any missing data as blockers.",
+        text: (() => {
+          const message =
+          opts.mutationRequired && !opts.mutationSatisfied
+            ? opts.requiredActionText ||
+              `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
+                "Stop probing and perform the required write/canvas mutation now."
+            : `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
+              "Stop additional probing now. Synthesize the best answer from current evidence, and explicitly list any missing data as blockers.";
+          return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+        })(),
       },
     ],
   });
@@ -390,6 +419,9 @@ export function maybeInjectStopReasonNudge(opts: {
   messages: LLMMessage[];
   phaseLabel: "step" | "follow-up";
   stopReasonNudgeInjected: boolean;
+  suppressToolUseStopNudge?: boolean;
+  requiredToolNames?: string[];
+  sanitizeMessageText?: (text: string) => string;
   minToolUseStreak?: number;
   minMaxTokenStreak?: number;
   log: (message: string) => void;
@@ -430,14 +462,39 @@ export function maybeInjectStopReasonNudge(opts: {
   });
 
   if (stopReason === "tool_use") {
+    if (opts.suppressToolUseStopNudge) {
+      const requiredTools =
+        Array.isArray(opts.requiredToolNames) && opts.requiredToolNames.length > 0
+          ? opts.requiredToolNames.map((name) => `"${name}"`).join(", ")
+          : "required write/mutation tool(s)";
+      opts.messages.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: (() => {
+              const message =
+              "This step requires an artifact mutation and it has not happened yet. " +
+              `Do not stop tool calls yet. Perform ${requiredTools} now, then continue.`;
+              return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+            })(),
+          },
+        ],
+      });
+      return true;
+    }
+
     opts.messages.push({
       role: "user",
       content: [
         {
           type: "text",
-          text:
+          text: (() => {
+            const message =
             "You have been in repeated tool-use turns. Stop calling tools unless absolutely required for correctness. " +
-            "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.",
+            "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.";
+            return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+          })(),
         },
       ],
     });
@@ -449,7 +506,11 @@ export function maybeInjectStopReasonNudge(opts: {
     content: [
       {
         type: "text",
-        text: "Your recent responses keep hitting output limits. Keep the next response compact: no long dumps, no repeated context, and only the essential final result.",
+        text: (() => {
+          const message =
+            "Your recent responses keep hitting output limits. Keep the next response compact: no long dumps, no repeated context, and only the essential final result.";
+          return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
+        })(),
       },
     ],
   });
@@ -492,14 +553,6 @@ export function shouldForceStopAfterSkippedToolOnlyTurns(
   return skippedToolOnlyTurnStreak >= threshold;
 }
 
-const FILE_WRITING_TOOLS = new Set([
-  "write_file",
-  "create_document",
-  "copy_file",
-  "create_spreadsheet",
-  "create_presentation",
-]);
-
 export function maybeInjectVariedFailureNudge(opts: {
   persistentToolFailures: Map<string, number>;
   variedFailureNudgeInjected: boolean;
@@ -519,13 +572,6 @@ export function maybeInjectVariedFailureNudge(opts: {
     );
     opts.emitVariedFailureEvent(failedToolName, failCount);
 
-    const isFileWritingTool = FILE_WRITING_TOOLS.has(failedToolName);
-    const fileWritingFallback = isFileWritingTool
-      ? "\n\nFILE WRITING FALLBACK: Output your deliverable content directly as text in your response. " +
-        "The system automatically captures your text response as the task deliverable. " +
-        "You do NOT need to successfully write a file."
-      : "";
-
     opts.messages.push({
       role: "user",
       content: [
@@ -537,8 +583,7 @@ export function maybeInjectVariedFailureNudge(opts: {
             `STOP retrying "${failedToolName}" for this goal. Instead:\n` +
             "1) Accept that this specific approach is not working in the current environment.\n" +
             "2) Try a FUNDAMENTALLY different approach (different tool, different strategy, or skip this sub-goal).\n" +
-            "3) If no alternative exists, report the blocker to the user and move on to the next part of the task." +
-            fileWritingFallback,
+            "3) If no alternative exists, report the blocker to the user and move on to the next part of the task.",
         },
       ],
     });
