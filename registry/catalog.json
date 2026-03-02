@@ -101,6 +101,23 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/auto-commenter.json"
     },
     {
+      "id": "batch",
+      "name": "Batch",
+      "description": "Plan and execute parallel, repeatable migrations across code, docs, research artifacts, ops configs, or mixed task sets.",
+      "version": "1.0.0",
+      "author": "CoWork OS",
+      "tags": [
+        "workflow",
+        "parallel",
+        "migration",
+        "cross-domain"
+      ],
+      "icon": "🧺",
+      "category": "Use Cases",
+      "updatedAt": "2026-03-01",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/batch.json"
+    },
+    {
       "id": "bear-notes",
       "name": "Bear-notes",
       "description": "Create, search, and manage Bear notes via grizzly CLI.",
@@ -1092,11 +1109,28 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/sherpa-onnx-tts.json"
     },
     {
+      "id": "simplify",
+      "name": "Simplify",
+      "description": "Improve existing work with focused simplification passes across code, writing, research, operations, or general tasks.",
+      "version": "1.0.0",
+      "author": "CoWork OS",
+      "tags": [
+        "workflow",
+        "quality",
+        "optimization",
+        "cross-domain"
+      ],
+      "icon": "🧹",
+      "category": "Use Cases",
+      "updatedAt": "2026-03-01",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/simplify.json"
+    },
+    {
       "id": "skill-creator",
       "name": "Skill-creator",
       "description": "Create or update AgentSkills for CoWork-OSS. Use when designing, structuring, or packaging skills. Supports JSON format with requirements, installation specs, and metadata.",
       "version": "2.0.0",
-      "author": "CoWork-OSS",
+      "author": "CoWork OS",
       "tags": [
         "development",
         "skills",
@@ -1112,7 +1146,7 @@
       "name": "skill-hub",
       "description": "Use the skill-hub CLI to search, install, update, and publish agent skills from skill-hub.com. Use when you need to fetch new skills on the fly, sync installed skills to latest or a specific version, or publish new/updated skill folders with the npm-installed skill-hub CLI.",
       "version": "1.0.0",
-      "author": "CoWork-OSS",
+      "author": "CoWork OS",
       "tags": [
         "cli",
         "registry",
