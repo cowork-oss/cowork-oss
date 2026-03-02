@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 // Test the isTransientProviderError logic directly
 function isTransientProviderError(error: Any): boolean {
   if (!error) return false;
+  if (error.retryable === true) return true;
   const message = String(error.message || "").toLowerCase();
   const code = error.cause?.code || error.code;
   const retryableCodes = new Set([
@@ -15,13 +16,20 @@ function isTransientProviderError(error: Any): boolean {
     "ENOTFOUND",
     "EAI_AGAIN",
     "ECONNREFUSED",
+    "ERR_STREAM_PREMATURE_CLOSE",
+    "EPIPE",
+    "ECONNABORTED",
   ]);
   if (code && retryableCodes.has(code)) return true;
   return (
     message.includes("fetch failed") ||
     message.includes("network") ||
     message.includes("timeout") ||
-    message.includes("socket hang up")
+    message.includes("socket hang up") ||
+    message.includes("terminated") ||
+    message.includes("stream disconnected") ||
+    message.includes("connection reset") ||
+    message.includes("unexpected eof")
   );
 }
 
@@ -79,6 +87,21 @@ describe("isTransientProviderError", () => {
 
     it("should return true for socket hang up", () => {
       const error = { message: "socket hang up" };
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("should return true for terminated interruptions", () => {
+      const error = { message: "terminated" };
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("should return true for stream disconnections", () => {
+      const error = { message: "stream disconnected by upstream" };
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("should return true for unexpected eof", () => {
+      const error = { message: "unexpected eof while reading stream" };
       expect(isTransientProviderError(error)).toBe(true);
     });
 
@@ -147,6 +170,11 @@ describe("isTransientProviderError", () => {
           message: "Connection refused",
         },
       };
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("should trust structured retryable provider errors", () => {
+      const error = { message: "provider interruption", retryable: true };
       expect(isTransientProviderError(error)).toBe(true);
     });
   });
