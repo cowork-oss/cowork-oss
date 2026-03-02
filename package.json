@@ -104,6 +104,8 @@
     "qa:eval:build": "node scripts/qa/build_eval_corpus.cjs",
     "qa:eval:run": "node scripts/qa/run_eval_suite.cjs",
     "qa:eval:enforce-regressions": "node scripts/qa/enforce_eval_regression_policy.cjs",
+    "qa:timeline:backfill": "node scripts/qa/backfill_timeline_completion_telemetry.cjs",
+    "qa:timeline:enforce": "node scripts/qa/enforce_timeline_reliability.cjs",
     "qa:reliability": "npm run qa:eval:run && node scripts/qa/run_battery.cjs",
     "skills:check:core": "npm run skills:validate-routing && npm run skills:validate-content && npm run skills:audit",
     "skills:check": "node scripts/qa/skills-check.mjs",
