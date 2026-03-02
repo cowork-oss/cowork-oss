@@ -9,6 +9,7 @@ import { TaskBoardColumn } from "./TaskBoardColumn";
 import { TaskLabelManager } from "./TaskLabelManager";
 import { TaskQuickActions } from "./TaskQuickActions";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 
 interface Task {
   id: string;
@@ -123,11 +124,15 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
   // Subscribe to task events for new tasks and status changes
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTaskEvent((event: Any) => {
-      if (event.type === "created" && event.task?.workspaceId === workspaceId) {
+      const effectiveType = getEffectiveTaskEventType(event as Any);
+      if (effectiveType === "created" && event.task?.workspaceId === workspaceId) {
         setTasks((prev) => [event.task, ...prev]);
-      } else if (event.type === "updated" && event.task) {
+      } else if (effectiveType === "task_created" && event.payload?.task?.workspaceId === workspaceId) {
+        const incoming = event.payload.task as Task;
+        setTasks((prev) => (prev.some((t) => t.id === incoming.id) ? prev : [incoming, ...prev]));
+      } else if (effectiveType === "updated" && event.task) {
         setTasks((prev) => prev.map((t) => (t.id === event.task.id ? { ...t, ...event.task } : t)));
-      } else if (event.type === "deleted" && event.taskId) {
+      } else if (effectiveType === "deleted" && event.taskId) {
         setTasks((prev) => prev.filter((t) => t.id !== event.taskId));
       }
     });
