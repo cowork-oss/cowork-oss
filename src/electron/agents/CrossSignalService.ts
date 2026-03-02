@@ -328,7 +328,8 @@ export class CrossSignalService {
     const stmt = this.db.prepare(`
       SELECT e.task_id as taskId, e.timestamp as timestamp, e.payload as payload
       FROM task_events e
-      WHERE e.type = 'assistant_message' AND e.timestamp >= ?
+      WHERE (e.type = 'assistant_message' OR e.legacy_type = 'assistant_message')
+        AND e.timestamp >= ?
       ORDER BY e.timestamp DESC
       LIMIT ?
     `);
