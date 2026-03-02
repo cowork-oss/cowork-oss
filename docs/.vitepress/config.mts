@@ -68,6 +68,7 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Use Cases', link: '/use-cases' },
+          { text: 'Simplify & Batch', link: '/simplify-batch' },
           { text: 'GTM Strategy', link: '/gtm-strategy' },
           { text: 'Competitive Landscape', link: '/competitive-landscape-research' },
           { text: 'Contributing', link: '/contributing' },
