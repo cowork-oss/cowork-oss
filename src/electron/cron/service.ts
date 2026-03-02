@@ -558,7 +558,7 @@ export class CronService {
 
     const startTime = Date.now();
     let taskId: string | undefined;
-    let status: "ok" | "partial_success" | "error" | "timeout" = "ok";
+    let status: "ok" | "partial_success" | "needs_user_action" | "error" | "timeout" = "ok";
     let errorMsg: string | undefined;
     let resultText: string | undefined;
     let workspaceContext: CronWorkspaceContext | null = null;
@@ -615,7 +615,12 @@ export class CronService {
 
           const taskStatus = typeof task.status === "string" ? task.status : "";
           if (taskStatus === "completed") {
-            status = task.terminalStatus === "partial_success" ? "partial_success" : "ok";
+            status =
+              task.terminalStatus === "needs_user_action"
+                ? "needs_user_action"
+                : task.terminalStatus === "partial_success"
+                  ? "partial_success"
+                  : "ok";
             if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
               pollResultSummary = task.resultSummary.trim();
             }
@@ -644,7 +649,12 @@ export class CronService {
           const finalTask = await deps.getTaskStatus(taskId);
           const finalStatus = typeof finalTask?.status === "string" ? finalTask.status : "";
           if (finalStatus === "completed") {
-            status = finalTask?.terminalStatus === "partial_success" ? "partial_success" : "ok";
+            status =
+              finalTask?.terminalStatus === "needs_user_action"
+                ? "needs_user_action"
+                : finalTask?.terminalStatus === "partial_success"
+                  ? "partial_success"
+                  : "ok";
             if (
               !pollResultSummary &&
               typeof finalTask?.resultSummary === "string" &&
@@ -661,7 +671,7 @@ export class CronService {
           }
         }
 
-        if (status === "ok" || status === "partial_success") {
+        if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
           if (deps.getTaskResultText) {
             try {
               resultText = await deps.getTaskResultText(taskId);
@@ -692,7 +702,7 @@ export class CronService {
 
     // Update run statistics
     job.state.totalRuns = (job.state.totalRuns ?? 0) + 1;
-    if (status === "ok" || status === "partial_success") {
+    if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
       job.state.successfulRuns = (job.state.successfulRuns ?? 0) + 1;
     } else {
       job.state.failedRuns = (job.state.failedRuns ?? 0) + 1;
@@ -787,7 +797,7 @@ export class CronService {
    */
   private async deliverToChannel(
     job: CronJob,
-    status: "ok" | "partial_success" | "error" | "timeout",
+    status: "ok" | "partial_success" | "needs_user_action" | "error" | "timeout",
     taskId?: string,
     error?: string,
     resultText?: string,
@@ -818,7 +828,7 @@ export class CronService {
     } = job.delivery;
 
     // Check if we should deliver based on status
-    const isSuccess = status === "ok" || status === "partial_success";
+    const isSuccess = status === "ok" || status === "partial_success" || status === "needs_user_action";
     const shouldDeliver =
       (isSuccess && deliverOnSuccess !== false) || (!isSuccess && deliverOnError !== false);
 
@@ -1054,7 +1064,7 @@ export class CronService {
   private enqueueOutboxEntry(params: {
     job: CronJob;
     runAtMs: number;
-    status: "ok" | "partial_success" | "error" | "timeout";
+    status: "ok" | "partial_success" | "needs_user_action" | "error" | "timeout";
     channelType: NonNullable<CronJob["delivery"]>["channelType"];
     channelDbId?: string;
     channelId: string;
