@@ -265,6 +265,17 @@ export class DatabaseManager {
         terminal_status TEXT,
         failure_class TEXT,
         budget_usage TEXT,
+        continuation_count INTEGER DEFAULT 0,
+        continuation_window INTEGER DEFAULT 1,
+        lifetime_turns_used INTEGER DEFAULT 0,
+        last_progress_score REAL,
+        auto_continue_block_reason TEXT,
+        compaction_count INTEGER DEFAULT 0,
+        last_compaction_at INTEGER,
+        last_compaction_tokens_before INTEGER,
+        last_compaction_tokens_after INTEGER,
+        no_progress_streak INTEGER DEFAULT 0,
+        last_loop_fingerprint TEXT,
         risk_level TEXT,
         eval_case_id TEXT,
         eval_run_id TEXT,
@@ -334,6 +345,15 @@ export class DatabaseManager {
         timestamp INTEGER NOT NULL,
         type TEXT NOT NULL,
         payload TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT 2,
+        event_id TEXT,
+        seq INTEGER,
+        ts INTEGER,
+        status TEXT,
+        step_id TEXT,
+        group_id TEXT,
+        actor TEXT,
+        legacy_type TEXT,
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
@@ -777,6 +797,17 @@ export class DatabaseManager {
       "ALTER TABLE tasks ADD COLUMN terminal_status TEXT",
       "ALTER TABLE tasks ADD COLUMN failure_class TEXT",
       "ALTER TABLE tasks ADD COLUMN budget_usage TEXT",
+      "ALTER TABLE tasks ADD COLUMN continuation_count INTEGER DEFAULT 0",
+      "ALTER TABLE tasks ADD COLUMN continuation_window INTEGER DEFAULT 1",
+      "ALTER TABLE tasks ADD COLUMN lifetime_turns_used INTEGER DEFAULT 0",
+      "ALTER TABLE tasks ADD COLUMN last_progress_score REAL",
+      "ALTER TABLE tasks ADD COLUMN auto_continue_block_reason TEXT",
+      "ALTER TABLE tasks ADD COLUMN compaction_count INTEGER DEFAULT 0",
+      "ALTER TABLE tasks ADD COLUMN last_compaction_at INTEGER",
+      "ALTER TABLE tasks ADD COLUMN last_compaction_tokens_before INTEGER",
+      "ALTER TABLE tasks ADD COLUMN last_compaction_tokens_after INTEGER",
+      "ALTER TABLE tasks ADD COLUMN no_progress_streak INTEGER DEFAULT 0",
+      "ALTER TABLE tasks ADD COLUMN last_loop_fingerprint TEXT",
       "ALTER TABLE tasks ADD COLUMN risk_level TEXT",
       "ALTER TABLE tasks ADD COLUMN eval_case_id TEXT",
       "ALTER TABLE tasks ADD COLUMN eval_run_id TEXT",
@@ -788,6 +819,33 @@ export class DatabaseManager {
       } catch {
         // Column already exists, ignore
       }
+    }
+
+    // Migration: Task timeline v2 columns
+    const taskEventColumns = [
+      "ALTER TABLE task_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 2",
+      "ALTER TABLE task_events ADD COLUMN event_id TEXT",
+      "ALTER TABLE task_events ADD COLUMN seq INTEGER",
+      "ALTER TABLE task_events ADD COLUMN ts INTEGER",
+      "ALTER TABLE task_events ADD COLUMN status TEXT",
+      "ALTER TABLE task_events ADD COLUMN step_id TEXT",
+      "ALTER TABLE task_events ADD COLUMN group_id TEXT",
+      "ALTER TABLE task_events ADD COLUMN actor TEXT",
+      "ALTER TABLE task_events ADD COLUMN legacy_type TEXT",
+    ];
+
+    for (const sql of taskEventColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+
+    try {
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_task_seq ON task_events(task_id, seq)");
+    } catch {
+      // Index already exists, ignore
     }
 
     // Migration: Add pinned marker to tasks table
