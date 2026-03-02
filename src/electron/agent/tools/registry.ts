@@ -20,6 +20,7 @@ import { GlobTools } from "./glob-tools";
 import { GrepTools } from "./grep-tools";
 import { EditTools } from "./edit-tools";
 import { MontyTools } from "./monty-tools";
+import { TextTools } from "./text-tools";
 import { BrowserTools } from "./browser-tools";
 import { ShellTools } from "./shell-tools";
 import { ImageTools } from "./image-tools";
@@ -78,6 +79,10 @@ import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { CitationTracker } from "../citation/CitationTracker";
+import {
+  getToolSemantics as getToolSemanticsUtil,
+  isArtifactGenerationToolName as isArtifactGenerationToolNameUtil,
+} from "../tool-semantics";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -313,6 +318,7 @@ export class ToolRegistry {
   private grepTools: GrepTools;
   private editTools: EditTools;
   private montyTools: MontyTools;
+  private textTools: TextTools;
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
@@ -350,6 +356,7 @@ export class ToolRegistry {
   private deniedGroups: Set<ToolGroupName> = new Set();
   private denyAllTools = false;
   private shadowedToolsLogged = false;
+  private semanticsInvariantLogged = false;
 
   constructor(
     private workspace: Workspace,
@@ -366,6 +373,7 @@ export class ToolRegistry {
     this.grepTools = new GrepTools(workspace, daemon, taskId);
     this.editTools = new EditTools(workspace, daemon, taskId);
     this.montyTools = new MontyTools(workspace, daemon, taskId, this.fileTools);
+    this.textTools = new TextTools(workspace, daemon, taskId, this.fileTools);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
@@ -433,6 +441,33 @@ export class ToolRegistry {
     }
   }
 
+  private validateToolSemanticsInvariant(tools: LLMTool[]): void {
+    if (this.semanticsInvariantLogged) return;
+
+    const artifactToolPattern = /^(?:create|generate)_(?:document|spreadsheet|presentation)$/;
+    const missingSemantics = tools
+      .map((tool) => String(tool?.name || ""))
+      .filter((toolName) => artifactToolPattern.test(toolName))
+      .filter((toolName) => !getToolSemanticsUtil(toolName));
+
+    if (missingSemantics.length > 0) {
+      console.warn(
+        `[ToolRegistry] Tool semantics invariant failed for artifact tools: ${missingSemantics.join(", ")}`,
+      );
+    } else {
+      const artifactToolNames = tools
+        .map((tool) => String(tool?.name || ""))
+        .filter((toolName) => isArtifactGenerationToolNameUtil(toolName));
+      if (artifactToolNames.length > 0) {
+        console.log(
+          `[ToolRegistry] Tool semantics invariant passed for: ${artifactToolNames.join(", ")}`,
+        );
+      }
+    }
+
+    this.semanticsInvariantLogged = true;
+  }
+
   /**
    * Attach a CitationTracker so web_search/web_fetch results feed citations.
    */
@@ -447,6 +482,13 @@ export class ToolRegistry {
   /** Enable deep work mode — extends spawn_agent max_turns cap to 250 */
   setDeepWorkMode(enabled: boolean): void {
     this._deepWorkMode = enabled;
+  }
+
+  /**
+   * Set resolved web_search domain policy for this task execution context.
+   */
+  setWebSearchDomainPolicy(policy: { allowedDomains?: string[]; blockedDomains?: string[] } | null): void {
+    this.searchTools.setDomainPolicy(policy);
   }
 
   /** Get scratchpad data for report generation and progress journaling */
@@ -475,6 +517,7 @@ export class ToolRegistry {
     this.grepTools.setWorkspace(workspace);
     this.editTools.setWorkspace(workspace);
     this.montyTools.setWorkspace(workspace);
+    this.textTools.setWorkspace(workspace);
     this.browserTools.setWorkspace(workspace);
     this.shellTools.setWorkspace(workspace);
     this.imageTools.setWorkspace(workspace);
@@ -578,6 +621,7 @@ export class ToolRegistry {
       ...GrepTools.getToolDefinitions(),
       ...EditTools.getToolDefinitions(),
       ...MontyTools.getToolDefinitions(),
+      ...TextTools.getToolDefinitions(),
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
     ];
@@ -818,6 +862,8 @@ export class ToolRegistry {
 
       return 0;
     });
+
+    this.validateToolSemanticsInvariant(filteredTools);
 
     return filteredTools;
   }
@@ -1066,6 +1112,11 @@ export class ToolRegistry {
 
     const googleWorkspaceEnabled =
       GmailTools.isEnabled() || GoogleCalendarTools.isEnabled() || GoogleDriveTools.isEnabled();
+    const notionEnabled = NotionTools.isEnabled();
+    const boxEnabled = BoxTools.isEnabled();
+    const oneDriveEnabled = OneDriveTools.isEnabled();
+    const dropboxEnabled = DropboxTools.isEnabled();
+    const sharepointEnabled = SharePointTools.isEnabled();
 
     let emailChannelStatus = "unknown";
     try {
@@ -1098,7 +1149,24 @@ export class ToolRegistry {
     let descriptions = `
 Integration Status:
 - Google Workspace integration (gmail_action/calendar_action/google_drive_action): ${googleWorkspaceEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > Google Workspace)"}
+- Notion integration (notion_action): ${notionEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > Notion)"}
+- Box integration (box_action): ${boxEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > Box)"}
+- OneDrive integration (onedrive_action): ${oneDriveEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > OneDrive)"}
+- Dropbox integration (dropbox_action): ${dropboxEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > Dropbox)"}
+- SharePoint integration (sharepoint_action): ${sharepointEnabled ? "ENABLED" : "DISABLED (enable in Settings > Integrations > SharePoint)"}
 - Email channel (IMAP/SMTP): ${emailChannelStatus}
+
+Cloud Storage Routing (CRITICAL):
+- If the user says "on/in/from Box/Dropbox/OneDrive/Google Drive/SharePoint/Notion", treat it as a cloud connector request, NOT a local workspace path.
+- Do NOT interpret provider names like "box" or "dropbox" as local directories.
+- For cloud file inventory/listing requests, prefer connector tools first:
+  - Box root list: box_action { action: "list_folder_items", folder_id: "0" }
+  - OneDrive root list: onedrive_action { action: "list_children" }
+  - Google Drive list: google_drive_action { action: "list_files" }
+  - Dropbox root list: dropbox_action { action: "list_folder", path: "" }
+  - SharePoint root list: sharepoint_action { action: "list_drive_items" } (requires configured drive/site)
+  - Notion content discovery: notion_action { action: "search" }
+- Use local file tools (list_directory/glob/read_file) only for the local workspace filesystem.
 
 File Operations:
 - read_file: Read contents of a file (supports plain text, DOCX, PDF, and PPTX; supports chunked reads via startChar/maxChars)
@@ -1114,9 +1182,12 @@ File Operations:
 
 Skills:
 - create_spreadsheet: Create Excel spreadsheets with data and formulas
+- generate_spreadsheet: Generate XLSX spreadsheets from structured sheets
 - create_document: Create Word/PDF (only when user explicitly requests DOCX or PDF — otherwise use write_file with .md)
+- generate_document: Generate PDF documents from markdown/sections
 - edit_document: Edit/append content to existing DOCX files
 - create_presentation: Create PowerPoint presentations
+- generate_presentation: Generate PPTX presentations from structured slides
 - organize_folder: Organize and structure files in folders
 - use_skill: Invoke a custom skill by ID to help accomplish tasks (see available skills below). Use explicit IDs for deterministic workflows ("Use the <skill id> skill."). If the skill writes files, use the "{artifactDir}" placeholder for deterministic workspace output.
 
@@ -1136,7 +1207,12 @@ Code Tools (PREFERRED for code navigation and editing):
   Use this FIRST for searching file contents - supports full regex.
 - edit_file: Surgical text replacement in files (old_string -> new_string)
   Use this INSTEAD of write_file for targeted changes - safer and preserves structure.
+- count_text: Exact text counting (characters/words/lines/paragraphs/sentences)
+  Use this FIRST for length checks and exact character targets.
+- text_metrics: Comprehensive text metrics and optional character-frequency breakdown
+  Use this for document validation workflows instead of custom scripts.
 - monty_run: Deterministic, sandboxed Python-subset compute for post-processing tool results.
+  Use monty_run only when count_text/text_metrics cannot express the computation.
 - monty_list_transforms / monty_run_transform: Run workspace-local transforms from .cowork/transforms/.
 - monty_transform_file: Apply a transform to a file and write output without returning full file contents to the LLM.
 - extract_json: Extract and parse JSON from messy text (prose + code fences).
@@ -1423,6 +1499,8 @@ ${skillDescriptions}`;
     if (name === "glob") return await this.globTools.glob(input);
     if (name === "grep") return await this.grepTools.grep(input);
     if (name === "edit_file") return await this.editTools.editFile(input);
+    if (name === "count_text") return await this.textTools.countText(input);
+    if (name === "text_metrics") return await this.textTools.textMetrics(input);
     if (name === "monty_run") return await this.montyTools.montyRun(input);
     if (name === "monty_list_transforms") return await this.montyTools.listTransforms(input);
     if (name === "monty_run_transform") return await this.montyTools.runTransform(input);
@@ -3267,6 +3345,11 @@ ${skillDescriptions}`;
               type: "number",
               description: "Maximum number of results (default: 10, max: 20)",
             },
+            maxUses: {
+              type: "number",
+              description:
+                "Optional per-call web_search usage cap. Executor clamps this against task/step policy limits.",
+            },
             provider: {
               type: "string",
               enum: configuredProviders.map((p) => p.type),
@@ -3536,9 +3619,23 @@ ${skillDescriptions}`;
               type: "number",
               description: "Max results (for search/list_folder_items)",
             },
+            maxResults: {
+              type: "number",
+              description:
+                "Alias for limit (kept for compatibility with older prompts/plans).",
+            },
             offset: {
               type: "number",
               description: "Offset for pagination (for search/list_folder_items)",
+            },
+            use_marker: {
+              type: "boolean",
+              description:
+                "Use marker-based pagination for list_folder_items (Box API usemarker=true).",
+            },
+            marker: {
+              type: "string",
+              description: "Marker token for marker-based pagination on list_folder_items.",
             },
             fields: {
               type: "string",
@@ -3584,6 +3681,11 @@ ${skillDescriptions}`;
             file_path: {
               type: "string",
               description: "Workspace-relative path to upload (for upload_file)",
+            },
+            include_raw: {
+              type: "boolean",
+              description:
+                "Include raw response text in tool result (debug only; disabled by default to reduce token usage).",
             },
           },
           required: ["action"],
