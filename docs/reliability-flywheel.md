@@ -15,6 +15,7 @@ This document describes the reliability system added to CoWork OS to turn produc
 - Phase 2 foundation: risk scoring and policy-driven tiered review gate.
 - Phase 3 foundation: prompt architecture modularization, deduped shared policy blocks, skill routing budgets.
 - Phase 4 foundation: nightly hardening workflow, PR-targeted eval gate, release hardening gate.
+- Reliability V2 hardening: balanced fail-closed completion for required contracts, split KPI tracking, and regression tags for contract/verification/dependency failures.
 
 ## Architecture
 
@@ -114,6 +115,12 @@ Modes:
 
 Both scripts use the `sqlite3` CLI (not `better-sqlite3`) and fail fast when the CLI is missing.
 
+Reliability V2 tags promoted into eval assertions/metadata:
+- `contract_unmet_write_required`
+- `missing_required_workspace_artifact`
+- `verification_required_fail`
+- `dependency_unavailable`
+
 ### Baseline Metrics
 
 Computed in `EvalService.getBaselineMetrics(...)`:
@@ -122,6 +129,10 @@ Computed in `EvalService.getBaselineMetrics(...)`:
 - `retriesPerTask`
 - `approvalDeadEndRate`
 - `verificationPassRate`
+- `agent_core_success_rate`
+- `dependency_availability_rate`
+- `verification_block_rate`
+- `artifact_contract_failure_rate`
 
 ## Prompt and Skill Reliability Hardening
 
