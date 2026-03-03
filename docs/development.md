@@ -41,11 +41,23 @@ Run the app with hot reload:
 npm run dev
 ```
 
+`npm run dev` checks **Settings → Appearance → Developer logging** (default: off).
+When enabled, logs are written to `logs/dev-YYYYMMDD-HHMMSS.log` and mirrored to
+`logs/dev-latest.log`, with an ISO date/time prefix on each log line.
+
+Force log capture regardless of Settings:
+
+```bash
+npm run dev:log
+```
+
 ## Available Commands
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start development server with hot reload |
+| `npm run dev` | Start development mode; log capture follows Settings toggle |
+| `npm run dev:log` | Start development mode and force timestamped logs to `logs/` |
+| `npm run dev:start` | Internal raw dev start command (used by wrappers) |
 | `npm run build` | Production build |
 | `npm run package` | Package desktop installers (`.dmg` on macOS, `.exe` on Windows) |
 | `npm run setup` | Set up native modules for Electron |
