@@ -71,6 +71,7 @@ import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
 import { CronService, setCronService, getCronStorePath } from "./cron";
+import { resolveTaskResultText } from "./cron/result-text";
 import {
   buildManagedScheduledWorkspacePath,
   createScheduledRunDirectory,
@@ -751,97 +752,11 @@ if (!gotTheLock) {
         },
         getTaskResultText: async (taskId) => {
           const task = taskRepo.findById(taskId);
-          const summary = typeof task?.resultSummary === "string" ? task.resultSummary.trim() : "";
-
-          // Always run the event scan — assistant_message events carry the
-          // full untruncated text, while resultSummary may have been capped.
-          // We return whichever source is longer.
-          // For agentic tasks, the last message may be a short "Done!" while the
-          // substantive content was emitted earlier. Pick the longest message that
-          // exceeds a minimum threshold; if none qualifies, fall back to the last
-          // non-trivial message.
           const events = taskEventRepo.findByTaskId(taskId);
-          let bestCandidate = "";
-          let lastCandidate = "";
-          const TRIVIAL_PHRASES = new Set([
-            "done.",
-            "done",
-            "task complete.",
-            "task complete",
-            "task completed.",
-            "task completed",
-            "task completed successfully.",
-            "task completed successfully",
-            "complete.",
-            "complete",
-            "completed.",
-            "completed",
-            "all set.",
-            "all set",
-            "finished.",
-            "finished",
-          ]);
-
-          // Use task_completed event's resultSummary only as a last resort —
-          // assistant_message events usually carry richer content.
-          let completionEventSummary = "";
-          // Track the best internal-only candidate separately so we can fall
-          // back to it when all user-facing messages were filtered out.
-          let bestInternalCandidate = "";
-
-          for (let i = events.length - 1; i >= 0; i--) {
-            const evt = events[i];
-            const payload = evt.payload || {};
-
-            // Collect resultSummary from task_completed as last-resort fallback
-            if (evt.type === "task_completed") {
-              const rs =
-                typeof payload.resultSummary === "string" ? payload.resultSummary.trim() : "";
-              if (rs && rs.length > completionEventSummary.length) {
-                completionEventSummary = rs;
-              }
-              continue;
-            }
-
-            if (evt.type !== "assistant_message") continue;
-            const text =
-              (typeof payload.message === "string" ? payload.message : "") ||
-              (typeof payload.content === "string" ? payload.content : "");
-            const trimmed = text.trim();
-            if (!trimmed) continue;
-
-            // Prefer user-facing content; track internal messages as a fallback
-            if (payload.internal === true) {
-              if (
-                trimmed.length > 50 &&
-                trimmed.length > bestInternalCandidate.length &&
-                !TRIVIAL_PHRASES.has(trimmed.toLowerCase())
-              ) {
-                bestInternalCandidate = trimmed;
-              }
-              continue;
-            }
-
-            // Track last non-trivial message as fallback
-            if (!lastCandidate && !TRIVIAL_PHRASES.has(trimmed.toLowerCase())) {
-              lastCandidate = trimmed;
-            }
-
-            // Track the longest substantive message (>50 chars = likely real content)
-            if (trimmed.length > 50 && trimmed.length > bestCandidate.length) {
-              bestCandidate = trimmed;
-            }
-          }
-
-          const eventResult =
-            bestCandidate || lastCandidate || bestInternalCandidate || completionEventSummary || "";
-
-          // Return whichever source produced more content — the persisted
-          // resultSummary may have been truncated while event text is full.
-          if (eventResult && eventResult.length > summary.length) {
-            return eventResult;
-          }
-          return summary || eventResult || undefined;
+          return resolveTaskResultText({
+            summary: task?.resultSummary,
+            events,
+          });
         },
         // Channel delivery handler - sends job results to messaging platforms
         deliverToChannel: async (params) => {
