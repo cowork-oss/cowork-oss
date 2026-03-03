@@ -4481,7 +4481,8 @@ a,
 .markdown-content a {
   color: var(--color-accent);
   text-decoration: none;
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .markdown-content a:hover {
@@ -4495,6 +4496,18 @@ a,
 }
 
 /* Markdown tables */
+.markdown-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.markdown-table-wrapper > table {
+  min-width: 100%;
+  width: max-content;
+}
+
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
@@ -4512,12 +4525,18 @@ a,
   font-weight: 600;
   color: var(--color-text);
   border-bottom: 2px solid var(--color-border);
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .markdown-content td {
   padding: 8px 12px;
   border-bottom: 1px solid var(--color-border-subtle);
   color: var(--color-text-secondary);
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .markdown-content tr:hover {
@@ -8373,6 +8392,10 @@ button {
   margin-bottom: 14px;
 }
 
+.insights-two-col.single {
+  grid-template-columns: 1fr;
+}
+
 /* ── Insights: Card (used in two-col and standalone) ── */
 .insights-card {
   background: var(--color-bg-secondary);
@@ -8440,6 +8463,48 @@ button {
 .insights-cost-split-value {
   color: var(--color-text-secondary);
   font-weight: 500;
+}
+
+.insights-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.insights-runtime-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 4px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.insights-runtime-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.insights-runtime-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.insights-runtime-note {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin: -2px 0 8px;
+}
+
+.insights-runtime-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin: 4px 0 4px;
 }
 
 .insights-model-list {
@@ -8636,6 +8701,10 @@ button {
   background: rgba(0, 0, 0, 0.03);
 }
 
+.theme-light .insights-runtime-metric {
+  background: rgba(0, 0, 0, 0.03);
+}
+
 .theme-light .insights-bar-track,
 .theme-light .insights-hero-rate-bar {
   background: rgba(0, 0, 0, 0.06);
@@ -8660,6 +8729,35 @@ button {
 .theme-light .insights-workspace-select {
   background: rgba(0, 0, 0, 0.02);
   border-color: rgba(0, 0, 0, 0.12);
+}
+
+@media (max-width: 980px) {
+  .insights-hero {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .insights-two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .insights-runtime-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .insights-header-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .insights-workspace-select {
+    max-width: 100%;
+  }
+
+  .insights-period-filter {
+    gap: 6px;
+  }
 }
 
 /* Onboarding section in Settings */
@@ -10617,6 +10715,32 @@ button {
 .task-status-banner-detail {
   font-size: 12px;
   color: var(--color-text-secondary);
+}
+
+.task-status-banner-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.task-status-banner-stop-btn {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.task-status-banner-stop-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.task-status-banner-stop-btn:active {
+  transform: translateY(1px);
 }
 
 .task-status-banner-blocked {
