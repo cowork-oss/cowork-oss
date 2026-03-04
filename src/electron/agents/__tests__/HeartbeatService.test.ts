@@ -412,6 +412,43 @@ describe("HeartbeatService", () => {
       expect(agent?.heartbeatStatus).toBe("sleeping");
       expect(agent?.lastHeartbeatAt).toBeDefined();
     });
+
+    it("respects proactive task frequencyMinutes and does not run every heartbeat", async () => {
+      createAgent("agent-1", {
+        heartbeatEnabled: true,
+        soul: JSON.stringify({
+          cognitiveOffload: {
+            proactiveTasks: [
+              {
+                id: "proactive-1",
+                name: "Inbox check",
+                description: "Check inbox for urgent updates",
+                category: "routine-automation",
+                promptTemplate: "Check inbox and summarize urgent items.",
+                frequencyMinutes: 60,
+                priority: 1,
+                enabled: true,
+              },
+            ],
+          },
+        }),
+      });
+
+      const first = await service.triggerHeartbeat("agent-1");
+      expect(first.status).toBe("work_done");
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0].prompt).toContain("## Proactive Tasks");
+
+      const second = await service.triggerHeartbeat("agent-1");
+      expect(second.status).toBe("ok");
+      expect(createdTasks).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+      const third = await service.triggerHeartbeat("agent-1");
+      expect(third.status).toBe("work_done");
+      expect(createdTasks).toHaveLength(2);
+    });
   });
 
   describe("cancelHeartbeat", () => {

@@ -15099,7 +15099,7 @@ TASK / CONVERSATION HISTORY:
             if (capabilityGapHintInjected) {
               continueLoop = true;
               stepFailed = false;
-              lastFailureReason = undefined;
+              lastFailureReason = "";
               continue;
             }
             console.log(
@@ -15114,7 +15114,7 @@ TASK / CONVERSATION HISTORY:
             if (capabilityGapHintInjected) {
               continueLoop = true;
               stepFailed = false;
-              lastFailureReason = undefined;
+              lastFailureReason = "";
               continue;
             }
             console.log(`${this.logTag} Hard tool failure detected - stopping iteration`);
@@ -18420,7 +18420,7 @@ TASK / CONVERSATION HISTORY:
             allowRecoveryHint: true,
           });
           const capabilityGapHintInjected = this.maybeInjectCapabilityGapSkillProposalHint({
-            stepId: step.id,
+            stepId: this.currentStepId || "follow_up",
             messages,
             toolResults,
             hasUnavailableToolAttempt,

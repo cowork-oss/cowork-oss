@@ -1023,6 +1023,16 @@ function normalizeMarkdownForDisplay(text: string): string {
   return normalizeSourcesSection(autolinkJsonPathPayloadLines(protectGlobTokens(text)));
 }
 
+function normalizeTimelineTitleMarkdownForDisplay(text: string): string {
+  // Timeline titles should stay compact inline text; escape ATX headings so
+  // shell comments like "# route check ..." are not rendered as <h1>.
+  return normalizeMarkdownForDisplay(text).replace(
+    /^( {0,3})(#{1,6})(?=\s)/gm,
+    (_match: string, indent: string, hashes: string) =>
+      `${indent}${hashes.replace(/#/g, "\\#")}`,
+  );
+}
+
 function cleanAssistantMessageForDisplay(message: string): string {
   return normalizeMarkdownForDisplay(
     String(message || "")
@@ -6263,7 +6273,7 @@ export function MainContent({
                             remarkPlugins={[remarkGfm]}
                             components={eventTitleMarkdownComponents}
                           >
-                            {normalizeMarkdownForDisplay(eventTitle)}
+                            {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
                           </ReactMarkdown>
                         ) : (
                           eventTitle

@@ -5378,6 +5378,14 @@ function broadcastPersonalitySettingsChanged(settings: Any): void {
  */
 function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
   const kitDirName = ".cowork";
+  const workspaceStateFileName = "workspace-state.json";
+  const workspaceStateVersion = 1;
+
+  type KitWorkspaceState = {
+    version: number;
+    bootstrapSeededAt?: number;
+    onboardingCompletedAt?: number;
+  };
 
   const getLocalDateStamp = (now: Date): string => {
     const yyyy = String(now.getFullYear());
@@ -5393,9 +5401,72 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     return ws.path;
   };
 
+  const resolveWorkspaceStatePath = (workspacePath: string): string =>
+    path.join(workspacePath, kitDirName, workspaceStateFileName);
+
+  const readWorkspaceState = async (workspacePath: string): Promise<KitWorkspaceState> => {
+    const statePath = resolveWorkspaceStatePath(workspacePath);
+    try {
+      const raw = await fs.readFile(statePath, "utf8");
+      const parsed = JSON.parse(raw) as Partial<KitWorkspaceState>;
+      return {
+        version: workspaceStateVersion,
+        bootstrapSeededAt:
+          typeof parsed.bootstrapSeededAt === "number" ? parsed.bootstrapSeededAt : undefined,
+        onboardingCompletedAt:
+          typeof parsed.onboardingCompletedAt === "number" ? parsed.onboardingCompletedAt : undefined,
+      };
+    } catch {
+      return {
+        version: workspaceStateVersion,
+      };
+    }
+  };
+
+  const writeWorkspaceState = async (
+    workspacePath: string,
+    state: KitWorkspaceState,
+  ): Promise<void> => {
+    const statePath = resolveWorkspaceStatePath(workspacePath);
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+  };
+
+  const syncBootstrapLifecycleState = async (
+    workspacePath: string,
+    state?: KitWorkspaceState,
+  ): Promise<{
+    state: KitWorkspaceState;
+    bootstrapPresent: boolean;
+  }> => {
+    const current = state || (await readWorkspaceState(workspacePath));
+    const bootstrapPath = path.join(workspacePath, kitDirName, "BOOTSTRAP.md");
+    const bootstrapPresent = fsSync.existsSync(bootstrapPath);
+    const next: KitWorkspaceState = { ...current, version: workspaceStateVersion };
+    let dirty = false;
+    const now = Date.now();
+
+    if (bootstrapPresent && !next.bootstrapSeededAt) {
+      next.bootstrapSeededAt = now;
+      dirty = true;
+    }
+
+    if (!bootstrapPresent && next.bootstrapSeededAt && !next.onboardingCompletedAt) {
+      next.onboardingCompletedAt = now;
+      dirty = true;
+    }
+
+    if (dirty) {
+      await writeWorkspaceState(workspacePath, next);
+    }
+
+    return { state: next, bootstrapPresent };
+  };
+
   const computeStatus = async (workspaceId: string): Promise<WorkspaceKitStatus> => {
     const workspacePath = getWorkspacePath(workspaceId);
     const kitRoot = path.join(workspacePath, kitDirName);
+    const lifecycle = await syncBootstrapLifecycleState(workspacePath);
 
     const required: string[] = [
       path.join(kitDirName, "AGENTS.md"),
@@ -5404,6 +5475,9 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       path.join(kitDirName, "SOUL.md"),
       path.join(kitDirName, "IDENTITY.md"),
       path.join(kitDirName, "TOOLS.md"),
+      path.join(kitDirName, "BOOTSTRAP.md"),
+      path.join(kitDirName, "VIBES.md"),
+      path.join(kitDirName, "LORE.md"),
       path.join(kitDirName, "HEARTBEAT.md"),
       path.join(kitDirName, "PRIORITIES.md"),
       path.join(kitDirName, "CROSS_SIGNALS.md"),
@@ -5442,7 +5516,18 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       }
     }
 
-    return { workspaceId, workspacePath, hasKitDir, files, missingCount };
+    return {
+      workspaceId,
+      workspacePath,
+      hasKitDir,
+      files,
+      missingCount,
+      onboarding: {
+        bootstrapSeededAt: lifecycle.state.bootstrapSeededAt,
+        onboardingCompletedAt: lifecycle.state.onboardingCompletedAt,
+        bootstrapPresent: lifecycle.bootstrapPresent,
+      },
+    };
   };
 
   const templatesForInit = (now: Date): Array<{ relPath: string; content: string }> => {
@@ -5515,6 +5600,44 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- Common commands:\n\n` +
           `## Secrets\n` +
           `- Store secrets in env vars; do not commit them\n`,
+      },
+      {
+        relPath: path.join(kitDirName, "VIBES.md"),
+        content:
+          `# Vibes\n\n` +
+          `Current energy and mode for this workspace. Updated by the agent based on cues.\n\n` +
+          `## Current\n` +
+          `<!-- cowork:auto:vibes:start -->\n` +
+          `- Mode: default\n` +
+          `- Energy: balanced\n` +
+          `- Notes: Ready to work\n` +
+          `<!-- cowork:auto:vibes:end -->\n\n` +
+          `## User Preferences\n` +
+          `- \n`,
+      },
+      {
+        relPath: path.join(kitDirName, "LORE.md"),
+        content:
+          `# Shared Lore\n\n` +
+          `This file is workspace-local and can be auto-updated by the system.\n` +
+          `It captures shared history between the human and the assistant.\n\n` +
+          `## Milestones\n` +
+          `<!-- cowork:auto:lore:start -->\n` +
+          `- (none)\n` +
+          `<!-- cowork:auto:lore:end -->\n\n` +
+          `## Notes\n` +
+          `- \n`,
+      },
+      {
+        relPath: path.join(kitDirName, "BOOTSTRAP.md"),
+        content:
+          `# First-Run Guide\n\n` +
+          `1. Fill in \`.cowork/USER.md\` (who you are, preferences).\n` +
+          `2. Fill in \`.cowork/IDENTITY.md\` and \`.cowork/SOUL.md\` (how the assistant should act).\n` +
+          `3. Add durable rules/constraints to \`.cowork/MEMORY.md\`.\n` +
+          `4. Add recurring checks to \`.cowork/HEARTBEAT.md\`.\n` +
+          `5. Review \`.cowork/VIBES.md\` and \`.cowork/LORE.md\` over time.\n\n` +
+          `When onboarding is complete, you can delete this file.\n`,
       },
       {
         relPath: path.join(kitDirName, "transforms", "README.md"),
@@ -5976,6 +6099,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     checkRateLimit(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
     const mode = request?.mode === "overwrite" ? "overwrite" : "missing";
     const workspacePath = getWorkspacePath(request.workspaceId);
+    const workspaceStateBefore = await readWorkspaceState(workspacePath);
 
     await ensureDir(workspacePath, path.join(kitDirName, "memory"));
     await ensureDir(workspacePath, path.join(kitDirName, "memory", "hourly"));
@@ -5991,8 +6115,19 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     const now = new Date();
     const templates = templatesForInit(now);
     for (const t of templates) {
+      const isBootstrapTemplate = t.relPath === path.join(kitDirName, "BOOTSTRAP.md");
+      if (
+        isBootstrapTemplate &&
+        mode === "missing" &&
+        workspaceStateBefore.onboardingCompletedAt &&
+        !fsSync.existsSync(path.join(workspacePath, t.relPath))
+      ) {
+        continue;
+      }
       await writeTemplate(workspacePath, t.relPath, t.content, mode);
     }
+
+    await syncBootstrapLifecycleState(workspacePath, workspaceStateBefore);
 
     // Best-effort: keep kit notes searchable for hybrid recall (does not affect kit init success).
     try {

@@ -77,6 +77,7 @@ export class HeartbeatService extends EventEmitter {
   private running: Map<string, boolean> = new Map();
   private wakeQueues: Map<string, HeartbeatWakeRequest[]> = new Map();
   private wakeDedupe: Map<string, HeartbeatWakeDedupe> = new Map();
+  private proactiveTaskLastRunAt: Map<string, number> = new Map();
   private wakeNowThrottleUntil: Map<string, number> = new Map();
   private wakeImmediateTimers: Map<string, NodeJS.Timeout> = new Map();
   private started = false;
@@ -123,6 +124,7 @@ export class HeartbeatService extends EventEmitter {
     this.running.clear();
     this.wakeQueues.clear();
     this.wakeDedupe.clear();
+    this.proactiveTaskLastRunAt.clear();
     this.wakeNowThrottleUntil.clear();
 
     for (const [, timer] of this.wakeImmediateTimers) {
@@ -218,6 +220,7 @@ export class HeartbeatService extends EventEmitter {
     }
     this.wakeQueues.delete(agentRoleId);
     this.wakeDedupe.delete(agentRoleId);
+    this.clearProactiveTaskRunState(agentRoleId);
     this.wakeNowThrottleUntil.delete(agentRoleId);
     this.clearImmediateWake(agentRoleId);
     this.running.delete(agentRoleId);
@@ -352,12 +355,14 @@ export class HeartbeatService extends EventEmitter {
         assignedTasks: workItems.assignedTasks.length,
         relevantActivities: workItems.relevantActivities.length,
       };
+      const proactiveTasks = this.extractProactiveTasks(agent);
 
       // If work is found, create a task or process it
       const hasWork =
         workItems.pendingMentions.length > 0 ||
         workItems.assignedTasks.length > 0 ||
-        wakeRequests.length > 0;
+        wakeRequests.length > 0 ||
+        proactiveTasks.length > 0;
 
       if (hasWork) {
         result.status = "work_done";
@@ -368,7 +373,13 @@ export class HeartbeatService extends EventEmitter {
           : this.deps.getDefaultWorkspacePath();
 
         // Build prompt for agent to handle the work
-        const prompt = this.buildHeartbeatPrompt(agent, workItems, wakeRequests, workspacePath);
+        const prompt = this.buildHeartbeatPrompt(
+          agent,
+          workItems,
+          wakeRequests,
+          proactiveTasks,
+          workspacePath,
+        );
         const workspaceId = selectedWorkspace?.workspaceId || this.deps.getDefaultWorkspaceId();
 
         if (workspaceId) {
@@ -733,6 +744,7 @@ export class HeartbeatService extends EventEmitter {
     agent: AgentRole,
     work: WorkItems,
     wakeRequests: HeartbeatWakeRequest[],
+    proactiveTasks: ProactiveTaskDefinition[],
     workspacePath?: string,
   ): string {
     const lines: string[] = [
@@ -777,7 +789,6 @@ export class HeartbeatService extends EventEmitter {
     }
 
     // Add proactive tasks from digital twin cognitive offload config
-    const proactiveTasks = this.extractProactiveTasks(agent);
     if (proactiveTasks.length > 0) {
       lines.push("## Proactive Tasks");
       lines.push(
@@ -822,14 +833,43 @@ export class HeartbeatService extends EventEmitter {
       const soulData = JSON.parse(agent.soul);
       const tasks = soulData?.cognitiveOffload?.proactiveTasks;
       if (!Array.isArray(tasks)) return [];
-      return tasks
+      const sortedTasks = tasks
         .filter((t: ProactiveTaskDefinition) => t.enabled && t.promptTemplate)
         .sort(
           (a: ProactiveTaskDefinition, b: ProactiveTaskDefinition) =>
             (a.priority ?? 99) - (b.priority ?? 99),
         );
+      const now = Date.now();
+      const dueTasks: ProactiveTaskDefinition[] = [];
+      for (const task of sortedTasks) {
+        const frequencyMinutes =
+          typeof task.frequencyMinutes === "number" && Number.isFinite(task.frequencyMinutes)
+            ? Math.max(1, Math.round(task.frequencyMinutes))
+            : 15;
+        const frequencyMs = frequencyMinutes * 60 * 1000;
+        const key = this.getProactiveTaskKey(agent.id, task.id);
+        const lastRunAt = this.proactiveTaskLastRunAt.get(key) || 0;
+        if (!lastRunAt || now - lastRunAt >= frequencyMs) {
+          dueTasks.push(task);
+          this.proactiveTaskLastRunAt.set(key, now);
+        }
+      }
+      return dueTasks;
     } catch {
       return [];
+    }
+  }
+
+  private getProactiveTaskKey(agentRoleId: string, taskId: string): string {
+    return `${agentRoleId}:${taskId}`;
+  }
+
+  private clearProactiveTaskRunState(agentRoleId: string): void {
+    const prefix = `${agentRoleId}:`;
+    for (const key of this.proactiveTaskLastRunAt.keys()) {
+      if (key.startsWith(prefix)) {
+        this.proactiveTaskLastRunAt.delete(key);
+      }
     }
   }
 

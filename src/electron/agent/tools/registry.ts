@@ -2749,6 +2749,15 @@ ${skillDescriptions}`;
         };
       }
 
+      if (createResult.proposal) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: `Created skill proposal '${createResult.proposal.id}'`,
+          proposalId: createResult.proposal.id,
+          requiredTools: createResult.proposal.requiredTools,
+          draftSkillId: createResult.proposal.draftSkill.id,
+        });
+      }
+
       return {
         success: true,
         action,
@@ -2795,6 +2804,19 @@ ${skillDescriptions}`;
           message:
             "Proposal requires tools that are not currently available in this runtime context.",
           missing_required_tools: missingRequiredTools,
+        };
+      }
+
+      const placeholderIssues = this.validateSkillPlaceholderIntegrity(
+        proposal.draftSkill.prompt,
+        proposal.draftSkill.parameters,
+      );
+      if (placeholderIssues.length > 0) {
+        return {
+          success: false,
+          action,
+          message: "Draft skill has placeholder validation errors.",
+          placeholder_issues: placeholderIssues,
         };
       }
 
@@ -2903,6 +2925,31 @@ ${skillDescriptions}`;
       action,
       message: `Unsupported skill_proposal action: ${action}`,
     };
+  }
+
+  private validateSkillPlaceholderIntegrity(prompt: string, parameters?: Any[]): string[] {
+    const text = String(prompt || "");
+    const placeholders = new Set<string>();
+    const placeholderPattern = /{{\s*([a-zA-Z0-9_]+)\s*}}/g;
+    for (const match of text.matchAll(placeholderPattern)) {
+      if (match[1]) placeholders.add(match[1].trim());
+    }
+
+    const parameterNames = new Set(
+      Array.isArray(parameters)
+        ? parameters
+            .map((param) => String(param?.name || "").trim())
+            .filter((name) => Boolean(name))
+        : [],
+    );
+
+    const issues: string[] = [];
+    for (const placeholder of placeholders) {
+      if (!parameterNames.has(placeholder)) {
+        issues.push(`Missing parameter definition for placeholder {{${placeholder}}}`);
+      }
+    }
+    return issues;
   }
 
   /**
@@ -5050,7 +5097,7 @@ ${skillDescriptions}`;
       success: dryRun ? true : effectiveReady,
       action,
       provider,
-      installed: Boolean(server) || dryRun,
+      installed: Boolean(server),
       configured: effectiveConfigured,
       connected: effectiveConnected,
       ready: effectiveReady,
