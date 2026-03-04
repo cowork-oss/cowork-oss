@@ -73,4 +73,18 @@ bounded_research=true
     const routed = IntentRouter.route("Dropbox listing", "what files are in my dropbox");
     expect(routed.intent).toBe("execution");
   });
+
+  it("routes SSH connectivity troubleshooting prompts to execution in operations domain", () => {
+    const prompt = [
+      "This is the azure VM private address but I cannot connect to it",
+      "mesut@host % ssh a_mozsoy@10.213.136.68",
+      "Connection closed by 10.213.136.68 port 22",
+      "Zscaler is open on my mac",
+    ].join("\n");
+
+    const routed = IntentRouter.route("SSH private VM issue", prompt);
+    expect(routed.intent).toBe("execution");
+    expect(routed.domain).toBe("operations");
+    expect(routed.signals).toContain("shell-troubleshooting");
+  });
 });

@@ -1796,8 +1796,14 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (_, id: string) => {
     const validated = validateInput(UUIDSchema, id, "task ID");
     // Resume daemon first - if it fails, exception propagates and status won't be updated
-    await agentDaemon.resumeTask(validated);
-    taskRepo.update(validated, { status: "executing" });
+    const resumed = await agentDaemon.resumeTask(validated);
+    if (resumed) {
+      taskRepo.update(validated, { status: "executing" });
+      return;
+    }
+    console.warn(
+      `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_CONTINUE, async (_, id: string) => {
@@ -1894,7 +1900,8 @@ export async function setupIpcHandlers(
   // Task events handler - get historical events from database
   // For collaborative root tasks, also include file events from child tasks.
   ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
-    const events = taskEventRepo.findByTaskId(taskId);
+    const maxEvents = 600;
+    const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
 
     // Include child task file events for collaborative/multi-LLM roots
     const task = taskRepo.findById(taskId);
@@ -1909,8 +1916,6 @@ export async function setupIpcHandlers(
         events.sort((a, b) => a.timestamp - b.timestamp);
       }
     }
-
-    const maxEvents = 600;
     return events.length > maxEvents ? events.slice(-maxEvents) : events;
   });
 

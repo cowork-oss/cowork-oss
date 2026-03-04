@@ -215,6 +215,95 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
     expect(String(reason || "")).toContain("missing_required_workspace_artifact");
   });
 
+  it("does not preflight-fail verification steps that reference remote absolute system paths", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.workspace = { path: process.cwd() };
+    const step = {
+      id: "s2-remote",
+      description:
+        "Check VM-side SSH service logs via Azure Run Command and inspect `/var/log/auth.log` and `/var/log/secure`.",
+      kind: "verification",
+      status: "pending",
+    };
+
+    const reason = (TaskExecutor as Any).prototype.getMissingWorkspaceArtifactPreflightReason.call(
+      fakeThis,
+      step,
+    );
+    expect(reason).toBeNull();
+  });
+
+  it("still preflight-fails absolute paths when they are inside the workspace root", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    const workspacePath = process.cwd();
+    fakeThis.workspace = { path: workspacePath };
+    const missingWorkspacePath = `${workspacePath}/tmp/nonexistent-verification-artifact.md`;
+    const step = {
+      id: "s2-workspace-abs",
+      description: `Verify and inspect ${missingWorkspacePath}.`,
+      kind: "verification",
+      status: "pending",
+    };
+
+    const reason = (TaskExecutor as Any).prototype.getMissingWorkspaceArtifactPreflightReason.call(
+      fakeThis,
+      step,
+    );
+    expect(String(reason || "")).toContain("missing_required_workspace_artifact");
+  });
+
+  it("auto-recovery heuristic includes missing workspace artifact failures", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.planRevisionCount = 0;
+    fakeThis.maxPlanRevisions = 5;
+    fakeThis.classifyRecoveryFailure = vi.fn(() => "local_runtime");
+    fakeThis.isRecoveryPlanStep = vi.fn(() => false);
+    const step = { id: "s-recovery-1", description: "Check VM-side logs", kind: "primary" };
+
+    const shouldRecover = (TaskExecutor as Any).prototype.shouldAutoPlanRecovery.call(
+      fakeThis,
+      step,
+      "missing_required_workspace_artifact: /var/log/auth.log, /var/log/secure",
+    );
+    expect(shouldRecover).toBe(true);
+  });
+
+  it("auto-recovery heuristic includes cross-step tool block failures", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.planRevisionCount = 0;
+    fakeThis.maxPlanRevisions = 5;
+    fakeThis.classifyRecoveryFailure = vi.fn(() => "local_runtime");
+    fakeThis.isRecoveryPlanStep = vi.fn(() => false);
+    const step = { id: "s-recovery-2", description: "Run SSH diagnostics", kind: "primary" };
+
+    const shouldRecover = (TaskExecutor as Any).prototype.shouldAutoPlanRecovery.call(
+      fakeThis,
+      step,
+      "Tool run_command has failed 6 times across previous steps",
+    );
+    expect(shouldRecover).toBe(true);
+  });
+
+  it("does not apply cross-step failure hard block to execution tools", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    const exemptRunCommand = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
+      fakeThis,
+      "run_command",
+    );
+    const exemptAppleScript = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
+      fakeThis,
+      "run_applescript",
+    );
+    const exemptWebSearch = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
+      fakeThis,
+      "web_search",
+    );
+
+    expect(exemptRunCommand).toBe(true);
+    expect(exemptAppleScript).toBe(true);
+    expect(exemptWebSearch).toBe(false);
+  });
+
   it("does not preflight-fail mixed verification plus write-note steps", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     fakeThis.workspace = { path: process.cwd() };

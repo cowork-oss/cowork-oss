@@ -3059,9 +3059,9 @@ a,
 
 /* Verbose on/off toggle switch */
 .verbose-switch {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: none;
   border: none;
   border-radius: 0;
@@ -3069,74 +3069,33 @@ a,
   padding: 0;
   margin: 0;
   min-width: 0;
-  font-weight: 400;
   line-height: 1;
   justify-content: flex-start;
   overflow: visible;
   cursor: pointer;
   user-select: none;
+  color: var(--text-secondary);
 }
 
-.verbose-switch:focus-visible .verbose-switch-track {
+.verbose-switch:focus-visible .goal-mode-switch-track {
   outline: 2px solid var(--accent-color);
   outline-offset: 2px;
 }
 
 .verbose-switch-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
-  transition: color 0.15s ease;
 }
 
 .verbose-switch:hover .verbose-switch-label {
   color: var(--text-primary);
 }
 
-.verbose-switch-track {
-  display: inline-block;
-  flex: 0 0 auto;
-  position: relative;
-  width: 32px;
-  height: 18px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 9px;
-  padding: 0;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.verbose-switch-track:hover {
-  border-color: var(--border-color-strong);
-}
-
-.verbose-switch-track.on {
-  background: var(--accent-color);
-  border-color: var(--accent-color);
-}
-
-.verbose-switch-track.on:hover {
-  background: var(--accent-color-hover);
-  border-color: var(--accent-color-hover);
-}
-
-.verbose-switch-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  background: var(--text-secondary);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.verbose-switch-track.on .verbose-switch-thumb {
-  left: 16px;
-  background: var(--bg-primary);
+.verbose-switch .goal-mode-toggle-switch-content {
+  width: auto;
+  justify-content: flex-start;
 }
 
 /* Verbose toggle button (code previews etc.) */
@@ -7458,44 +7417,32 @@ button {
 .shell-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 6px 10px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .shell-toggle:hover {
   background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
-  border-color: var(--color-border);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong, var(--color-border));
 }
 
 .shell-toggle.enabled {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.5);
-  color: var(--color-success);
+  color: var(--color-text-primary);
 }
 
 .shell-toggle.enabled:hover {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: rgba(34, 197, 94, 0.6);
-}
-
-/* Light mode adjustments for shell toggle */
-.theme-light .shell-toggle.enabled {
-  background: rgba(22, 163, 74, 0.1);
-  border-color: rgba(22, 163, 74, 0.4);
-  color: var(--color-text-secondary);
-}
-
-.theme-light .shell-toggle.enabled:hover {
-  background: rgba(22, 163, 74, 0.15);
-  border-color: rgba(22, 163, 74, 0.5);
+  color: var(--color-text-primary);
 }
 
 .shell-toggle svg {
@@ -7504,6 +7451,10 @@ button {
 
 .shell-toggle.enabled svg {
   opacity: 1;
+}
+
+.shell-toggle .goal-mode-switch-track {
+  margin-left: 2px;
 }
 
 /* Input below actions - for shell toggle in conversation view */
@@ -13168,6 +13119,62 @@ button {
   font-size: 12px;
 }
 
+.goal-mode-toggle.goal-mode-toggle-switch-row {
+  align-items: stretch;
+  gap: 0;
+}
+
+.goal-mode-toggle-switch-content {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.goal-mode-toggle-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.goal-mode-toggle-switch-row .goal-mode-hint {
+  line-height: 1.25;
+}
+
+.goal-mode-switch-track {
+  flex: 0 0 auto;
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.2));
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.goal-mode-switch-track.on {
+  background: var(--color-accent, #22d3ee);
+  border-color: var(--color-accent, #22d3ee);
+}
+
+.goal-mode-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-primary, #e5e7eb);
+  transition: left 0.18s ease;
+}
+
+.goal-mode-switch-track.on .goal-mode-switch-thumb {
+  left: 14px;
+}
+
 .goal-mode-options {
   margin-top: 12px;
   display: flex;
@@ -17163,6 +17170,7 @@ button {
   font-size: 13px;
   line-height: 1.55;
   color: var(--terminal-text);
+  background: transparent;
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -17374,7 +17382,7 @@ button {
 /* Light theme macOS Terminal-like palette */
 .theme-light .command-output-container {
   --terminal-bg: #eceef2;
-  --terminal-surface: #f5f6f9;
+  --terminal-surface: #eceef2;
   --terminal-header-top: #e3e5eb;
   --terminal-header-bottom: #d5d8e1;
   --terminal-border: #c2c7d2;
@@ -22079,8 +22087,8 @@ button {
   letter-spacing: 0;
 }
 
-.visual-oblivion .verbose-switch-track {
-  border-radius: var(--radius-md);
+.visual-oblivion .goal-mode-switch-track {
+  border-radius: 999px;
 }
 
 .visual-oblivion .event-title,
@@ -22472,6 +22480,9 @@ button {
 }
 .overflow-menu-item .goal-mode-toggle-switch-row .goal-mode-hint {
   line-height: 1.25;
+}
+.overflow-menu-item .shell-toggle .goal-mode-switch-track {
+  margin-left: auto;
 }
 .overflow-menu-item .goal-mode-switch-track {
   flex: 0 0 auto;
@@ -23037,7 +23048,7 @@ button {
   font-family: var(--font-ui);
   text-transform: none;
   letter-spacing: 0;
-  font-size: 11px;
+  font-size: 13px;
 }
 /* Hide talk mode button — advanced feature */
 .density-focused .talk-mode-btn {

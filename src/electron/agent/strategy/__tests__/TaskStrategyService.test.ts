@@ -106,6 +106,16 @@ describe("TaskStrategyService applyToAgentConfig", () => {
     expect(strategy.executionMode).toBe("execute");
   });
 
+  it("allows mixed intent to execute with shell troubleshooting signals", () => {
+    const route = makeRoute({
+      intent: "mixed",
+      signals: ["planning-language", "shell-troubleshooting", "terminal-transcript"],
+      domain: "operations",
+    });
+    const strategy = TaskStrategyService.derive(route);
+    expect(strategy.executionMode).toBe("execute");
+  });
+
   it("promotes mixed intent maxTurns to 60 with concrete execution signals", () => {
     const route = makeRoute({
       intent: "mixed",

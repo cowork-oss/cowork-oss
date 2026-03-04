@@ -676,10 +676,9 @@ export class DatabaseManager {
     // Initialize FTS5 for memory search (separate exec to handle if not supported)
     this.initializeMemoryFTS();
     this.initializeMarkdownMemoryFTS();
-    this.initializeKnowledgeGraphFTS();
-
     // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
+    this.initializeKnowledgeGraphFTS();
 
     // Seed default models if table is empty
     this.seedDefaultModels();
@@ -1748,6 +1747,15 @@ export class DatabaseManager {
   }
 
   private initializeKnowledgeGraphFTS() {
+    const hasKnowledgeGraphEntitiesTable = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kg_entities' LIMIT 1",
+      )
+      .get();
+    if (!hasKnowledgeGraphEntitiesTable) {
+      return;
+    }
+
     try {
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS kg_entities_fts USING fts5(

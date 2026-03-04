@@ -74,7 +74,7 @@ export class IntentRouter {
     if (codeSignal) return "code";
 
     const operationsSignal =
-      /\b(deploy|deployment|docker|kubernetes|k8s|terraform|infra|infrastructure|server|production|staging|cloud|monitoring|on-call|incident|sre|devops)\b/.test(
+      /\b(deploy|deployment|docker|kubernetes|k8s|terraform|infra|infrastructure|server|production|staging|cloud|monitoring|on-call|incident|sre|devops|vm|virtual machine|vnet|subnet|vpn|firewall|dns|ssh|private ip|zscaler)\b/.test(
         lower,
       );
     if (operationsSignal) return "operations";
@@ -150,7 +150,7 @@ export class IntentRouter {
       "execution",
       3,
       "action-verb",
-      /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement|check|read|review|find|analyze|examine|inspect|list|show|scan|look|update|modify|delete|remove|rename|move|copy|test|verify|continue|commit|push|pull|merge|raise|raised|cherry-?pick|rebase|revert|publish|release|tag|submit|approve|request|close|research|investigate|summarize|compare|generate|draft|prepare|export)\b/.test(
+      /\b(create|build|edit|write|fix|deploy|run|install|execute|open|search|fetch|schedule|configure|implement|check|read|review|find|analyze|examine|inspect|list|show|scan|look|update|modify|delete|remove|rename|move|copy|test|verify|continue|commit|push|pull|merge|raise|raised|cherry-?pick|rebase|revert|publish|release|tag|submit|approve|request|close|research|investigate|summarize|compare|generate|draft|prepare|export|troubleshoot|diagnose)\b/.test(
         lower,
       ),
     );
@@ -167,6 +167,27 @@ export class IntentRouter {
       2,
       "path-or-command",
       /`[^`]+`|\/[a-z0-9_./-]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower),
+    );
+    const shellCommandMentioned =
+      /\b(ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap|ifconfig|ipconfig|route)\b/.test(
+        lower,
+      );
+    const connectivityIssueMentioned =
+      /\b(can(?:not|'t)\s+connect|unable to connect|connection\s+(?:closed|refused|reset|timed?\s*out)|no route to host|network is unreachable|host unreachable|permission denied|port\s+\d+)\b/.test(
+        lower,
+      );
+    const terminalTranscriptMentioned = /(?:^|\n)\S+@\S+[^\n]*(?:[$%#])\s+/.test(text);
+    add(
+      "execution",
+      4,
+      "shell-troubleshooting",
+      shellCommandMentioned && connectivityIssueMentioned,
+    );
+    add(
+      "execution",
+      2,
+      "terminal-transcript",
+      terminalTranscriptMentioned && shellCommandMentioned,
     );
     add("advice", 1, "question-form", /\?/.test(text));
     add(
@@ -220,7 +241,7 @@ export class IntentRouter {
     const hasWorkflowConnectives = workflowConnectives.test(lower);
     const actionVerbMatches =
       lower.match(
-        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify|research|analyze|summarize|generate|send|email|present|export|schedule|review|compile|draft|prepare|deliver|share|upload|publish)\b/g,
+        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify|research|analyze|summarize|generate|send|email|present|export|schedule|review|compile|draft|prepare|deliver|share|upload|publish|troubleshoot|diagnose)\b/g,
       ) || [];
     const uniqueActionVerbs = new Set(actionVerbMatches).size;
 
@@ -249,7 +270,7 @@ export class IntentRouter {
     const wordCount = text.split(/\s+/).length;
     const actionVerbCount = (
       lower.match(
-        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify)\b/g,
+        /\b(create|build|edit|write|fix|deploy|run|install|execute|configure|implement|update|modify|delete|remove|test|verify|troubleshoot|diagnose)\b/g,
       ) || []
     ).length;
     const hasMultipleSteps =

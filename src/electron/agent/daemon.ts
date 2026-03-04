@@ -155,6 +155,12 @@ function getAllElectronWindows(): Any[] {
  * It coordinates between the database, task executors, and UI
  */
 export class AgentDaemon extends EventEmitter {
+  private static readonly RENDERER_SUPPRESSED_EVENT_TYPES = new Set([
+    "log",
+    "llm_usage",
+    "task_analysis",
+  ]);
+
   private taskRepo: TaskRepository;
   private eventRepo: TaskEventRepository;
   private workspaceRepo: WorkspaceRepository;
@@ -215,6 +221,8 @@ export class AgentDaemon extends EventEmitter {
   };
   private completionTelemetryBackfilledTaskIds: Set<string> = new Set();
   private readonly verificationOutcomeV2Enabled: boolean;
+  private static readonly TRANSIENT_RETRY_ERROR_REGEX =
+    /^Transient provider error\.\s*Retry\s+\d+\/\d+\s+in\s+\d+s\./i;
 
   constructor(private dbManager: DatabaseManager) {
     super();
@@ -265,6 +273,13 @@ export class AgentDaemon extends EventEmitter {
 
   getDatabase(): Database.Database {
     return this.dbManager.getDatabase();
+  }
+
+  private isTransientRetryErrorMessage(message: unknown): boolean {
+    return (
+      typeof message === "string" &&
+      AgentDaemon.TRANSIENT_RETRY_ERROR_REGEX.test(message.trim())
+    );
   }
 
   setTeamOrchestrator(orchestrator: AgentTeamOrchestrator | null): void {
@@ -552,6 +567,25 @@ export class AgentDaemon extends EventEmitter {
     for (const task of activeAndIncompleteTasks) {
       this.backfillTaskCompletionTelemetry(task.id);
       this.completionTelemetryBackfilledTaskIds.add(task.id);
+    }
+
+    // Recover stale retry tasks that were incorrectly persisted as executing.
+    // These should re-enter the queue on startup so retries can continue.
+    const staleTransientRetryTasks = this.taskRepo
+      .findByStatus("executing")
+      .filter((task) => this.isTransientRetryErrorMessage(task.error));
+    if (staleTransientRetryTasks.length > 0) {
+      console.warn(
+        `[AgentDaemon] Recovering ${staleTransientRetryTasks.length} stale transient-retry task(s) stuck in executing state`,
+      );
+      for (const task of staleTransientRetryTasks) {
+        this.taskRepo.update(task.id, { status: "queued" });
+        this.logEvent(task.id, "task_queued", {
+          reason: "transient_retry_recovered",
+          message:
+            "Recovered stale transient-retry state after restart. Task re-queued automatically.",
+        });
+      }
     }
 
     // Find queued tasks from database for queue recovery
@@ -1923,7 +1957,15 @@ export class AgentDaemon extends EventEmitter {
         this.retryCounts.delete(taskId);
         return;
       }
-      if (task.status !== "queued") return;
+      if (task.status === "executing" && this.isTransientRetryErrorMessage(task.error)) {
+        // Recover from stale status drift: this task was queued for retry but got
+        // flipped back to executing without an active executor.
+        this.taskRepo.update(taskId, { status: "queued" });
+      }
+
+      const refreshedTask = this.taskRepo.findById(taskId);
+      const taskToStart = refreshedTask || task;
+      if (taskToStart.status !== "queued") return;
       if (
         this.activeTasks.has(taskId) ||
         this.queueManager.isRunning(taskId) ||
@@ -1931,7 +1973,7 @@ export class AgentDaemon extends EventEmitter {
       ) {
         return;
       }
-      await this.startTask(task);
+      await this.startTask(taskToStart);
     }, delayMs);
 
     this.pendingRetries.set(taskId, handle);
@@ -2171,6 +2213,17 @@ export class AgentDaemon extends EventEmitter {
         : payload === undefined
           ? {}
           : ({ value: payload } as Record<string, unknown>);
+
+    // Drop internal metric telemetry from timeline persistence/rendering.
+    // These high-frequency events are not user-facing and can overwhelm UI/event stores.
+    if (
+      type === "log" &&
+      typeof payloadObj.metric === "string" &&
+      payloadObj.metric.trim().length > 0
+    ) {
+      return;
+    }
+
     this.normalizeArtifactEventPayload(taskId, type, payloadObj);
 
     // Streaming progress remains ephemeral, but we bridge it into the v2 timeline
@@ -3234,6 +3287,20 @@ export class AgentDaemon extends EventEmitter {
       actor: event.actor,
       legacyType: event.legacyType,
     };
+    const payloadObj =
+      event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+        ? (event.payload as Record<string, unknown>)
+        : null;
+    const payloadLegacyType =
+      payloadObj && typeof payloadObj.legacyType === "string" ? payloadObj.legacyType : "";
+    const effectiveType =
+      typeof event.legacyType === "string" && event.legacyType.trim().length > 0
+        ? event.legacyType.trim()
+        : typeof payloadLegacyType === "string" && payloadLegacyType.trim().length > 0
+          ? payloadLegacyType.trim()
+          : event.type;
+    const suppressRendererBroadcast =
+      AgentDaemon.RENDERER_SUPPRESSED_EVENT_TYPES.has(effectiveType);
 
     // Emit timeline event to local EventEmitter listeners.
     try {
@@ -3260,18 +3327,20 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Emit to renderer process via IPC
-    const windows = getAllElectronWindows();
-    windows.forEach((window) => {
-      // Check if window is still valid before sending
-      try {
-        if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
-          window.webContents.send(IPC_CHANNELS.TASK_EVENT, timelineEnvelope);
+    if (!suppressRendererBroadcast) {
+      const windows = getAllElectronWindows();
+      windows.forEach((window) => {
+        // Check if window is still valid before sending
+        try {
+          if (!window.isDestroyed() && window.webContents && !window.webContents.isDestroyed()) {
+            window.webContents.send(IPC_CHANNELS.TASK_EVENT, timelineEnvelope);
+          }
+        } catch (error) {
+          // Window might have been destroyed between check and send
+          console.error(`[AgentDaemon] Error sending IPC to window:`, error);
         }
-      } catch (error) {
-        // Window might have been destroyed between check and send
-        console.error(`[AgentDaemon] Error sending IPC to window:`, error);
-      }
-    });
+      });
+    }
   }
 
   private resolveLegacyTaskEventAlias(event: TaskEvent): {

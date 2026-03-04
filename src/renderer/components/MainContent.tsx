@@ -2008,8 +2008,9 @@ interface MainContentProps {
   uiDensity?: "focused" | "full" | "power";
 }
 
-// Track active command execution state
-interface ActiveCommand {
+// Track command execution sessions for timeline rendering
+interface CommandOutputSession {
+  id: string;
   command: string;
   output: string;
   isRunning: boolean;
@@ -2217,9 +2218,7 @@ export function MainContent({
 
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
-  // Active command execution state
-  const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
-  // Track dismissed command outputs by task ID (persisted in localStorage)
+  // Track dismissed command outputs by command session ID (persisted in localStorage)
   const [dismissedCommandOutputs, setDismissedCommandOutputs] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("dismissedCommandOutputs");
@@ -2815,18 +2814,118 @@ export function MainContent({
     childTasks,
   ]);
 
-  // Find the index where command output should be inserted (after the last event before command started)
-  const commandOutputInsertIndex = useMemo(() => {
-    if (!activeCommand || !activeCommand.startTimestamp) return -1;
-    // Find the last event that started before or at the same time as the command
-    for (let i = filteredEvents.length - 1; i >= 0; i--) {
-      if (filteredEvents[i].timestamp <= activeCommand.startTimestamp) {
-        return i;
+  // Build all command output sessions so previous command windows remain visible.
+  const commandOutputSessions = useMemo<CommandOutputSession[]>(() => {
+    const commandOutputEvents = events.filter(
+      (event) => getEffectiveTaskEventType(event) === "command_output",
+    );
+    if (commandOutputEvents.length === 0) return [];
+
+    const sessions: CommandOutputSession[] = [];
+    let currentSession: CommandOutputSession | null = null;
+    let syntheticIdCounter = 0;
+
+    const finalizeCurrentSession = () => {
+      if (!currentSession) return;
+      sessions.push(currentSession);
+      currentSession = null;
+    };
+
+    for (const event of commandOutputEvents) {
+      const payload =
+        event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+          ? (event.payload as Record<string, unknown>)
+          : {};
+      const payloadType = typeof payload.type === "string" ? payload.type : "";
+      const payloadCommand = typeof payload.command === "string" ? payload.command : "";
+      const payloadOutput = typeof payload.output === "string" ? payload.output : "";
+
+      if (payloadType === "start") {
+        // Previous session did not emit an end event; keep it visible in timeline.
+        finalizeCurrentSession();
+        currentSession = {
+          id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
+          command: payloadCommand,
+          output: payloadOutput,
+          isRunning: true,
+          exitCode: null,
+          startTimestamp: event.timestamp,
+        };
+        continue;
+      }
+
+      if (!currentSession) {
+        currentSession = {
+          id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
+          command: payloadCommand,
+          output: "",
+          isRunning: payloadType !== "end",
+          exitCode: null,
+          startTimestamp: event.timestamp,
+        };
+      } else if (!currentSession.command && payloadCommand) {
+        currentSession.command = payloadCommand;
+      }
+
+      if (
+        payloadType === "stdout" ||
+        payloadType === "stderr" ||
+        payloadType === "stdin" ||
+        payloadType === "error"
+      ) {
+        currentSession.output += payloadOutput;
+        continue;
+      }
+
+      if (payloadType === "end") {
+        currentSession.isRunning = false;
+        currentSession.exitCode = typeof payload.exitCode === "number" ? payload.exitCode : null;
+        finalizeCurrentSession();
       }
     }
-    // If no events before command, insert at beginning (index -1 means render before all events)
-    return -1;
-  }, [filteredEvents, activeCommand]);
+
+    if (currentSession) {
+      sessions.push(currentSession);
+    }
+
+    const maxUiOutputChars = 50 * 1024;
+    return sessions.map((session) => {
+      if (session.output.length <= maxUiOutputChars) return session;
+      return {
+        ...session,
+        output: "[... earlier output truncated ...]\n\n" + session.output.slice(-maxUiOutputChars),
+      };
+    });
+  }, [events]);
+
+  const visibleCommandOutputSessions = useMemo(
+    () =>
+      commandOutputSessions.filter(
+        (session) => session.isRunning || !dismissedCommandOutputs.has(session.id),
+      ),
+    [commandOutputSessions, dismissedCommandOutputs],
+  );
+
+  // Group command outputs by insertion point in the timeline.
+  const commandOutputSessionsByInsertIndex = useMemo(() => {
+    const grouped = new Map<number, CommandOutputSession[]>();
+    for (const session of visibleCommandOutputSessions) {
+      let insertIndex = -1;
+      for (let i = filteredEvents.length - 1; i >= 0; i--) {
+        if (filteredEvents[i].timestamp <= session.startTimestamp) {
+          insertIndex = i;
+          break;
+        }
+      }
+      const existing = grouped.get(insertIndex);
+      if (existing) {
+        existing.push(session);
+      } else {
+        grouped.set(insertIndex, [session]);
+      }
+    }
+    return grouped;
+  }, [filteredEvents, visibleCommandOutputSessions]);
 
   // Toggle verbose mode and persist to appearance settings
   const toggleVerboseSteps = () => {
@@ -3053,18 +3152,34 @@ export function MainContent({
     setCanvasSessions((prev) => prev.filter((s) => s.id !== sessionId));
   }, []);
 
-  // Handle dismissing command output for current task
-  const handleDismissCommandOutput = useCallback(() => {
-    if (!task?.id) return;
+  // Handle dismissing a specific command output window
+  const handleDismissCommandOutput = useCallback((commandOutputId: string) => {
     setDismissedCommandOutputs((prev) => {
       const updated = new Set(prev);
-      updated.add(task.id);
+      updated.add(commandOutputId);
       // Persist to localStorage
       localStorage.setItem("dismissedCommandOutputs", JSON.stringify([...updated]));
       return updated;
     });
-    setActiveCommand(null);
-  }, [task?.id]);
+  }, []);
+
+  const renderCommandOutputs = useCallback(
+    (sessions: CommandOutputSession[] | undefined) => {
+      if (!sessions || sessions.length === 0) return null;
+      return sessions.map((session) => (
+        <CommandOutput
+          key={session.id}
+          command={session.command}
+          output={session.output}
+          isRunning={session.isRunning}
+          exitCode={session.exitCode}
+          taskId={task?.id}
+          onClose={() => handleDismissCommandOutput(session.id)}
+        />
+      ));
+    },
+    [handleDismissCommandOutput, task?.id],
+  );
 
   // Filter skills based on search query
   const filteredSkills = useMemo(() => {
@@ -3518,88 +3633,6 @@ export function MainContent({
   useEffect(() => {
     setAutoScroll(true);
   }, [task?.id]);
-
-  // Process command_output events to track live command execution
-  useEffect(() => {
-    // Get the last command_output event
-    const commandOutputEvents = events.filter(
-      (event) => getEffectiveTaskEventType(event) === "command_output",
-    );
-    if (commandOutputEvents.length === 0) {
-      setActiveCommand(null);
-      return;
-    }
-
-    // Build the command state from events
-    let currentCommand: string | null = null;
-    let output = "";
-    let isRunning = false;
-    let exitCode: number | null = null;
-    let startTimestamp: number = 0;
-
-    for (const event of commandOutputEvents) {
-      const payload = event.payload;
-      if (payload.type === "start") {
-        // New command started
-        currentCommand = payload.command;
-        output = payload.output || "";
-        isRunning = true;
-        exitCode = null;
-        startTimestamp = event.timestamp;
-      } else if (
-        payload.type === "stdout" ||
-        payload.type === "stderr" ||
-        payload.type === "stdin"
-      ) {
-        // Append output (stdin shows what user typed)
-        output += payload.output || "";
-      } else if (payload.type === "end") {
-        // Command finished
-        isRunning = false;
-        exitCode = payload.exitCode;
-      } else if (payload.type === "error") {
-        // Error output
-        output += payload.output || "";
-      }
-    }
-
-    // Check if this task's command output was dismissed
-    const isDismissed = task?.id ? dismissedCommandOutputs.has(task.id) : false;
-
-    // If a new command is running, clear the dismissed state for this task
-    if (isRunning && task?.id && isDismissed) {
-      setDismissedCommandOutputs((prev) => {
-        const updated = new Set(prev);
-        updated.delete(task.id);
-        localStorage.setItem("dismissedCommandOutputs", JSON.stringify([...updated]));
-        return updated;
-      });
-    }
-
-    // Show command output if:
-    // 1. There's a command AND it's not dismissed, OR
-    // 2. Command is currently running (always show while running)
-    const shouldShowOutput = currentCommand && (isRunning || !isDismissed);
-
-    // Limit output size in UI to prevent performance issues (keep last 50KB)
-    const MAX_UI_OUTPUT = 50 * 1024;
-    let truncatedOutput = output;
-    if (output.length > MAX_UI_OUTPUT) {
-      truncatedOutput = "[... earlier output truncated ...]\n\n" + output.slice(-MAX_UI_OUTPUT);
-    }
-
-    if (shouldShowOutput) {
-      setActiveCommand({
-        command: currentCommand!,
-        output: truncatedOutput,
-        isRunning,
-        exitCode,
-        startTimestamp,
-      });
-    } else {
-      setActiveCommand(null);
-    }
-  }, [events, task?.id, task?.status, dismissedCommandOutputs]);
 
   const reportAttachmentError = (message: string) => {
     setAttachmentError(message);
@@ -4925,7 +4958,9 @@ export function MainContent({
                                   handleShellToggle();
                                   setShowOverflowMenu(false);
                                 }}
-                                role="menuitem"
+                                role="menuitemcheckbox"
+                                aria-checked={shellEnabled}
+                                aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
                                 data-overflow-menu-item
                               >
                                 <svg
@@ -4938,7 +4973,13 @@ export function MainContent({
                                 >
                                   <path d="M4 17l6-6-6-6M12 19h8" />
                                 </svg>
-                                <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
+                                <span>Shell</span>
+                                <span
+                                  className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
+                                  aria-hidden="true"
+                                >
+                                  <span className="goal-mode-switch-thumb" />
+                                </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
@@ -5326,7 +5367,9 @@ export function MainContent({
                                   handleShellToggle();
                                   setShowOverflowMenu(false);
                                 }}
-                                role="menuitem"
+                                role="menuitemcheckbox"
+                                aria-checked={shellEnabled}
+                                aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
                                 data-overflow-menu-item
                               >
                                 <svg
@@ -5339,7 +5382,13 @@ export function MainContent({
                                 >
                                   <path d="M4 17l6-6-6-6M12 19h8" />
                                 </svg>
-                                <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
+                                <span>Shell</span>
+                                <span
+                                  className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
+                                  aria-hidden="true"
+                                >
+                                  <span className="goal-mode-switch-thumb" />
+                                </span>
                               </button>
                             </div>
                             <div className="overflow-menu-item" role="none">
@@ -5910,18 +5959,24 @@ export function MainContent({
                     className="verbose-switch"
                     role="switch"
                     aria-checked={verboseSteps}
+                    aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       toggleVerboseSteps();
                     }}
-                    title={verboseSteps ? "Show important steps only" : "Show all steps (verbose)"}
+                    title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
                   >
-                    <span className="verbose-switch-label">
-                      {verboseSteps ? "Verbose" : "Summary"}
-                    </span>
-                    <span className={`verbose-switch-track ${verboseSteps ? "on" : ""}`}>
-                      <span className="verbose-switch-thumb" />
+                    <span className="goal-mode-toggle-switch-content">
+                      <span className="goal-mode-toggle-text">
+                        <span className="verbose-switch-label">Verbose</span>
+                      </span>
+                      <span
+                        className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
+                        aria-hidden="true"
+                      >
+                        <span className="goal-mode-switch-thumb" />
+                      </span>
                     </span>
                   </button>
                   <button
@@ -5967,17 +6022,8 @@ export function MainContent({
           {/* Conversation Flow - renders all events in order */}
           {events.length > 0 && (
             <div className="conversation-flow" ref={timelineRef}>
-              {/* Render CommandOutput at beginning if it should appear before all events */}
-              {activeCommand && commandOutputInsertIndex === -1 && (
-                <CommandOutput
-                  command={activeCommand.command}
-                  output={activeCommand.output}
-                  isRunning={activeCommand.isRunning}
-                  exitCode={activeCommand.exitCode}
-                  taskId={task?.id}
-                  onClose={handleDismissCommandOutput}
-                />
-              )}
+              {/* Render command outputs that started before any visible event */}
+              {renderCommandOutputs(commandOutputSessionsByInsertIndex.get(-1))}
               {timelineItems.map((item, timelineIndex) => {
                 if (item.kind === "canvas") {
                   return (
@@ -6008,9 +6054,9 @@ export function MainContent({
                 const effectiveType = getEffectiveTaskEventType(event);
                 const isUserMessage = effectiveType === "user_message";
                 const isAssistantMessage = effectiveType === "assistant_message";
-                // Check if CommandOutput should be rendered after this event
-                const shouldRenderCommandOutput =
-                  activeCommand && item.eventIndex === commandOutputInsertIndex;
+                const commandOutputsAfterEvent = commandOutputSessionsByInsertIndex.get(
+                  item.eventIndex,
+                );
 
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
@@ -6052,16 +6098,7 @@ export function MainContent({
                         </CollapsibleUserBubble>
                         <MessageCopyButton text={messageText} />
                       </div>
-                      {shouldRenderCommandOutput && (
-                        <CommandOutput
-                          command={activeCommand.command}
-                          output={activeCommand.output}
-                          isRunning={activeCommand.isRunning}
-                          exitCode={activeCommand.exitCode}
-                          taskId={task?.id}
-                          onClose={handleDismissCommandOutput}
-                        />
-                      )}
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
                     </Fragment>
                   );
                 }
@@ -6205,33 +6242,17 @@ export function MainContent({
                           </div>
                         )}
                       </div>
-                      {shouldRenderCommandOutput && (
-                        <CommandOutput
-                          command={activeCommand.command}
-                          output={activeCommand.output}
-                          isRunning={activeCommand.isRunning}
-                          exitCode={activeCommand.exitCode}
-                          taskId={task?.id}
-                          onClose={handleDismissCommandOutput}
-                        />
-                      )}
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
                     </Fragment>
                   );
                 }
 
                 if (!shouldRenderTimelineEventInStepFeed(event)) {
-                  // Even if we're not showing steps, we may still need to render CommandOutput here
-                  if (shouldRenderCommandOutput) {
+                  // Even if we're not showing steps, we may still need to render command output.
+                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
                     return (
                       <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        <CommandOutput
-                          command={activeCommand.command}
-                          output={activeCommand.output}
-                          isRunning={activeCommand.isRunning}
-                          exitCode={activeCommand.exitCode}
-                          taskId={task?.id}
-                          onClose={handleDismissCommandOutput}
-                        />
+                        {renderCommandOutputs(commandOutputsAfterEvent)}
                       </Fragment>
                     );
                   }
@@ -6290,16 +6311,7 @@ export function MainContent({
                           : undefined
                       }
                     />
-                    {shouldRenderCommandOutput && (
-                      <CommandOutput
-                        command={activeCommand.command}
-                        output={activeCommand.output}
-                        isRunning={activeCommand.isRunning}
-                        exitCode={activeCommand.exitCode}
-                        taskId={task?.id}
-                        onClose={handleDismissCommandOutput}
-                      />
-                    )}
+                    {renderCommandOutputs(commandOutputsAfterEvent)}
                   </Fragment>
                 );
               })}
@@ -6692,6 +6704,9 @@ export function MainContent({
             <button
               className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
               onClick={handleShellToggle}
+              role="switch"
+              aria-checked={shellEnabled}
+              aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
               title={
                 shellEnabled
                   ? "Shell commands enabled - click to disable"
@@ -6708,7 +6723,10 @@ export function MainContent({
               >
                 <path d="M4 17l6-6-6-6M12 19h8" />
               </svg>
-              <span>Shell {shellEnabled ? "ON" : "OFF"}</span>
+              <span>Shell</span>
+              <span className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`} aria-hidden="true">
+                <span className="goal-mode-switch-thumb" />
+              </span>
             </button>
             <span className="keyboard-hint">
               {isPreparingMessage ? (

@@ -62,7 +62,7 @@ export const CANONICAL_ARTIFACT_PATH_REGEX = new RegExp(
 );
 
 const COMMAND_PREFIX_REGEX =
-  /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php)\b/i;
+  /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php|ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap)\b/i;
 const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
 

@@ -739,6 +739,15 @@ export class TaskRepository {
 }
 
 export class TaskEventRepository {
+  private static readonly RENDERER_NOISE_EVENT_TYPES = [
+    "log",
+    "llm_usage",
+    "llm_streaming",
+    "progress_update",
+    "task_analysis",
+    "executing",
+  ] as const;
+
   constructor(private db: Database.Database) {}
 
   create(event: Omit<TaskEvent, "id"> & { id?: string }): TaskEvent {
@@ -807,6 +816,52 @@ export class TaskEventRepository {
       ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC
     `);
     const rows = stmt.all(taskId) as Any[];
+    return this.mapRowsToEvents(rows).events;
+  }
+
+  findRecentByTaskId(taskId: string, maxEvents: number): TaskEvent[] {
+    const safeLimit =
+      typeof maxEvents === "number" && Number.isFinite(maxEvents) && maxEvents > 0
+        ? Math.floor(maxEvents)
+        : 0;
+    if (!taskId || safeLimit <= 0) return [];
+
+    const noiseTypes = TaskEventRepository.RENDERER_NOISE_EVENT_TYPES;
+    const noisePlaceholders = noiseTypes.map(() => "?").join(", ");
+
+    const structuralRowsStmt = this.db.prepare(`
+      SELECT * FROM task_events
+      WHERE task_id = ?
+        AND COALESCE(legacy_type, type) NOT IN (${noisePlaceholders})
+      ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC
+      LIMIT ?
+    `);
+
+    const structuralRows = structuralRowsStmt.all(taskId, ...noiseTypes, safeLimit) as Any[];
+    let rows = structuralRows;
+
+    if (structuralRows.length < safeLimit) {
+      const noiseBudget = safeLimit - structuralRows.length;
+      const noiseRowsStmt = this.db.prepare(`
+        SELECT * FROM task_events
+        WHERE task_id = ?
+          AND COALESCE(legacy_type, type) IN (${noisePlaceholders})
+        ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC
+        LIMIT ?
+      `);
+      const noiseRows = noiseRowsStmt.all(taskId, ...noiseTypes, noiseBudget) as Any[];
+      rows = [...structuralRows, ...noiseRows];
+    }
+
+    rows.sort((a, b) => {
+      const aOrder =
+        typeof a.seq === "number" && Number.isFinite(a.seq) ? a.seq : Number(a.timestamp) || 0;
+      const bOrder =
+        typeof b.seq === "number" && Number.isFinite(b.seq) ? b.seq : Number(b.timestamp) || 0;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0);
+    });
+
     return this.mapRowsToEvents(rows).events;
   }
 

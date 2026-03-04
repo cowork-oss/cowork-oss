@@ -231,6 +231,8 @@ export class TaskStrategyService {
         "needs-tool-inspection",
         "cloud-storage-file-access",
         "cloud-storage-query",
+        "shell-troubleshooting",
+        "terminal-transcript",
       ].includes(signal),
     );
 
@@ -289,6 +291,8 @@ export class TaskStrategyService {
       route.intent === "mixed" &&
       (route.signals.includes("path-or-command") ||
         route.signals.includes("needs-tool-inspection") ||
+        route.signals.includes("shell-troubleshooting") ||
+        route.signals.includes("terminal-transcript") ||
         executionVerbCount >= 3);
     const mixedMaxTurns =
       route.intent !== "mixed"

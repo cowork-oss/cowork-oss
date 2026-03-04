@@ -7044,12 +7044,32 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     const executionVerb =
-      /\b(?:run|execute|install|build|deploy|create|mint|airdrop|launch|start|set\s*up|setup)\b/.test(
+      /\b(?:run|execute|install|build|deploy|create|mint|airdrop|launch|start|set\s*up|setup|troubleshoot|diagnose|debug)\b/.test(
         lower,
       );
     const executionTarget =
-      /\b(?:command|commands|cli|terminal|script|solana|devnet|npm|pnpm|yarn)\b/.test(lower);
-    return executionVerb && executionTarget;
+      /\b(?:command|commands|cli|terminal|script|solana|devnet|npm|pnpm|yarn|ssh|ping|nc|netcat|traceroute|mtr)\b/.test(
+        lower,
+      );
+    const shellDiagnosticCommandMentioned =
+      /\b(?:ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap|ifconfig|ipconfig|route)\b/.test(
+        lower,
+      );
+    const commandSnippetMentioned = /`[^`]+`/.test(message) || isLikelyCommandSnippet(message);
+    const troubleshootingCue =
+      /\b(?:troubleshoot|diagnos(?:e|is)|debug|issue|problem|cannot|can't|unable|failed|failing|error|connection|timeout|timed out|refused|closed|unreachable|no route to host|permission denied)\b/.test(
+        lower,
+      );
+    const commandOutputCue =
+      /\b(?:connection closed by|connection refused|permission denied|no route to host|network is unreachable|operation timed out|port\s+\d+)\b/.test(
+        lower,
+      );
+
+    return (
+      (executionVerb && executionTarget) ||
+      ((shellDiagnosticCommandMentioned || commandSnippetMentioned) &&
+        (troubleshootingCue || commandOutputCue))
+    );
   }
 
   private followUpRequiresCanvasAction(message: string): boolean {
@@ -7095,6 +7115,11 @@ You are continuing a previous conversation. The context from the previous conver
 
   private isExecutionTool(toolName: string): boolean {
     return toolName === "run_command" || toolName === "run_applescript";
+  }
+
+  private isCrossStepFailureBlockExemptTool(toolName: string): boolean {
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    return canonicalToolName === "run_command" || canonicalToolName === "run_applescript";
   }
 
   private classifyShellPermissionDecision(
@@ -7341,6 +7366,9 @@ You are continuing a previous conversation. The context from the previous conver
       lower.includes("all required tools are unavailable or failed") ||
       lower.includes("one or more tools failed without recovery") ||
       lower.includes("run_command failed") ||
+      lower.includes("tool blocked: failed") ||
+      /tool\s+\S+\s+has failed\s+\d+\s+times across previous steps/.test(lower) ||
+      lower.includes("missing_required_workspace_artifact") ||
       lower.includes("cannot complete this task") ||
       lower.includes("without a workaround") ||
       lower.includes("limitation statement") ||
@@ -9551,15 +9579,31 @@ You are continuing a previous conversation. The context from the previous conver
     return verificationCue && !this.isScaffoldCreateStep(step);
   }
 
+  private shouldEnforceWorkspaceArtifactPreflightForCandidate(candidate: string): boolean {
+    const value = String(candidate || "").trim();
+    if (!value) return false;
+    if (!path.isAbsolute(value)) return true;
+    try {
+      const workspaceRoot = path.resolve(this.workspace.path);
+      const resolved = path.resolve(value);
+      return resolved === workspaceRoot || resolved.startsWith(`${workspaceRoot}${path.sep}`);
+    } catch {
+      return false;
+    }
+  }
+
   private getMissingWorkspaceArtifactPreflightReason(step: PlanStep): string | null {
     if (!this.isVerificationOnlyPathStep(step)) return null;
     const candidates = this.extractStepPathCandidates(step);
     if (candidates.length === 0) return null;
 
     const missing = candidates.filter((candidate) => {
-      const resolved = path.isAbsolute(candidate)
-        ? candidate
-        : path.resolve(this.workspace.path, candidate);
+      const value = String(candidate || "").trim();
+      if (!value) return false;
+      if (!this.shouldEnforceWorkspaceArtifactPreflightForCandidate(value)) {
+        return false;
+      }
+      const resolved = path.isAbsolute(value) ? value : path.resolve(this.workspace.path, value);
       try {
         return !fs.existsSync(resolved);
       } catch {
@@ -9812,14 +9856,6 @@ You are continuing a previous conversation. The context from the previous conver
     if (this.toolSemanticsV2Enabled) {
       const normalized = normalizeToolNameFromSemantics(name);
       const normalizedName = normalized.stripped;
-      if (normalized.modified) {
-        this.emitEvent("log", {
-          metric: "tool_name_normalized",
-          original_tool_name: normalized.original,
-          normalized_tool_name: normalizedName,
-          canonical_tool_name: normalized.canonicalName,
-        });
-      }
       return {
         name: normalizedName,
         modified: normalizedName !== normalized.original,
@@ -12861,7 +12897,8 @@ WEB RESEARCH & TOOL SELECTION (CRITICAL):
 - For reading SPECIFIC URLs: USE web_fetch - lightweight, doesn't require browser.
 - For INTERACTIVE pages or JavaScript content: USE browser_navigate + browser_get_content.
 - For SCREENSHOTS: USE browser_navigate + browser_screenshot.
-- NEVER use run_command with curl, wget, or other network commands.
+- NEVER use run_command with curl or wget for general web research when web_search/web_fetch/browser tools can do the job.
+- Network diagnostics for troubleshooting (for example: ping, nc, ssh, traceroute) are allowed when relevant.
 
 TOOL PRIORITY FOR RESEARCH:
 1. web_search - PREFERRED for most research tasks (news, trends, finding information)
@@ -13049,6 +13086,9 @@ TASK / CONVERSATION HISTORY:
       // Cross-step tool failure guidance: warn the agent upfront about persistently failing tools
       const crossStepWarnings: string[] = [];
       for (const [toolName, failCount] of this.crossStepToolFailures) {
+        if (this.isCrossStepFailureBlockExemptTool(toolName)) {
+          continue;
+        }
         if (failCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
           crossStepWarnings.push(
             `"${toolName}" has failed ${failCount} times across previous steps and will not work.`,
@@ -14011,7 +14051,9 @@ TASK / CONVERSATION HISTORY:
             {
               const crossStepToolName = canonicalizeToolNameUtil(content.name);
               const crossStepCount = this.crossStepToolFailures.get(crossStepToolName) || 0;
-              if (crossStepCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
+              const crossStepBlockExempt =
+                this.isCrossStepFailureBlockExemptTool(crossStepToolName);
+              if (!crossStepBlockExempt && crossStepCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
                 console.log(
                   `${this.logTag} Tool "${content.name}" blocked by cross-step failure threshold (${crossStepCount} failures across steps)`,
                 );
@@ -17032,7 +17074,8 @@ WEB ACCESS & CONTENT EXTRACTION (CRITICAL):
 - For EACH page you visit: navigate -> browser_get_content -> process the result. Then move to next page.
 - If browser_get_content returns insufficient info, use browser_screenshot to see the visual layout.
 - If browser tools are unavailable, use web_search as an alternative.
-- NEVER use run_command with curl, wget, or other network commands.
+- NEVER use run_command with curl or wget for general web research when web_search/web_fetch/browser tools can do the job.
+- Network diagnostics for troubleshooting (for example: ping, nc, ssh, traceroute) are allowed when relevant.
 
 MULTI-PAGE RESEARCH PATTERN:
 - When researching from multiple sources, process each source COMPLETELY before moving to the next:
@@ -17747,7 +17790,9 @@ TASK / CONVERSATION HISTORY:
             // Check if this tool has failed too many times across steps
             {
               const crossStepCount = this.crossStepToolFailures.get(canonicalContentName) || 0;
-              if (crossStepCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
+              const crossStepBlockExempt =
+                this.isCrossStepFailureBlockExemptTool(canonicalContentName);
+              if (!crossStepBlockExempt && crossStepCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
                 console.log(
                   `${this.logTag} Tool "${content.name}" blocked by cross-step failure threshold (${crossStepCount} failures across steps)`,
                 );

@@ -60,10 +60,42 @@ type AppView = "main" | "settings" | "browser";
 const MAX_RENDERER_TASK_EVENTS = 600;
 const APPROVAL_TOAST_PREFIX = "approval-request-";
 const APPROVAL_WARNING_TOAST_ID = "approval-auto-approve-warning";
+const RENDERER_NOISE_EVENT_TYPES = new Set([
+  "log",
+  "llm_usage",
+  "llm_streaming",
+  "progress_update",
+  "task_analysis",
+  "executing",
+]);
+const RENDERER_DROPPED_EVENT_TYPES = new Set(["log", "llm_usage", "task_analysis"]);
+const RENDERER_THROTTLED_EVENT_TYPES = new Set(["progress_update", "executing", "llm_streaming"]);
+const RENDERER_NOISE_THROTTLE_MS = 250;
+
+function isRendererNoiseEvent(event: TaskEvent): boolean {
+  return RENDERER_NOISE_EVENT_TYPES.has(getEffectiveTaskEventType(event));
+}
 
 function capTaskEvents(events: TaskEvent[]): TaskEvent[] {
   if (events.length <= MAX_RENDERER_TASK_EVENTS) return events;
-  return events.slice(-MAX_RENDERER_TASK_EVENTS);
+
+  const indexed = events.map((event, index) => ({ event, index }));
+  const structural = indexed.filter(({ event }) => !isRendererNoiseEvent(event));
+
+  if (structural.length >= MAX_RENDERER_TASK_EVENTS) {
+    return structural.slice(-MAX_RENDERER_TASK_EVENTS).map(({ event }) => event);
+  }
+
+  const noiseBudget = MAX_RENDERER_TASK_EVENTS - structural.length;
+  const recentNoise = indexed
+    .filter(({ event }) => isRendererNoiseEvent(event))
+    .slice(-noiseBudget);
+  const keepIndexes = new Set<number>([
+    ...structural.map(({ index }) => index),
+    ...recentNoise.map(({ index }) => index),
+  ]);
+
+  return indexed.filter(({ index }) => keepIndexes.has(index)).map(({ event }) => event);
 }
 
 function getApprovalToastId(approvalId: string): string {
@@ -159,6 +191,7 @@ export function App() {
   const currentViewRef = useRef<AppView>("main");
   const rightSidebarCollapsedRef = useRef(false);
   const currentWorkspaceRef = useRef<Workspace | null>(null);
+  const noiseEventThrottleRef = useRef<Map<string, number>>(new Map());
 
   // Disclaimer state (null = loading)
   const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
@@ -688,6 +721,10 @@ export function App() {
   }, [selectedTaskId]);
 
   useEffect(() => {
+    noiseEventThrottleRef.current.clear();
+  }, [selectedTaskId]);
+
+  useEffect(() => {
     currentViewRef.current = currentView;
   }, [currentView]);
 
@@ -1021,6 +1058,19 @@ export function App() {
         })();
 
       if (isSelectedTask || isChildFileEvent) {
+        if (RENDERER_DROPPED_EVENT_TYPES.has(event.type)) {
+          return;
+        }
+        if (RENDERER_THROTTLED_EVENT_TYPES.has(event.type)) {
+          const throttleKey = `${event.taskId}:${event.type}`;
+          const now = Date.now();
+          const previous = noiseEventThrottleRef.current.get(throttleKey) ?? 0;
+          if (now - previous < RENDERER_NOISE_THROTTLE_MS) {
+            return;
+          }
+          noiseEventThrottleRef.current.set(throttleKey, now);
+        }
+
         if (event.type === "llm_streaming") {
           // Replace the previous streaming event to avoid array bloat
           setEvents((prev) => {
