@@ -21,6 +21,12 @@ describe("TASK_EVENT_STATUS_MAP", () => {
     expect(TASK_EVENT_STATUS_MAP.approval_denied).toBe("failed");
   });
 
+  it("tracks structured input-request lifecycle semantics", () => {
+    expect(TASK_EVENT_STATUS_MAP.input_request_created).toBe("paused");
+    expect(TASK_EVENT_STATUS_MAP.input_request_resolved).toBe("executing");
+    expect(TASK_EVENT_STATUS_MAP.input_request_dismissed).toBe("paused");
+  });
+
   it("does not force terminal failure on intermediate execution failures", () => {
     expect(TASK_EVENT_STATUS_MAP.step_failed).toBeUndefined();
     expect(TASK_EVENT_STATUS_MAP.verification_failed).toBeUndefined();
