@@ -87,4 +87,19 @@ bounded_research=true
     expect(routed.domain).toBe("operations");
     expect(routed.signals).toContain("shell-troubleshooting");
   });
+
+  it("routes interactive website build prompts to execution instead of advice", () => {
+    const prompt =
+      'Make an interactive website that scrolls horizontally with a timeline and include a "what if" toggle.';
+    const routed = IntentRouter.route("Build site", prompt);
+    expect(routed.intent).toBe("execution");
+  });
+
+  it("does not let feature-language 'what if' force thinking intent", () => {
+    const prompt =
+      'Build CoworkOS distro and start implementation; include a "what if" mode in the installer wizard.';
+    const routed = IntentRouter.route("CoworkOS", prompt);
+    expect(routed.intent).not.toBe("thinking");
+    expect(routed.intent).not.toBe("advice");
+  });
 });
