@@ -19,6 +19,7 @@ import {
   StepFeedbackAction,
   ExecutionMode,
   TaskDomain,
+  InputRequest,
 } from "../../shared/types";
 import { parseLeadingSkillSlashCommand } from "../../shared/skill-slash-commands";
 import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
@@ -245,6 +246,8 @@ import { InlineImagePreview } from "./InlineImagePreview";
 import { InlineSpreadsheetPreview } from "./InlineSpreadsheetPreview";
 import { InlineDocumentPreview } from "./InlineDocumentPreview";
 import { StepFeed } from "./timeline/StepFeed";
+import { ParallelGroupFeed } from "./timeline/ParallelGroupFeed";
+import { buildParallelGroupProjection } from "./timeline/parallel-group-projection";
 import {
   resolveTimelineIndicator,
   shouldShowTimelineBranchStub,
@@ -1564,6 +1567,281 @@ function ClickableFilePath({
   );
 }
 
+type InputRequestAnswers = Record<string, { optionLabel?: string; otherText?: string }>;
+
+interface StructuredInputPromptCardProps {
+  request: InputRequest;
+  onSubmit: (answers: InputRequestAnswers) => void;
+  onDismiss: () => void;
+}
+
+function StructuredInputPromptCard({ request, onSubmit, onDismiss }: StructuredInputPromptCardProps) {
+  const questions = Array.isArray(request.questions) ? request.questions : [];
+  const [selectedOptionByQuestion, setSelectedOptionByQuestion] = useState<Record<string, number>>({});
+  const [otherTextByQuestion, setOtherTextByQuestion] = useState<Record<string, string>>({});
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+
+  useEffect(() => {
+    const nextSelected: Record<string, number> = {};
+    for (const question of questions) {
+      if (typeof question?.id === "string" && question.id.trim()) {
+        nextSelected[question.id] = 0;
+      }
+    }
+    setSelectedOptionByQuestion(nextSelected);
+    setOtherTextByQuestion({});
+    setActiveQuestionIndex(0);
+  }, [request.id, questions]);
+
+  const updateSelection = useCallback(
+    (questionId: string, nextIndex: number) => {
+      setSelectedOptionByQuestion((prev) => ({
+        ...prev,
+        [questionId]: Math.max(0, nextIndex),
+      }));
+    },
+    [],
+  );
+
+  const isQuestionAnswered = useCallback(
+    (question: InputRequest["questions"][number]) => {
+      if (!question || typeof question?.id !== "string") return false;
+      const selected = selectedOptionByQuestion[question.id];
+      if (typeof selected !== "number") return false;
+      const options = Array.isArray(question.options) ? question.options : [];
+      const isOther = selected === options.length;
+      if (!isOther) return true;
+      return (otherTextByQuestion[question.id] || "").trim().length > 0;
+    },
+    [otherTextByQuestion, selectedOptionByQuestion],
+  );
+
+  const activeQuestion = useMemo(() => {
+    if (!questions.length) return null;
+    const safeIndex = Math.max(0, Math.min(questions.length - 1, activeQuestionIndex));
+    return questions[safeIndex] ?? null;
+  }, [activeQuestionIndex, questions]);
+
+  const activeOptions = useMemo(
+    () => (activeQuestion && Array.isArray(activeQuestion.options) ? activeQuestion.options : []),
+    [activeQuestion],
+  );
+  const activeSelected =
+    activeQuestion && typeof selectedOptionByQuestion[activeQuestion.id] === "number"
+      ? selectedOptionByQuestion[activeQuestion.id]
+      : 0;
+  const activeOtherSelected = activeSelected === activeOptions.length;
+
+  const getActiveOptionCount = useCallback(() => activeOptions.length + 1, [activeOptions.length]);
+
+  const goToNextQuestion = useCallback(() => {
+    setActiveQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1));
+  }, [questions.length]);
+
+  const goToPreviousQuestion = useCallback(() => {
+    setActiveQuestionIndex((prev) => Math.max(0, prev - 1));
+  }, []);
+
+  const currentQuestionAnswered = useMemo(
+    () => (activeQuestion ? isQuestionAnswered(activeQuestion) : false),
+    [activeQuestion, isQuestionAnswered],
+  );
+
+  const canSubmit = useMemo(
+    () => questions.length > 0 && questions.every((question) => isQuestionAnswered(question)),
+    [isQuestionAnswered, questions],
+  );
+
+  const buildAnswers = useCallback((): InputRequestAnswers => {
+    const answers: InputRequestAnswers = {};
+    for (const question of questions) {
+      const selected = selectedOptionByQuestion[question.id];
+      if (typeof selected !== "number") continue;
+      if (selected < question.options.length) {
+        answers[question.id] = {
+          optionLabel: question.options[selected]?.label,
+        };
+      } else {
+        answers[question.id] = {
+          otherText: (otherTextByQuestion[question.id] || "").trim(),
+        };
+      }
+    }
+    return answers;
+  }, [otherTextByQuestion, questions, selectedOptionByQuestion]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!questions.length || !activeQuestion) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDismiss();
+        return;
+      }
+
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeTag = activeElement?.tagName?.toLowerCase();
+      const typingInInput = activeTag === "textarea" || activeTag === "input";
+      const selected = selectedOptionByQuestion[activeQuestion.id] ?? 0;
+      const optionCount = getActiveOptionCount();
+
+      if (/^[1-4]$/.test(event.key) && !typingInInput) {
+        const nextIndex = Number(event.key) - 1;
+        if (nextIndex < optionCount) {
+          event.preventDefault();
+          updateSelection(activeQuestion.id, nextIndex);
+        }
+        return;
+      }
+
+      if (event.key === "ArrowUp" && !typingInInput) {
+        event.preventDefault();
+        updateSelection(activeQuestion.id, Math.max(0, selected - 1));
+        return;
+      }
+      if (event.key === "ArrowDown" && !typingInInput) {
+        event.preventDefault();
+        updateSelection(activeQuestion.id, Math.min(optionCount - 1, selected + 1));
+        return;
+      }
+
+      if (event.key === "ArrowLeft" && !typingInInput) {
+        event.preventDefault();
+        goToPreviousQuestion();
+        return;
+      }
+      if (event.key === "ArrowRight" && !typingInInput) {
+        event.preventDefault();
+        if (activeQuestionIndex < questions.length - 1 && currentQuestionAnswered) {
+          goToNextQuestion();
+        }
+        return;
+      }
+
+      if (event.key === "Enter" && !typingInInput) {
+        event.preventDefault();
+        if (activeQuestionIndex < questions.length - 1) {
+          if (currentQuestionAnswered) {
+            goToNextQuestion();
+          }
+          return;
+        }
+        if (canSubmit) {
+          onSubmit(buildAnswers());
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    activeQuestion,
+    activeQuestionIndex,
+    buildAnswers,
+    canSubmit,
+    currentQuestionAnswered,
+    getActiveOptionCount,
+    goToNextQuestion,
+    goToPreviousQuestion,
+    onDismiss,
+    onSubmit,
+    questions,
+    selectedOptionByQuestion,
+    updateSelection,
+  ]);
+
+  if (!activeQuestion) {
+    return null;
+  }
+
+  return (
+    <div className="input-request-composer-shell" role="dialog" aria-modal="true" aria-label="Structured input required">
+      <div className="input-request-card input-request-card-inline">
+        <div className="input-request-progress">
+          <span className="input-request-header">{activeQuestion.header || "Question"}</span>
+          <span className="input-request-progress-index">
+            {Math.min(activeQuestionIndex + 1, questions.length)} / {questions.length}
+          </span>
+        </div>
+        <div className="input-request-title">{activeQuestion.question}</div>
+        <div className="input-request-options">
+          {activeOptions.map((option, optionIndex) => (
+            <button
+              key={`${activeQuestion.id}-option-${optionIndex}`}
+              className={`input-request-option ${activeSelected === optionIndex ? "selected" : ""}`}
+              onClick={() => {
+                updateSelection(activeQuestion.id, optionIndex);
+              }}
+            >
+              <span className="input-request-option-index">{optionIndex + 1}.</span>
+              <span className="input-request-option-copy">
+                <span className="input-request-option-label">{option.label}</span>
+                <span className="input-request-option-description">{option.description}</span>
+              </span>
+            </button>
+          ))}
+          <button
+            className={`input-request-option ${activeOtherSelected ? "selected" : ""}`}
+            onClick={() => {
+              updateSelection(activeQuestion.id, activeOptions.length);
+            }}
+          >
+            <span className="input-request-option-index">{activeOptions.length + 1}.</span>
+            <span className="input-request-option-copy">
+              <span className="input-request-option-label">Other</span>
+              <span className="input-request-option-description">Type a custom response</span>
+            </span>
+          </button>
+        </div>
+        {activeOtherSelected && (
+          <textarea
+            className="input-request-other"
+            placeholder="Tell Codex what to do differently..."
+            value={otherTextByQuestion[activeQuestion.id] || ""}
+            onChange={(event) =>
+              setOtherTextByQuestion((prev) => ({
+                ...prev,
+                [activeQuestion.id]: event.target.value,
+              }))
+            }
+          />
+        )}
+        <div className="input-request-hint">Use 1-4 to choose, Enter to continue, Esc to dismiss.</div>
+        <div className="input-request-actions">
+          <button className="input-request-dismiss" onClick={onDismiss}>
+            Dismiss
+          </button>
+          <button
+            className="input-request-dismiss"
+            onClick={goToPreviousQuestion}
+            disabled={activeQuestionIndex === 0}
+          >
+            Back
+          </button>
+          {activeQuestionIndex < questions.length - 1 ? (
+            <button
+              className="input-request-submit"
+              onClick={goToNextQuestion}
+              disabled={!currentQuestionAnswered}
+            >
+              Next
+            </button>
+          ) : (
+            <button
+              className="input-request-submit"
+              onClick={() => onSubmit(buildAnswers())}
+              disabled={!canSubmit}
+            >
+              Submit
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface CreateTaskOptions {
   autonomousMode?: boolean;
   collaborativeMode?: boolean;
@@ -2009,6 +2287,12 @@ interface MainContentProps {
   onOpenSettings?: (tab?: SettingsTab) => void;
   onStopTask?: () => void;
   onWrapUpTask?: () => void;
+  inputRequest?: InputRequest | null;
+  onSubmitInputRequest?: (
+    requestId: string,
+    answers: Record<string, { optionLabel?: string; otherText?: string }>,
+  ) => void;
+  onDismissInputRequest?: (requestId: string) => void;
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
   selectedModel: string;
@@ -2043,6 +2327,9 @@ export function MainContent({
   onOpenSettings,
   onStopTask,
   onWrapUpTask,
+  inputRequest = null,
+  onSubmitInputRequest,
+  onDismissInputRequest,
   onOpenBrowserView,
   onViewTaskOutputs,
   selectedModel,
@@ -2520,6 +2807,13 @@ export function MainContent({
     // Always keep explicit verification steps silent; surface failures elsewhere.
     return dedupedEvents.filter((event) => !isVerificationNoiseEvent(event));
   }, [events, verboseSteps, task?.status]);
+
+  const parallelGroupProjection = useMemo(
+    () => buildParallelGroupProjection(filteredEvents),
+    [filteredEvents],
+  );
+  const parallelGroupsByAnchorEventId = parallelGroupProjection.groupsByAnchorEventId;
+  const suppressedParallelEventIds = parallelGroupProjection.suppressedEventIds;
 
   const latestUserMessageTimestamp = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i--) {
@@ -3517,6 +3811,7 @@ export function MainContent({
       "assistant_message",
       "error",
       "step_failed",
+      "approval_requested",
     ].includes(effectiveType);
   };
 
@@ -3535,6 +3830,9 @@ export function MainContent({
       event.type === "timeline_error"
     )
       return true;
+    if (effectiveType === "approval_requested") {
+      return isRunCommandApproval(getApprovalPayload(event));
+    }
     // Code previews: expand by default unless user opted for collapsed
     if (codePreviewsExpanded) {
       if (
@@ -5827,7 +6125,17 @@ export function MainContent({
   let stepFeedEventCount = 0;
   timelineItems.forEach((timelineItem, timelineIndex) => {
     if (timelineItem.kind !== "event") return;
-    if (!shouldRenderTimelineEventInStepFeed(timelineItem.event)) return;
+    const event = timelineItem.event;
+    const eventId = event.id;
+    if (suppressedParallelEventIds.has(eventId) && !parallelGroupsByAnchorEventId.has(eventId)) {
+      return;
+    }
+    if (
+      !parallelGroupsByAnchorEventId.has(eventId) &&
+      !shouldRenderTimelineEventInStepFeed(event)
+    ) {
+      return;
+    }
     stepFeedTimelineIndexPosition.set(timelineIndex, stepFeedEventCount);
     stepFeedEventCount += 1;
   });
@@ -5852,6 +6160,13 @@ export function MainContent({
         getEffectiveTaskEventType(event) === "approval_requested" &&
         event.payload?.autoApproved !== true,
     );
+  const hasActiveStructuredInputRequest = Boolean(
+    task &&
+      inputRequest &&
+      inputRequest.taskId === task.id &&
+      onSubmitInputRequest &&
+      onDismissInputRequest,
+  );
 
   // Task view
   return (
@@ -6257,7 +6572,19 @@ export function MainContent({
                   );
                 }
 
-                if (!shouldRenderTimelineEventInStepFeed(event)) {
+                const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
+                if (suppressedParallelEventIds.has(event.id) && !parallelGroup) {
+                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                    return (
+                      <Fragment key={event.id || `event-${item.eventIndex}`}>
+                        {renderCommandOutputs(commandOutputsAfterEvent)}
+                      </Fragment>
+                    );
+                  }
+                  return null;
+                }
+
+                if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
                   // Even if we're not showing steps, we may still need to render command output.
                   if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
                     return (
@@ -6275,6 +6602,22 @@ export function MainContent({
                 const showConnectorBelow =
                   typeof indicatorPosition === "number" &&
                   indicatorPosition < stepFeedEventCount - 1;
+
+                if (parallelGroup) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <ParallelGroupFeed
+                        group={parallelGroup}
+                        timeLabel={formatTime(parallelGroup.startedAt)}
+                        formatTime={formatTime}
+                        showConnectorAbove={showConnectorAbove}
+                        showConnectorBelow={showConnectorBelow}
+                      />
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
+
                 const isExpandable = hasEventDetails(event);
                 const isExpanded = isEventExpanded(event);
                 const eventTitle = renderEventTitle(
@@ -6358,6 +6701,13 @@ export function MainContent({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
+          {hasActiveStructuredInputRequest && inputRequest && onSubmitInputRequest && onDismissInputRequest && (
+            <StructuredInputPromptCard
+              request={inputRequest}
+              onSubmit={(answers) => onSubmitInputRequest(inputRequest.id, answers)}
+              onDismiss={() => onDismissInputRequest(inputRequest.id)}
+            />
+          )}
           {showVoiceNotConfigured && (
             <div className="voice-not-configured-banner">
               <svg
@@ -6401,7 +6751,7 @@ export function MainContent({
               </button>
             </div>
           )}
-          {task.status === "paused" && (
+          {task.status === "paused" && !hasActiveStructuredInputRequest && (
             <div className="task-status-banner task-status-banner-paused">
               <div className="task-status-banner-content">
                 <strong>Quick check-in - I'm at a decision point.</strong>
@@ -6469,6 +6819,169 @@ export function MainContent({
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
+            {uiDensity === "focused" && (
+              <>
+                <div className="overflow-menu-container" ref={overflowMenuRef}>
+                  <button
+                    ref={overflowToggleBtnRef}
+                    className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
+                    onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+                    onKeyDown={handleOverflowButtonKeyDown}
+                    title="More options"
+                    aria-label="More options"
+                    aria-haspopup="menu"
+                    aria-expanded={showOverflowMenu}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <circle cx="12" cy="12" r="1" />
+                      <circle cx="19" cy="12" r="1" />
+                      <circle cx="5" cy="12" r="1" />
+                    </svg>
+                  </button>
+                  {showOverflowMenu && (
+                    <div
+                      className="overflow-menu-dropdown"
+                      role="menu"
+                      aria-label="More options"
+                      onKeyDown={handleOverflowMenuKeyDown}
+                    >
+                      <div className="overflow-menu-item" role="none">
+                        <button
+                          className="folder-selector"
+                          onClick={() => {
+                            setOverflowSubmenu(null);
+                            setShowOverflowMenu(false);
+                            handleWorkspaceDropdownToggle();
+                          }}
+                          role="menuitem"
+                          data-overflow-menu-item
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                          </svg>
+                          <span>
+                            {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                              ? "Work in a folder"
+                              : workspace?.name || "Work in a folder"}
+                          </span>
+                        </button>
+                      </div>
+                      <div className="overflow-menu-item" role="none">
+                        <button
+                          className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
+                          onClick={() => {
+                            setOverflowSubmenu(null);
+                            handleShellToggle();
+                            setShowOverflowMenu(false);
+                          }}
+                          role="menuitemcheckbox"
+                          aria-checked={shellEnabled}
+                          aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
+                          data-overflow-menu-item
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path d="M4 17l6-6-6-6M12 19h8" />
+                          </svg>
+                          <span>Shell</span>
+                          <span
+                            className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
+                            aria-hidden="true"
+                          >
+                            <span className="goal-mode-switch-thumb" />
+                          </span>
+                        </button>
+                      </div>
+                      {renderExecutionModeRow()}
+                      {renderTaskDomainRow()}
+                    </div>
+                  )}
+                  {showOverflowMenu && renderOverflowSubmenu()}
+                </div>
+                <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                  {showWorkspaceDropdown && (
+                    <div className="workspace-dropdown">
+                      {workspacesList.length > 0 && (
+                        <>
+                          <div className="workspace-dropdown-header">Recent Folders</div>
+                          <div className="workspace-dropdown-list">
+                            {workspacesList.slice(0, 10).map((w) => (
+                              <button
+                                key={w.id}
+                                className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                                onClick={() => handleWorkspaceSelect(w)}
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                </svg>
+                                <div className="workspace-item-info">
+                                  <span className="workspace-item-name">{w.name}</span>
+                                  <span className="workspace-item-path">{w.path}</span>
+                                </div>
+                                {workspace?.id === w.id && (
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    className="check-icon"
+                                  >
+                                    <path d="M20 6L9 17l-5-5" />
+                                  </svg>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="workspace-dropdown-divider" />
+                        </>
+                      )}
+                      <button className="workspace-dropdown-item new-folder" onClick={handleSelectNewFolder}>
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        <span>Work in another folder...</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
             <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
               <textarea
                 ref={textareaRef}
@@ -6608,93 +7121,19 @@ export function MainContent({
             </div>
           </div>
           <div className="input-below-actions">
-            <ModelDropdown
-              models={availableModels}
-              selectedModel={selectedModel}
-              onModelChange={onModelChange}
-              onOpenSettings={onOpenSettings}
-            />
-            <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-              <button
-                className="folder-selector"
-                onClick={handleWorkspaceDropdownToggle}
-                title={workspace?.path || "Select a workspace folder"}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-                <span>
-                  {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
-                    ? "Work in a folder"
-                    : workspace?.name || "Work in a folder"}
-                </span>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={showWorkspaceDropdown ? "chevron-up" : ""}
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-              {showWorkspaceDropdown && (
-                <div className="workspace-dropdown">
-                  {workspacesList.length > 0 && (
-                    <>
-                      <div className="workspace-dropdown-header">Recent Folders</div>
-                      <div className="workspace-dropdown-list">
-                        {workspacesList.slice(0, 10).map((w) => (
-                          <button
-                            key={w.id}
-                            className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                            onClick={() => handleWorkspaceSelect(w)}
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                            </svg>
-                            <div className="workspace-item-info">
-                              <span className="workspace-item-name">{w.name}</span>
-                              <span className="workspace-item-path">{w.path}</span>
-                            </div>
-                            {workspace?.id === w.id && (
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                className="check-icon"
-                              >
-                                <path d="M20 6L9 17l-5-5" />
-                              </svg>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="workspace-dropdown-divider" />
-                    </>
-                  )}
+            {uiDensity !== "focused" && (
+              <>
+                <ModelDropdown
+                  models={availableModels}
+                  selectedModel={selectedModel}
+                  onModelChange={onModelChange}
+                  onOpenSettings={onOpenSettings}
+                />
+                <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
                   <button
-                    className="workspace-dropdown-item new-folder"
-                    onClick={handleSelectNewFolder}
+                    className="folder-selector"
+                    onClick={handleWorkspaceDropdownToggle}
+                    title={workspace?.path || "Select a workspace folder"}
                   >
                     <svg
                       width="14"
@@ -6704,40 +7143,121 @@ export function MainContent({
                       stroke="currentColor"
                       strokeWidth="2"
                     >
-                      <path d="M12 5v14M5 12h14" />
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                     </svg>
-                    <span>Work in another folder...</span>
+                    <span>
+                      {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                        ? "Work in a folder"
+                        : workspace?.name || "Work in a folder"}
+                    </span>
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className={showWorkspaceDropdown ? "chevron-up" : ""}
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
                   </button>
+                  {showWorkspaceDropdown && (
+                    <div className="workspace-dropdown">
+                      {workspacesList.length > 0 && (
+                        <>
+                          <div className="workspace-dropdown-header">Recent Folders</div>
+                          <div className="workspace-dropdown-list">
+                            {workspacesList.slice(0, 10).map((w) => (
+                              <button
+                                key={w.id}
+                                className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                                onClick={() => handleWorkspaceSelect(w)}
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                </svg>
+                                <div className="workspace-item-info">
+                                  <span className="workspace-item-name">{w.name}</span>
+                                  <span className="workspace-item-path">{w.path}</span>
+                                </div>
+                                {workspace?.id === w.id && (
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    className="check-icon"
+                                  >
+                                    <path d="M20 6L9 17l-5-5" />
+                                  </svg>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="workspace-dropdown-divider" />
+                        </>
+                      )}
+                      <button
+                        className="workspace-dropdown-item new-folder"
+                        onClick={handleSelectNewFolder}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        <span>Work in another folder...</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <button
-              className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
-              onClick={handleShellToggle}
-              role="switch"
-              aria-checked={shellEnabled}
-              aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
-              title={
-                shellEnabled
-                  ? "Shell commands enabled - click to disable"
-                  : "Shell commands disabled - click to enable"
-              }
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M4 17l6-6-6-6M12 19h8" />
-              </svg>
-              <span>Shell</span>
-              <span className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`} aria-hidden="true">
-                <span className="goal-mode-switch-thumb" />
-              </span>
-            </button>
+                <button
+                  className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
+                  onClick={handleShellToggle}
+                  role="switch"
+                  aria-checked={shellEnabled}
+                  aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
+                  title={
+                    shellEnabled
+                      ? "Shell commands enabled - click to disable"
+                      : "Shell commands disabled - click to enable"
+                  }
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M4 17l6-6-6-6M12 19h8" />
+                  </svg>
+                  <span>Shell</span>
+                  <span
+                    className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
+                    aria-hidden="true"
+                  >
+                    <span className="goal-mode-switch-thumb" />
+                  </span>
+                </button>
+              </>
+            )}
             <span className="keyboard-hint">
               {isPreparingMessage ? (
                 <span>Preparing your message...</span>
@@ -6824,6 +7344,43 @@ function getSummaryStageLabel(stage: string): string | null {
     default:
       return null;
   }
+}
+
+function getApprovalPayload(event: TaskEvent): Any | null {
+  if (!event?.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) {
+    return null;
+  }
+  const approval = (event.payload as Any).approval;
+  if (!approval || typeof approval !== "object" || Array.isArray(approval)) {
+    return null;
+  }
+  return approval as Any;
+}
+
+function getApprovalDescription(approval: Any | null): string {
+  const description = approval?.description;
+  return typeof description === "string" ? description.trim() : "";
+}
+
+function extractApprovalCommand(approval: Any | null): string | null {
+  const commandFromDetails = approval?.details?.command;
+  if (typeof commandFromDetails === "string") {
+    const trimmed = commandFromDetails.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+
+  const description = getApprovalDescription(approval);
+  if (!description) return null;
+
+  const commandMatch = description.match(/^Run(?:ning)? command(?:\s*\([^)]+\))?:\s*([\s\S]+)$/i);
+  if (!commandMatch || typeof commandMatch[1] !== "string") return null;
+  const command = commandMatch[1].trim();
+  return command.length > 0 ? command : null;
+}
+
+function isRunCommandApproval(approval: Any | null): boolean {
+  if (approval?.type === "run_command") return true;
+  return Boolean(extractApprovalCommand(approval));
 }
 
 function renderEventTitle(
@@ -7146,8 +7703,20 @@ function renderEventTitle(
     }
     case "error":
       return getMessage("error", msgCtx);
-    case "approval_requested":
-      return `${getMessage("approval", msgCtx)} ${event.payload.approval?.description}`;
+    case "approval_requested": {
+      const approval = getApprovalPayload(event);
+      if (isRunCommandApproval(approval)) {
+        return "Running command:";
+      }
+      const description = getApprovalDescription(approval);
+      return description ? `${getMessage("approval", msgCtx)} ${description}` : getMessage("approval", msgCtx);
+    }
+    case "input_request_created":
+      return "Structured input requested";
+    case "input_request_resolved":
+      return "Structured input submitted";
+    case "input_request_dismissed":
+      return "Structured input dismissed";
     case "log":
       return event.payload.message;
     case "verification_started":
@@ -7507,6 +8076,73 @@ function renderEventDetails(
               ))}
             </ul>
           )}
+        </div>
+      );
+    }
+    case "approval_requested": {
+      const approval = getApprovalPayload(event);
+      if (!approval) return null;
+
+      const description = getApprovalDescription(approval);
+      const command = extractApprovalCommand(approval);
+      const cwd = typeof approval?.details?.cwd === "string" ? approval.details.cwd : "";
+      const timeoutMs =
+        typeof approval?.details?.timeout === "number" && Number.isFinite(approval.details.timeout)
+          ? approval.details.timeout
+          : null;
+      const timeoutLabel =
+        typeof timeoutMs === "number" ? `${Math.max(1, Math.round(timeoutMs / 1000))}s` : null;
+
+      if (command) {
+        return (
+          <div className="event-details event-details-scrollable">
+            <div style={{ marginBottom: 6, fontWeight: 600 }}>Running command:</div>
+            <pre>
+              <code>{truncateForDisplay(command, 8000)}</code>
+            </pre>
+            {(cwd || timeoutLabel) && (
+              <div style={{ marginTop: 8 }}>
+                {cwd && <div>CWD: {cwd}</div>}
+                {timeoutLabel && <div>Timeout: {timeoutLabel}</div>}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      return (
+        <div className="event-details event-details-scrollable">
+          {description ? <div style={{ marginBottom: approval.details ? 8 : 0 }}>{description}</div> : null}
+          {approval.details && <pre>{truncateForDisplay(JSON.stringify(approval.details, null, 2), 4000)}</pre>}
+        </div>
+      );
+    }
+    case "input_request_created": {
+      const request = event.payload?.request;
+      const questions: Array<{ question?: string; options?: Array<{ label?: string }> }> = Array.isArray(
+        request?.questions,
+      )
+        ? request.questions
+        : [];
+      if (questions.length === 0) return null;
+      return (
+        <div className="event-details event-details-scrollable">
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>Pending structured prompt</div>
+          <ol style={{ margin: 0, paddingLeft: 18 }}>
+            {questions.map((question, idx) => (
+              <li key={`${idx}-${question?.question || "q"}`}>
+                <div>{question?.question || "Question"}</div>
+                {Array.isArray(question?.options) && question.options.length > 0 && (
+                  <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                    {question.options
+                      .map((option) => (typeof option?.label === "string" ? option.label : ""))
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
         </div>
       );
     }
