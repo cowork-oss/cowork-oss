@@ -32,6 +32,8 @@ import type {
   UpdateAgentTeamMemberRequest,
   UpdateAgentTeamRequest,
   AddChannelRequest,
+  InputRequest,
+  InputRequestResponse,
   Workspace,
 } from "../shared/types";
 
@@ -262,6 +264,8 @@ const IPC_CHANNELS = {
   APPROVAL_RESPOND: "approval:respond",
   APPROVAL_SESSION_AUTO_APPROVE_SET: "approval:sessionAutoApprove:set",
   APPROVAL_SESSION_AUTO_APPROVE_GET: "approval:sessionAutoApprove:get",
+  INPUT_REQUEST_LIST: "inputRequest:list",
+  INPUT_REQUEST_RESPOND: "inputRequest:respond",
   ARTIFACT_LIST: "artifact:list",
   ARTIFACT_PREVIEW: "artifact:preview",
   SKILL_LIST: "skill:list",
@@ -2114,6 +2118,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setSessionAutoApprove: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, enabled),
   getSessionAutoApprove: () => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET),
+  listInputRequests: (query?: {
+    limit?: number;
+    offset?: number;
+    taskId?: string;
+    status?: "pending" | "submitted" | "dismissed";
+  }) => ipcRenderer.invoke(IPC_CHANNELS.INPUT_REQUEST_LIST, query),
+  respondToInputRequest: (data: InputRequestResponse) =>
+    ipcRenderer.invoke(IPC_CHANNELS.INPUT_REQUEST_RESPOND, data),
 
   // Artifact APIs
   listArtifacts: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARTIFACT_LIST, taskId),
@@ -3371,6 +3383,16 @@ export interface ElectronAPI {
   respondToApproval: (data: Any) => Promise<void>;
   setSessionAutoApprove: (enabled: boolean) => Promise<void>;
   getSessionAutoApprove: () => Promise<boolean>;
+  listInputRequests: (query?: {
+    limit?: number;
+    offset?: number;
+    taskId?: string;
+    status?: "pending" | "submitted" | "dismissed";
+  }) => Promise<InputRequest[]>;
+  respondToInputRequest: (data: InputRequestResponse) => Promise<{
+    status: "handled" | "duplicate" | "not_found" | "in_progress";
+    requestId: string;
+  }>;
   listArtifacts: (taskId: string) => Promise<Any[]>;
   previewArtifact: (id: string) => Promise<Any>;
   listSkills: () => Promise<Any[]>;
