@@ -1,4 +1,3 @@
-import { shell } from "electron";
 import http from "http";
 import { randomBytes, createHash } from "crypto";
 import { URL } from "url";
@@ -44,6 +43,27 @@ export interface ConnectorOAuthResult {
 
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 1000;
 const OAUTH_CALLBACK_PORT = 18765;
+
+function getElectronShell(): Any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
+    const shell = electron?.shell;
+    if (shell?.openExternal) return shell;
+  } catch {
+    // Not running under Electron.
+  }
+  return null;
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  const shell = getElectronShell();
+  if (!shell?.openExternal) {
+    throw new Error("Electron shell is unavailable outside the Electron runtime");
+  }
+  await shell.openExternal(url);
+}
 
 export async function startConnectorOAuth(
   request: ConnectorOAuthRequest,
@@ -206,7 +226,7 @@ async function startSalesforceOAuth(request: ConnectorOAuthRequest): Promise<Con
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("state", state);
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -278,7 +298,7 @@ async function startJiraOAuth(request: ConnectorOAuthRequest): Promise<Connector
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -366,7 +386,7 @@ async function startHubSpotOAuth(request: ConnectorOAuthRequest): Promise<Connec
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("state", state);
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -432,7 +452,7 @@ async function startZendeskOAuth(request: ConnectorOAuthRequest): Promise<Connec
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("state", state);
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -511,7 +531,7 @@ async function startGoogleOAuth(request: ConnectorOAuthRequest): Promise<Connect
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -575,7 +595,7 @@ async function startDocusignOAuth(request: ConnectorOAuthRequest): Promise<Conne
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("state", state);
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -641,7 +661,7 @@ async function startOutreachOAuth(request: ConnectorOAuthRequest): Promise<Conne
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("state", state);
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 
@@ -707,7 +727,7 @@ async function startSlackOAuth(request: ConnectorOAuthRequest): Promise<Connecto
     authUrl.searchParams.set("team", request.teamDomain);
   }
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 

@@ -1,4 +1,3 @@
-import { shell } from "electron";
 import http from "http";
 import { randomBytes, createHash } from "crypto";
 import { URL } from "url";
@@ -21,6 +20,27 @@ const DEFAULT_TIMEOUT_MS = 2 * 60 * 1000;
 const OAUTH_CALLBACK_PORT = 18766;
 const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+function getElectronShell(): Any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
+    const shell = electron?.shell;
+    if (shell?.openExternal) return shell;
+  } catch {
+    // Not running under Electron.
+  }
+  return null;
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  const shell = getElectronShell();
+  if (!shell?.openExternal) {
+    throw new Error("Electron shell is unavailable outside the Electron runtime");
+  }
+  await shell.openExternal(url);
+}
 
 function base64Url(buffer: Buffer): string {
   return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -184,7 +204,7 @@ export async function startGoogleWorkspaceOAuth(
   authUrl.searchParams.set("access_type", "offline");
   authUrl.searchParams.set("prompt", "consent");
 
-  await shell.openExternal(authUrl.toString());
+  await openExternalUrl(authUrl.toString());
 
   const { code } = await waitForCode();
 

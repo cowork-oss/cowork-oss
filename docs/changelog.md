@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shell protocol violations**: `run_command` now rejects direct or wrapped `apply_patch` invocations and tells the agent to use the dedicated patch tool.
 - **Task-root rewrites**: pinned-root recovery no longer skips rewrites just because an unpinned root-level path already exists, preventing drifted writes from mutating the wrong files.
 - **Legacy read-only resumes**: tasks resumed without `executionModeSource` now keep user-selected non-`execute` modes instead of being auto-promoted to mutation-capable execution.
+- **Electron-optional OAuth imports**: connector and Google Workspace OAuth helpers now resolve `shell.openExternal` lazily so plain Node test/release environments can import them without a packaged Electron runtime.
 - **Task execution heuristics**: write-intent detection, duplicate-mutation bypass, follow-up tool locking, and browser-session verification heuristics were tightened to reduce false stalls and false completions.
 - **Canvas URL validation**: canvas browsing now rejects non-HTTP(S) schemes explicitly.
 - **Documentation alignment**: README, architecture, remote-access, development, and getting-started docs now reflect structured input, recovery policies, and Control Plane input-request handling.
