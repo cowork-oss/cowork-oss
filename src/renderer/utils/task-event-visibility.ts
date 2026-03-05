@@ -30,12 +30,18 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "no_progress_circuit_breaker",
   "step_contract_escalated",
   "approval_requested",
+  "input_request_created",
+  "input_request_resolved",
+  "input_request_dismissed",
 ];
 
 export const ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "approval_requested",
   "approval_granted",
   "approval_denied",
+  "input_request_created",
+  "input_request_resolved",
+  "input_request_dismissed",
   "error",
   "step_failed",
   "verification_failed",
@@ -123,6 +129,26 @@ function isToolBatchTimelineGroupEvent(event: TaskEvent): boolean {
   return SUMMARY_HIDDEN_GROUP_LABEL_PATTERN.test(groupLabel);
 }
 
+function isToolBatchLaneEvent(event: TaskEvent): boolean {
+  const groupId = getTimelineGroupId(event).toLowerCase();
+  if (!groupId || !groupId.startsWith("tools:")) return false;
+
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (
+    effectiveType === "tool_call" ||
+    effectiveType === "tool_result" ||
+    effectiveType === "tool_error"
+  ) {
+    return true;
+  }
+
+  return (
+    event.type === "timeline_step_started" ||
+    event.type === "timeline_step_updated" ||
+    event.type === "timeline_step_finished"
+  );
+}
+
 // In non-verbose mode, hide most tool traffic but keep user-facing schedule confirmations visible.
 export function isImportantTaskEvent(event: TaskEvent): boolean {
   const effectiveType = getEffectiveTaskEventType(event);
@@ -137,6 +163,7 @@ export function shouldShowTaskEventInSummaryMode(
 ): boolean {
   if (!isImportantTaskEvent(event)) return false;
   if (isToolBatchTimelineGroupEvent(event)) return false;
+  if (isToolBatchLaneEvent(event)) return false;
 
   if (isStageBoundaryTimelineGroupEvent(event)) {
     if (event.type === "timeline_group_finished") return false;
