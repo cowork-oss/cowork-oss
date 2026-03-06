@@ -82,6 +82,22 @@ Use these phrases naturally in docs and landing sections:
 
 Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
 
+## Best Initial Wedges
+
+> This section describes GTM entry points within the existing category — not a repositioning. CoWork OS remains a security-hardened, local-first AI operating system.
+
+The three operational lanes where CoWork OS has the clearest initial ROI are governed, intelligence-heavy workflows that benefit most from approval gates, local data control, and measurable outcome delivery:
+
+| Lane | Pack | Primary Connectors | Why It Wins Early |
+|------|------|--------------------|-------------------|
+| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow | High-volume, well-defined quality criteria; completion rate and response time are measurable on day one |
+| **IT Ops** | DevOps Pack | ServiceNow, Jira, Linear | Incident and release workflows have clear triggers, audit requirements, and high cost of error |
+| **Sales Ops** | Sales CRM Pack | HubSpot, Salesforce, Outreach | Outbound workflows are repetitive but require personalization — the balance where governed AI delivery performs best |
+
+These are best-fit entry points, not exclusions. CoWork OS works across many workflows; these three have the most predictable buyer, measurable outcome, and vendor-swap-friendly structure.
+
+For the full workflow narrative, see [Best-Fit Operational Workflows](best-fit-workflows.md).
+
 ## GTM Assets in This Repo
 
 - [OpenClaw Alternative Guide](openclaw-comparison.md)

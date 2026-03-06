@@ -9,6 +9,13 @@
   "icon": "🎧",
   "category": "Operations",
   "recommendedConnectors": ["zendesk-mcp"],
+  "bestFitWorkflows": ["support_ops"],
+  "outcomeExamples": [
+    "Triage and draft responses to 40+ tickets per day without queue buildup",
+    "Reduce average first-response time with templated, tone-matched replies",
+    "Turn resolved cases into knowledge base articles in one step",
+    "Produce structured escalation summaries that engineering can act on immediately"
+  ],
   "tryAsking": [
     "Triage this support ticket and suggest a response",
     "Draft a response for a frustrated customer about a billing issue",

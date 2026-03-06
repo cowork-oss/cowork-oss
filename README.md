@@ -208,6 +208,18 @@ Unified plugin platform with 17 bundled role-specific packs (Engineering, DevOps
 
 Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
 
+### Best-Fit Workflows
+
+CoWork OS ships purpose-built packs and Tier-1 connectors for three operational lanes where governed AI delivery has the clearest ROI:
+
+| Lane | Pack | Connectors |
+|------|------|------------|
+| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow |
+| **IT Ops** | DevOps Pack | ServiceNow, Jira, Linear |
+| **Sales Ops** | Sales CRM Pack | HubSpot, Salesforce, Outreach |
+
+These are the workflows where approval gates, local data control, and measurable outcome delivery pay off most — and where CoWork OS is a vendor-swap-friendly alternative to point solutions or BPO tooling. [Learn more](docs/best-fit-workflows.md)
+
 ### Extensibility
 
 - **139 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
@@ -359,6 +371,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries |
 | [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
 | [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
+| [Best-Fit Workflows](docs/best-fit-workflows.md) | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI |
 | [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |
 | [Digital Twins](docs/digital-twins.md) | Role-based AI twin personas and cognitive offload |
 | [Digital Twins Guide](docs/digital-twin-personas-guide.md) | Comprehensive guide with scenarios and expanded job areas |

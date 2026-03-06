@@ -9,6 +9,8 @@ export type ConnectorCapabilityId =
   | "hubspot"
   | "zendesk"
   | "servicenow"
+  | "outreach"
+  | "docusign"
   | "linear"
   | "asana"
   | "okta"
@@ -28,7 +30,12 @@ export type Tier1IntegrationProvider =
   | "google-workspace"
   | "jira"
   | "linear"
-  | "hubspot";
+  | "hubspot"
+  | "salesforce"
+  | "zendesk"
+  | "servicenow"
+  | "outreach"
+  | "docusign";
 
 export interface IntegrationLinkSet {
   dashboard?: string;
@@ -90,6 +97,7 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       dashboard: "https://login.salesforce.com",
       oauth_docs: "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm",
     },
+    tier1: true,
   },
   jira: {
     id: "jira",
@@ -160,6 +168,7 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       api_keys_docs: "https://support.zendesk.com/hc/en-us/articles/4408831452954",
       oauth_docs: "https://developer.zendesk.com/documentation/integration-services/apps/oauth/",
     },
+    tier1: true,
   },
   servicenow: {
     id: "servicenow",
@@ -177,6 +186,46 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       dashboard: "https://www.servicenow.com",
       api_keys_docs: "https://www.servicenow.com/docs/bundle/washingtondc-platform-security/page/integrate/authentication/task/t_CreateAnOAuthApiEndpointForExternalClients.html",
     },
+    tier1: true,
+  },
+  outreach: {
+    id: "outreach",
+    name: "Outreach",
+    registryEntryId: "outreach",
+    authMethods: ["oauth"],
+    oauthProvider: "outreach",
+    readinessAny: [["OUTREACH_ACCESS_TOKEN"]],
+    readinessByAuth: {
+      oauth: [["OUTREACH_ACCESS_TOKEN", "OUTREACH_REFRESH_TOKEN"]],
+    },
+    healthTool: "outreach.health",
+    links: {
+      dashboard: "https://app.outreach.io",
+      oauth_docs: "https://developers.outreach.io/api/oauth/",
+    },
+    tier1: true,
+  },
+  docusign: {
+    id: "docusign",
+    name: "DocuSign",
+    registryEntryId: "docusign",
+    authMethods: ["api_key", "oauth"],
+    oauthProvider: "docusign",
+    readinessAny: [
+      ["DOCUSIGN_ACCOUNT_ID", "DOCUSIGN_ACCESS_TOKEN"],
+      ["DOCUSIGN_ACCOUNT_ID", "DOCUSIGN_INTEGRATION_KEY", "DOCUSIGN_SECRET_KEY"],
+    ],
+    readinessByAuth: {
+      api_key: [["DOCUSIGN_ACCOUNT_ID", "DOCUSIGN_INTEGRATION_KEY", "DOCUSIGN_SECRET_KEY"]],
+      oauth: [["DOCUSIGN_ACCOUNT_ID", "DOCUSIGN_ACCESS_TOKEN", "DOCUSIGN_REFRESH_TOKEN"]],
+    },
+    healthTool: "docusign.health",
+    links: {
+      dashboard: "https://admindemo.docusign.com",
+      api_keys_docs: "https://developers.docusign.com/platform/auth/",
+      oauth_docs: "https://developers.docusign.com/platform/auth/authcode/",
+    },
+    tier1: true,
   },
   linear: {
     id: "linear",
@@ -339,6 +388,11 @@ export const TIER1_CONNECTOR_IDS: Tier1IntegrationProvider[] = [
   "jira",
   "linear",
   "hubspot",
+  "salesforce",
+  "zendesk",
+  "servicenow",
+  "outreach",
+  "docusign",
 ];
 
 export function getConnectorCapability(id: string): ConnectorCapability | undefined {

@@ -1528,7 +1528,7 @@ Channel Message Log (Local Gateway):
 		- request_user_input: Ask the user a structured multiple-choice question set (propose mode only) and wait for selection.
 		- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
 		- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
-		- integration_setup: List/inspect/configure Tier-1 integrations from chat (resend/slack/gmail/google-calendar/google-drive/jira/linear/hubspot), including plan_hash stale-plan safety and optional OAuth setup.
+		- integration_setup: List/inspect/configure Tier-1 integrations from chat (resend/slack/gmail/google-calendar/google-drive/google-workspace/jira/linear/hubspot/salesforce/zendesk/servicenow/outreach/docusign), including plan_hash stale-plan safety and optional OAuth setup.
 		- set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
 	- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
 	- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
@@ -7280,7 +7280,7 @@ ${skillDescriptions}`;
         name: "integration_setup",
         description:
           "Inspect, list, or configure integrations directly from chat. " +
-          "Supports Tier-1 providers: resend, slack, gmail, google-calendar, google-drive, jira, linear, hubspot. " +
+          "Supports Tier-1 providers: resend, slack, gmail, google-calendar, google-drive, google-workspace, jira, linear, hubspot, salesforce, zendesk, servicenow, outreach, docusign. " +
           "Use inspect to get plan_hash + missing inputs, and configure with expected_plan_hash for safe apply.",
         input_schema: {
           type: "object",
@@ -7299,9 +7299,15 @@ ${skillDescriptions}`;
                 "gmail",
                 "google-calendar",
                 "google-drive",
+                "google-workspace",
                 "jira",
                 "linear",
                 "hubspot",
+                "salesforce",
+                "zendesk",
+                "servicenow",
+                "outreach",
+                "docusign",
               ],
               description: "Integration provider to inspect/configure",
             },

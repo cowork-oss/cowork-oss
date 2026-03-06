@@ -8,7 +8,14 @@
   "keywords": ["sales", "crm", "prospecting", "pipeline"],
   "icon": "💼",
   "category": "Sales",
-  "recommendedConnectors": ["hubspot-mcp"],
+  "recommendedConnectors": ["hubspot-mcp", "salesforce-mcp"],
+  "bestFitWorkflows": ["sales_ops"],
+  "outcomeExamples": [
+    "Research prospects and compile outreach briefings with company context and pain points",
+    "Draft personalized follow-up emails referencing specific conversation details",
+    "Review pipeline health and flag at-risk deals with recommended actions",
+    "Prepare objection-handling scripts tailored to the product and prospect"
+  ],
   "tryAsking": [
     "Research this prospect and compile a briefing for outreach",
     "Draft a follow-up email after yesterday's demo call",

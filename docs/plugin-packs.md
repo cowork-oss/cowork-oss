@@ -20,6 +20,8 @@ A JSON manifest (`cowork.plugin.json`) that bundles related capabilities:
 | **Connectors** | Declarative tool definitions (HTTP, shell, script) for external services |
 | **Try Asking** | Natural language prompt suggestions for discoverability |
 | **Digital Twin Link** | Optional `personaTemplateId` connecting the pack to a proactive persona |
+| **Best-Fit Workflows** | Optional `bestFitWorkflows` array tagging the pack to one or more operational lanes (`support_ops`, `it_ops`, `sales_ops`) |
+| **Outcome Examples** | Optional `outcomeExamples` array of short strings describing what users achieve with the pack |
 
 ### Pack Scopes
 
@@ -107,6 +109,8 @@ When a pack is selected, the right panel shows:
 | **Commands** | Card grid of slash commands derived from skills. Each card shows the `/command-name` and description. |
 | **Skills** | List of all skills in the pack with icon, name, description, and **per-skill toggle switch**. Individual skills can be enabled or disabled independently without toggling the entire pack. |
 | **Agents** | Agent roles defined by the pack, plus a Digital Twin entry if `personaTemplateId` is set. |
+
+When `bestFitWorkflows` is set, the pack header shows colored **Best for** lane badges (Support Ops, IT Ops, Sales Ops). When `outcomeExamples` is set, a short bulleted list of outcomes appears below the badges.
 
 **Try Asking**
 
@@ -964,6 +968,11 @@ window.electronAPI.scaffoldPluginPack({
   "category": "Engineering",
   "personaTemplateId": "software-engineer",
   "recommendedConnectors": ["hubspot-mcp"],
+  "bestFitWorkflows": ["sales_ops"],
+  "outcomeExamples": [
+    "Draft personalized follow-up emails for 20 prospects in one session",
+    "Review pipeline health and flag at-risk deals automatically"
+  ],
   "tryAsking": [
     "Natural language prompt 1",
     "Natural language prompt 2"

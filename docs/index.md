@@ -36,4 +36,6 @@ features:
     details: Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, and Resend MCP connectors.
   - title: Security First
     details: Local-first architecture, sandboxed execution, guardrails, approval workflows, encrypted storage, and 3200+ tests.
+  - title: Best-Fit Operational Workflows
+    details: Purpose-built packs for Support Ops, IT Ops, and Sales Ops — governed outcome delivery for the workflows where AI assistance has the clearest ROI. See the Best-Fit Workflows guide.
 ---

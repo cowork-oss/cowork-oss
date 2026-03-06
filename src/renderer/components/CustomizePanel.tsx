@@ -13,6 +13,8 @@ interface PluginPackData {
   personaTemplateId?: string;
   recommendedConnectors?: string[];
   tryAsking?: string[];
+  bestFitWorkflows?: ("support_ops" | "it_ops" | "sales_ops")[];
+  outcomeExamples?: string[];
   skills: { id: string; name: string; description: string; icon?: string; enabled?: boolean }[];
   slashCommands: { name: string; description: string; skillId: string }[];
   agentRoles: {
@@ -333,6 +335,26 @@ export function CustomizePanel({
                     <Dna size={14} strokeWidth={1.5} />
                   </span>
                   <span>Includes Digital Twin</span>
+                </div>
+              )}
+              {activePack.bestFitWorkflows && activePack.bestFitWorkflows.length > 0 && (
+                <div className="cp-best-fit-row">
+                  <span className="cp-rc-label">Best for:</span>
+                  {activePack.bestFitWorkflows.map((lane) => (
+                    <span key={lane} className={`cp-best-fit-badge cp-best-fit-badge--${lane}`}>
+                      {lane === "support_ops" ? "Support Ops" : lane === "it_ops" ? "IT Ops" : "Sales Ops"}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {activePack.outcomeExamples && activePack.outcomeExamples.length > 0 && (
+                <div className="cp-outcome-examples">
+                  <span className="cp-rc-label">Outcome examples:</span>
+                  <ul className="cp-outcome-list">
+                    {activePack.outcomeExamples.map((ex, i) => (
+                      <li key={i} className="cp-outcome-item">{ex}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
               {activePack.recommendedConnectors && activePack.recommendedConnectors.length > 0 && (
@@ -716,6 +738,62 @@ export function CustomizePanel({
           display: flex;
           align-items: center;
           gap: 8px;
+        }
+
+        /* Best-fit workflow badges */
+        .cp-best-fit-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 8px;
+        }
+
+        .cp-best-fit-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 10px;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+        }
+
+        .cp-best-fit-badge--support_ops {
+          background: rgba(99, 102, 241, 0.15);
+          color: #818cf8;
+          border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .cp-best-fit-badge--it_ops {
+          background: rgba(239, 68, 68, 0.15);
+          color: #f87171;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .cp-best-fit-badge--sales_ops {
+          background: rgba(16, 185, 129, 0.15);
+          color: #34d399;
+          border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        /* Outcome examples */
+        .cp-outcome-examples {
+          margin-top: 10px;
+        }
+
+        .cp-outcome-list {
+          margin: 6px 0 0 0;
+          padding-left: 18px;
+          list-style: disc;
+        }
+
+        .cp-outcome-item {
+          font-size: 12px;
+          color: var(--color-text-secondary);
+          line-height: 1.6;
+          margin-bottom: 2px;
         }
 
         /* Recommended connectors */

@@ -20,6 +20,8 @@ export interface PluginPackData {
   personaTemplateId?: string;
   recommendedConnectors?: string[];
   tryAsking?: string[];
+  bestFitWorkflows?: ("support_ops" | "it_ops" | "sales_ops")[];
+  outcomeExamples?: string[];
   skills: { id: string; name: string; description: string; icon?: string; enabled?: boolean }[];
   slashCommands: { name: string; description: string; skillId: string }[];
   agentRoles: {
@@ -128,6 +130,8 @@ export function setupPluginPackHandlers(): void {
         personaTemplateId: m.personaTemplateId,
         recommendedConnectors: m.recommendedConnectors,
         tryAsking: m.tryAsking,
+        bestFitWorkflows: m.bestFitWorkflows,
+        outcomeExamples: m.outcomeExamples,
         skills: (m.skills || []).map((s) => ({
           id: s.id,
           name: s.name,

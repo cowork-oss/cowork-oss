@@ -8,6 +8,13 @@
   "keywords": ["devops", "deployment", "monitoring", "incident-response", "infrastructure", "terraform", "kubernetes", "k8s", "docker", "migration", "iac"],
   "icon": "⚙️",
   "category": "Engineering",
+  "bestFitWorkflows": ["it_ops"],
+  "outcomeExamples": [
+    "Produce incident response plans and post-mortems in minutes, not hours",
+    "Generate deployment checklists and rollback procedures for every release",
+    "Draft Terraform modules and Kubernetes manifests from plain-language descriptions",
+    "Run cloud migration assessments across workloads with effort and risk breakdowns"
+  ],
   "personaTemplateId": "devops-sre-engineer",
   "tryAsking": [
     "Create an incident response plan for this production issue",

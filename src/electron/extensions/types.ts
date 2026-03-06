@@ -96,6 +96,12 @@ export interface PluginManifest {
 
   /** Whether this is an organization-distributed pack (vs personal) */
   scope?: "personal" | "organization";
+
+  /** Best-fit operational workflow lanes for this pack (support_ops, it_ops, sales_ops) */
+  bestFitWorkflows?: ("support_ops" | "it_ops" | "sales_ops")[];
+
+  /** Short outcome examples that describe what users achieve with this pack */
+  outcomeExamples?: string[];
 }
 
 /**

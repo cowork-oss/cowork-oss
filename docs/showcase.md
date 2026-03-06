@@ -138,6 +138,11 @@ packages that conflict with our MIT license.
 
 ## DevOps & Infrastructure
 
+> **Best-fit workflow: IT Ops**
+> **Why this is a strong fit:** Incident and release workflows have clear triggers, defined completion criteria, and high cost of error — conditions where approval gates, local audit trails, and governed execution outperform ad-hoc tooling.
+> **Who already buys this outcome:** Managed infrastructure providers, SRE-as-a-service teams, IT outsourcers operating under SLAs.
+> **What CoWork OS contributes:** Incident response with comms templates, deployment checklists with rollback procedures, IaC generation from plain language, and blameless post-mortems with structured action items. Enable the DevOps Pack and connect ServiceNow or Jira.
+
 ### Kubernetes Cluster Operations
 
 Manage Kubernetes clusters, generate manifests, debug pods, and configure networking — all from natural language.
@@ -424,6 +429,11 @@ optimization plan to hit 30fps stable.
 
 ### CRM & Sales Automation
 
+> **Best-fit workflow: Sales Ops**
+> **Why this is a strong fit:** Outbound sales workflows are high-volume and repetitive but require personalization at scale — the balance where governed AI delivery performs best.
+> **Who already buys this outcome:** Outsourced SDR/BDR providers, sales development agencies, in-house sales teams running a managed outbound lane.
+> **What CoWork OS contributes:** Prospect research briefings, personalized follow-up drafts, pipeline health reviews, and objection-handling scripts. Enable the Sales CRM Pack and connect HubSpot, Salesforce, or Outreach.
+
 Connect to Salesforce and HubSpot to automate pipeline management, prospect research, and follow-up sequences.
 
 **What it handles:**
@@ -497,6 +507,11 @@ Set up a Discord server structure for our open-source project:
 ---
 
 ### Customer Support Workflows
+
+> **Best-fit workflow: Support Ops**
+> **Why this is a strong fit:** Support volume is predictable, quality criteria are measurable, and the workflow is well-defined — exactly the conditions where governed AI delivery outperforms ad-hoc tooling.
+> **Who already buys this outcome:** BPOs, CX outsourcers, managed-services providers, in-house support teams that operate like a managed lane.
+> **What CoWork OS contributes:** Ticket triage with priority and sentiment analysis, tone-matched response drafting, one-step KB article generation, and escalation summaries engineering can act on immediately. Enable the Customer Support Pack and connect Zendesk or ServiceNow.
 
 Connect to Zendesk and ServiceNow to automate ticket triage, response drafting, and escalation management.
 

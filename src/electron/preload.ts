@@ -4508,6 +4508,8 @@ export interface ElectronAPI {
       personaTemplateId?: string;
       recommendedConnectors?: string[];
       tryAsking?: string[];
+      bestFitWorkflows?: ("support_ops" | "it_ops" | "sales_ops")[];
+      outcomeExamples?: string[];
       skills: Array<{
         id: string;
         name: string;
