@@ -21382,11 +21382,23 @@ TASK / CONVERSATION HISTORY:
    * model overrides since those are intentional.
    */
   private refreshProviderIfSettingsChanged(): void {
-    const hasExplicitOverride =
-      this.task.agentConfig?.providerType != null || this.task.agentConfig?.modelKey != null;
-    if (hasExplicitOverride) return;
+    // Skip only when the task has an explicit per-task provider type override
+    // (e.g. multi-LLM tasks, agent roles with a pinned provider).
+    if (this.task.agentConfig?.providerType != null) return;
 
-    const newSelection = LLMProviderFactory.resolveTaskModelSelection(this.task.agentConfig, {
+    const settings = LLMProviderFactory.loadSettings();
+    const globalProviderType = settings.providerType as LLMProviderType;
+
+    // When the global provider changed, the task's stored modelKey may belong to the old
+    // provider (e.g. task was created with MiniMax as the global default, user later switched
+    // to Azure/gpt-5.4). Drop the stale modelKey so we resolve with the new provider's
+    // defaults. When the provider is unchanged, preserve any explicit per-task model choice.
+    const agentConfigForResolution =
+      globalProviderType !== this.provider.type
+        ? { ...this.task.agentConfig, modelKey: undefined }
+        : this.task.agentConfig;
+
+    const newSelection = LLMProviderFactory.resolveTaskModelSelection(agentConfigForResolution, {
       isVerificationTask:
         this.task.agentConfig?.verificationAgent === true ||
         /^verify\s*:/i.test(this.task.title) ||
