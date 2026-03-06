@@ -21376,6 +21376,45 @@ TASK / CONVERSATION HISTORY:
   }
 
   /**
+   * Refreshes the LLM provider from current global settings if the provider or model
+   * has changed since this executor was initialized. Allows mid-session model switches
+   * to take effect on the next follow-up message. Skips tasks with explicit per-task
+   * model overrides since those are intentional.
+   */
+  private refreshProviderIfSettingsChanged(): void {
+    const hasExplicitOverride =
+      this.task.agentConfig?.providerType != null || this.task.agentConfig?.modelKey != null;
+    if (hasExplicitOverride) return;
+
+    const newSelection = LLMProviderFactory.resolveTaskModelSelection(this.task.agentConfig, {
+      isVerificationTask:
+        this.task.agentConfig?.verificationAgent === true ||
+        /^verify\s*:/i.test(this.task.title) ||
+        /^verification\s*:/i.test(this.task.title),
+    });
+
+    if (
+      newSelection.modelId !== this.modelId ||
+      newSelection.providerType !== this.provider.type
+    ) {
+      console.log(
+        `${this.logTag} Provider/model changed mid-session: ${this.provider.type}/${this.modelId} → ${newSelection.providerType}/${newSelection.modelId}`,
+      );
+      this.provider = LLMProviderFactory.createProvider({
+        type: newSelection.providerType,
+        model: newSelection.modelId,
+      });
+      this.modelId = newSelection.modelId;
+      this.modelKey = newSelection.modelKey;
+      this.llmProfileUsed = newSelection.llmProfileUsed;
+      this.resolvedModelKey = newSelection.resolvedModelKey;
+      this.emitEvent("log", {
+        message: `LLM provider updated mid-session: provider=${newSelection.providerType}, model=${newSelection.modelId}`,
+      });
+    }
+  }
+
+  /**
    * Send a follow-up message to continue the conversation
    */
   async sendMessage(message: string, images?: ImageAttachment[]): Promise<void> {
@@ -21417,6 +21456,7 @@ TASK / CONVERSATION HISTORY:
         ...persistedTask,
       };
     }
+    this.refreshProviderIfSettingsChanged();
     const previousStatus = persistedTask?.status || this.task.status;
     const shouldResumeAfterFollowup = previousStatus === "paused" || this.waitingForUserInput;
     const shouldStartNewCanvasSession = ["completed", "failed", "cancelled"].includes(
