@@ -34,6 +34,8 @@ interface CronJob {
   name: string;
   description?: string;
   enabled: boolean;
+  shellAccess?: boolean;
+  allowUserInput?: boolean;
   deleteAfterRun?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -1027,6 +1029,8 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
   const [taskPrompt, setTaskPrompt] = useState(job?.taskPrompt || "");
   const [taskTitle, setTaskTitle] = useState(job?.taskTitle || "");
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
+  const [shellAccess, setShellAccess] = useState(job?.shellAccess ?? false);
+  const [allowUserInput, setAllowUserInput] = useState(job?.allowUserInput ?? false);
   const [deleteAfterRun, setDeleteAfterRun] = useState(job?.deleteAfterRun ?? false);
 
   // Delivery config
@@ -1165,6 +1169,8 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           taskPrompt: taskPrompt.trim(),
           taskTitle: taskTitle.trim() || undefined,
           enabled,
+          shellAccess,
+          allowUserInput,
           deleteAfterRun,
           schedule,
           delivery,
@@ -1181,6 +1187,8 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           taskPrompt: taskPrompt.trim(),
           taskTitle: taskTitle.trim() || undefined,
           enabled,
+          shellAccess,
+          allowUserInput,
           deleteAfterRun,
           schedule,
           delivery,
@@ -1525,6 +1533,22 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
               onChange={(e) => setEnabled(e.target.checked)}
             />
             Enable immediately after saving
+          </label>
+          <label style={{ ...modalStyles.checkbox, marginTop: "8px" }}>
+            <input
+              type="checkbox"
+              checked={shellAccess}
+              onChange={(e) => setShellAccess(e.target.checked)}
+            />
+            Allow shell access (run_command) for this scheduled task
+          </label>
+          <label style={{ ...modalStyles.checkbox, marginTop: "8px" }}>
+            <input
+              type="checkbox"
+              checked={allowUserInput}
+              onChange={(e) => setAllowUserInput(e.target.checked)}
+            />
+            Allow interactive pauses when the task needs extra approvals or input
           </label>
           {scheduleType === "at" && (
             <label style={{ ...modalStyles.checkbox, marginTop: "8px" }}>
