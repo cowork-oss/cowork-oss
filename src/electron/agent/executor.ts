@@ -195,6 +195,7 @@ import {
   isLikelyCommandSnippet,
   descriptionHasArtifactCue,
   descriptionHasChecklistReportCue,
+  descriptionHasDiscoveryIntent,
   descriptionHasReadOnlyIntent,
   descriptionHasScaffoldIntent,
   descriptionHasSummaryCue,
@@ -6551,9 +6552,10 @@ ${transcript}
   private stepIndicatesBrowserSessionVerification(description: string): boolean {
     const desc = String(description || "").toLowerCase();
     if (!desc.trim()) return false;
-    return /\b(in-browser|browser|website|web site|webpage|web page|site|ui|layout|scroll|toggle|responsive)\b/.test(
-      desc,
-    );
+    // Only trigger on unambiguously browser-specific terms.
+    // "ui", "site", "layout", "scroll", "toggle", "responsive" are too broad —
+    // they appear in server/file tasks that have nothing to do with browser automation.
+    return /\b(in-browser|browser|website|web site|webpage|web page)\b/.test(desc);
   }
 
   private stepIndicatesCanvasSessionVerification(description: string): boolean {
@@ -12484,6 +12486,11 @@ You are continuing a previous conversation. The context from the previous conver
     const hasReadOnlyIntent = descriptionHasReadOnlyIntent(desc);
     if (hasReadOnlyIntent && !hasWriteVerb) return false;
 
+    // Discovery/inspection steps are about finding what exists, not producing artifacts,
+    // even if the description mentions file paths or extensions as targets to look for.
+    const hasDiscoveryIntent = descriptionHasDiscoveryIntent(desc);
+    if (hasDiscoveryIntent) return false;
+
     const hasExplicitExtension = hasArtifactExtensionMention(desc);
     const hasArtifactCue = descriptionHasArtifactCue(desc) || /\bmd\b/.test(desc);
     const scaffoldProjectIntent = descriptionHasScaffoldIntent(desc);
@@ -12910,6 +12917,8 @@ You are continuing a previous conversation. The context from the previous conver
     const checklistStylePath = hasChecklistCue && hasChecklistActionCue;
     const policy = this.getEffectiveVerificationArtifactPathPolicy();
 
+    // effectivePath may be rewritten by the double-nesting fallback below.
+    let effectivePath = value;
     const resolved = path.isAbsolute(value) ? value : path.resolve(this.workspace.path, value);
     let exists = false;
     try {
@@ -12918,10 +12927,29 @@ You are continuing a previous conversation. The context from the previous conver
       exists = false;
     }
 
+    // Fallback: if path not found and first segment overlaps with workspace basename,
+    // strip the overlapping segment and retry (prevents double-nesting like build/build/docs/...).
+    if (!exists && !path.isAbsolute(value)) {
+      const wsBasename = path.basename(this.workspace.path);
+      const segments = value.split("/");
+      if (segments[0] === wsBasename && segments.length > 1) {
+        const stripped = segments.slice(1).join("/");
+        const altResolved = path.resolve(this.workspace.path, stripped);
+        try {
+          if (fs.existsSync(altResolved)) {
+            exists = true;
+            effectivePath = stripped;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     if (hasExplicitWriteCue) {
       if (exists) {
         return {
-          path: value,
+          path: effectivePath,
           exists,
           role: "existing_only_write",
           reason: "explicit_write_existing_artifact",
@@ -12929,7 +12957,7 @@ You are continuing a previous conversation. The context from the previous conver
       }
       if (policy === "inline_if_missing" || policy === "always_inline") {
         return {
-          path: value,
+          path: effectivePath,
           exists,
           role: "optional_output_inline",
           reason: "explicit_write_missing_artifact_downgraded_to_inline",
@@ -12937,7 +12965,7 @@ You are continuing a previous conversation. The context from the previous conver
         };
       }
       return {
-        path: value,
+        path: effectivePath,
         exists,
         role: "existing_only_write",
         reason: "explicit_write_requires_existing_artifact",
@@ -12946,7 +12974,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     if (checklistStylePath || policy === "always_inline") {
       return {
-        path: value,
+        path: effectivePath,
         exists,
         role: "optional_output_inline",
         reason: checklistStylePath
@@ -12957,15 +12985,17 @@ You are continuing a previous conversation. The context from the previous conver
 
     if (hasInspectCue) {
       return {
-        path: value,
+        path: effectivePath,
         exists,
-        role: "inspect_existing",
-        reason: "inspection_style_verification_requires_existing_artifact",
+        role: exists ? "inspect_existing" : "optional_output_inline",
+        reason: exists
+          ? "inspection_style_verification_requires_existing_artifact"
+          : "inspection_artifact_not_found_downgraded_to_inline",
       };
     }
 
     return {
-      path: value,
+      path: effectivePath,
       exists,
       role: "inspect_existing",
       reason: "default_verification_existing_artifact_inspection",
@@ -15173,16 +15203,32 @@ You are continuing a previous conversation. The context from the previous conver
         !this.planCompletedEffectively
       ) {
         const shellDisabled = !this.workspace.permissions.shell;
-        const blocker = shellDisabled
-          ? "shell permission is OFF for this workspace"
-          : this.executionToolAttemptObserved
-            ? this.executionToolLastError
-              ? `execution tools failed. Latest error: ${this.executionToolLastError}`
-              : "execution tools were attempted but did not complete successfully"
-            : "no execution tool (run_command/run_applescript) was used";
-        throw new Error(
-          `Task required command execution, but execution did not complete: ${blocker}.`,
-        );
+        if (shellDisabled && this.task.source === "cron") {
+          this.allowExecutionWithoutShell = true;
+          this.emitEvent("log", {
+            metric: "cron_execution_requirement_waived_no_shell",
+            taskId: this.task.id,
+            reason:
+              "Scheduled task requires command execution, but shell is disabled and user input is unavailable; allowing safe best-effort completion.",
+          });
+          this.emitEvent("log", {
+            level: "warning",
+            metric: "cron_execution_requirement_waived_no_shell_user_notice",
+            message:
+              "Shell access is disabled for this workspace. The scheduled task needed to run commands but could not — results may be incomplete. Enable shell access in workspace settings or turn on 'Allow shell access' for this scheduled task.",
+          });
+        } else {
+          const blocker = shellDisabled
+            ? "shell permission is OFF for this workspace"
+            : this.executionToolAttemptObserved
+              ? this.executionToolLastError
+                ? `execution tools failed. Latest error: ${this.executionToolLastError}`
+                : "execution tools were attempted but did not complete successfully"
+              : "no execution tool (run_command/run_applescript) was used";
+          throw new Error(
+            `Task required command execution, but execution did not complete: ${blocker}.`,
+          );
+        }
       }
 
       // Phase 2.5: Optional verification agent
@@ -15414,7 +15460,7 @@ Canvas policy:
 PLANNING RULES:
 - Create a plan with 3-7 specific steps, each with one concrete objective.
 - Use specific file names/paths when known.
-- ${shouldRequirePlanVerificationStep ? "Include one final verification step for non-trivial tasks." : "Skip dedicated verification steps unless the user explicitly asks for verification."}
+- ${shouldRequirePlanVerificationStep ? "Include one final verification step for non-trivial tasks. Verification steps MUST use only objective, machine-checkable criteria: file existence, section/keyword presence, structural requirements, format validity. NEVER use subjective quality criteria (e.g. 'clearly written', 'comprehensive', 'actionable', 'well-structured')." : "Skip dedicated verification steps unless the user explicitly asks for verification."}
 - Avoid redundant review/verify steps and repeated file reads.
 - In propose mode, if the plan needs user choices/preferences, include a step that uses request_user_input (not plain free-text questioning).
 
@@ -16560,12 +16606,17 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 - browser_navigate supports browser_channel values "chromium", "chrome", and "brave". If the user asks for Brave, set browser_channel="brave" instead of claiming it is unavailable.
 
-USER INPUT GATE (CRITICAL):
+${this.task.agentConfig?.allowUserInput === false ? `AUTONOMOUS DECISION POLICY (CRITICAL):
+- You are a sub-agent running without user interaction capability.
+- NEVER ask the user to choose, confirm, specify, or provide input.
+- When a decision is required, make the most reasonable choice using safe defaults and document your rationale briefly.
+- If multiple approaches exist, pick the most standard/common one.
+- Proceed with execution after stating your assumption — do NOT stop.` : `USER INPUT GATE (CRITICAL):
 - If you ask the user for required information or a decision, STOP and wait.
 - Do NOT continue executing steps or call tools after asking such questions.
 - If safe defaults exist, state the assumption and proceed without asking.
 - In propose mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
-- When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.
+- When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.`}
 
 CLOUD STORAGE ROUTING (CRITICAL):
 - If the user mentions Box/Dropbox/OneDrive/Google Drive/SharePoint/Notion, treat it as a cloud integration request.
@@ -17077,6 +17128,7 @@ TASK / CONVERSATION HISTORY:
       let consecutiveToolUseStops = 0;
       let consecutiveMaxTokenStops = 0;
       let structuredInputEnforcementAttempts = 0;
+      let autonomousDecisionRecoveryAttempts = 0;
       let verificationRewindAttempted = false;
       let verificationCheckpointEmitted = false;
       let bootstrapMutationAttempted = false;
@@ -19674,6 +19726,27 @@ TASK / CONVERSATION HISTORY:
           });
           continueLoop = false;
         } else if (requiredDecisionDetected && !this.shouldPauseForRequiredDecision) {
+          // Attempt recovery: inject a corrective message telling the model to decide autonomously.
+          if (autonomousDecisionRecoveryAttempts < 2) {
+            autonomousDecisionRecoveryAttempts += 1;
+            console.log(
+              `${this.logTag} Sub-agent asked a blocking question, injecting autonomous decision guidance (attempt ${autonomousDecisionRecoveryAttempts}/2)`,
+            );
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "You are running without user input. Do NOT ask questions or request decisions. " +
+                    "Make the best autonomous decision now using safe defaults, " +
+                    "state your choice briefly, and proceed with execution.",
+                },
+              ],
+            });
+            continueLoop = true;
+            continue;
+          }
           stepFailed = true;
           lastFailureReason =
             "User action required: assistant requested required input/decision, but user input is disabled.";
@@ -21725,12 +21798,17 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT ask "Should I proceed?" or wait for permission in text - the tools handle approvals automatically.
 - browser_navigate supports browser_channel values "chromium", "chrome", and "brave". If the user asks for Brave, set browser_channel="brave" instead of claiming it is unavailable.
 
-USER INPUT GATE (CRITICAL):
+${this.task.agentConfig?.allowUserInput === false ? `AUTONOMOUS DECISION POLICY (CRITICAL):
+- You are a sub-agent running without user interaction capability.
+- NEVER ask the user to choose, confirm, specify, or provide input.
+- When a decision is required, make the most reasonable choice using safe defaults and document your rationale briefly.
+- If multiple approaches exist, pick the most standard/common one.
+- Proceed with execution after stating your assumption — do NOT stop.` : `USER INPUT GATE (CRITICAL):
 - If you ask the user for required information or a decision, STOP and wait.
 - Do NOT continue executing steps or call tools after asking such questions.
 - If safe defaults exist, state the assumption and proceed without asking.
 - In propose mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
-- When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.
+- When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.`}
 
 CLOUD STORAGE ROUTING (CRITICAL):
 - If the user mentions Box/Dropbox/OneDrive/Google Drive/SharePoint/Notion, treat it as a cloud integration request.
@@ -21965,6 +22043,7 @@ TASK / CONVERSATION HISTORY:
     let lowProgressNudgeInjected = false;
     let stopReasonNudgeInjected = false;
     let structuredInputEnforcementAttempts = 0;
+    let autonomousDecisionRecoveryAttempts = 0;
     let consecutiveToolUseStops = 0;
     let consecutiveMaxTokenStops = 0;
     let followUpToolCallsLocked = false;
@@ -23489,6 +23568,27 @@ TASK / CONVERSATION HISTORY:
           });
           continueLoop = false;
         } else if (followupRequiredDecisionDetected && !this.shouldPauseForRequiredDecision) {
+          // Attempt recovery: inject corrective guidance to decide autonomously.
+          if (autonomousDecisionRecoveryAttempts < 2) {
+            autonomousDecisionRecoveryAttempts += 1;
+            console.log(
+              `${this.logTag} Sub-agent asked a blocking follow-up question, injecting autonomous decision guidance (attempt ${autonomousDecisionRecoveryAttempts}/2)`,
+            );
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "You are running without user input. Do NOT ask questions or request decisions. " +
+                    "Make the best autonomous decision now using safe defaults, " +
+                    "state your choice briefly, and proceed with execution.",
+                },
+              ],
+            });
+            continueLoop = true;
+            continue;
+          }
           this.emitEvent("awaiting_user_input", {
             reasonCode: "user_action_required_disabled",
             followUp: true,
