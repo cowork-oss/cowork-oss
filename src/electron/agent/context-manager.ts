@@ -57,6 +57,10 @@ const RESERVED_TOKENS = 8000;
 const MAX_TOOL_RESULT_TOKENS_DEFAULT = 10000;
 const MAX_TOOL_RESULT_TOKENS_DOCUMENT = 30000;
 
+// Number of trailing messages inspected to identify "active" file paths.
+// Older messages that reference these paths are given budget priority during compaction.
+const ACTIVE_PATH_CONTEXT_WINDOW = 4;
+
 // Messages that begin with one of these tags are treated as "pinned" and should
 // survive compaction. (They are system-generated context blocks, not normal chat turns.)
 const PINNED_MESSAGE_TAG_PREFIXES = [
@@ -387,6 +391,56 @@ export class ContextManager {
   /**
    * Remove older messages while preserving conversation flow
    */
+  /**
+   * Extract file paths referenced in a set of messages (for active-work context detection).
+   */
+  private extractFilePathsFromMessages(msgs: LLMMessage[]): Set<string> {
+    const paths = new Set<string>();
+    const pathRegex = /(?:\/[\w.@-]+){2,}(?:\.\w+)?/g;
+    for (const msg of msgs) {
+      const text =
+        typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? (msg.content as Array<{ type: string; text?: string; input?: unknown; content?: string }>)
+                .map((c) => {
+                  if (c.type === "text") return c.text || "";
+                  if (c.type === "tool_use") return JSON.stringify(c.input || "");
+                  if (c.type === "tool_result") return typeof c.content === "string" ? c.content : "";
+                  return "";
+                })
+                .join(" ")
+            : "";
+      const matches = text.match(pathRegex);
+      if (matches) matches.forEach((p) => paths.add(p));
+    }
+    return paths;
+  }
+
+  /**
+   * Check if a message references any of the given active file paths.
+   */
+  private messageReferencesActivePaths(msg: LLMMessage, activePaths: Set<string>): boolean {
+    if (activePaths.size === 0) return false;
+    const text =
+      typeof msg.content === "string"
+        ? msg.content
+        : Array.isArray(msg.content)
+          ? (msg.content as Array<{ type: string; text?: string; input?: unknown; content?: string }>)
+              .map((c) => {
+                if (c.type === "text") return c.text || "";
+                if (c.type === "tool_use") return JSON.stringify(c.input || "");
+                if (c.type === "tool_result") return typeof c.content === "string" ? c.content : "";
+                return "";
+              })
+              .join(" ")
+          : "";
+    for (const path of activePaths) {
+      if (text.includes(path)) return true;
+    }
+    return false;
+  }
+
   private removeOlderMessagesWithMeta(
     messages: LLMMessage[],
     targetTokens: number,
@@ -408,6 +462,27 @@ export class ContextManager {
       if (!isPinnedMessage(messages[i])) continue;
       keep.add(i);
       currentTokens += estimateMessageTokens(messages[i]);
+    }
+
+    // Extract file paths from recent messages to identify actively-worked files.
+    // Older messages referencing these files should be preserved if budget allows.
+    const recentSliceStart = Math.max(1, messages.length - ACTIVE_PATH_CONTEXT_WINDOW);
+    const activeFilePaths = this.extractFilePathsFromMessages(
+      messages.slice(recentSliceStart),
+    );
+
+    // Prioritize keeping messages that reference active files (from older section).
+    // Reserve up to 70% of budget for recency, use remaining for active-file context.
+    const activeFileBudget = targetTokens * 0.15; // Up to 15% of budget for active-file messages
+    let activeFileTokensUsed = 0;
+    for (let i = 1; i < recentSliceStart; i++) {
+      if (keep.has(i)) continue;
+      if (!this.messageReferencesActivePaths(messages[i], activeFilePaths)) continue;
+      const msgTokens = estimateMessageTokens(messages[i]);
+      if (activeFileTokensUsed + msgTokens > activeFileBudget) continue;
+      keep.add(i);
+      currentTokens += msgTokens;
+      activeFileTokensUsed += msgTokens;
     }
 
     // Add messages from the end until we hit the limit (preserve recency).

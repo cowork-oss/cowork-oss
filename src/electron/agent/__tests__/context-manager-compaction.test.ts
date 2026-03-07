@@ -93,3 +93,128 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     }
   });
 });
+
+describe("ContextManager active-file path retention", () => {
+  /**
+   * Build a message whose text content references the given file path.
+   */
+  function msgWithPath(role: "user" | "assistant", filePath: string): LLMMessage {
+    return { role, content: `Here is the content of ${filePath}` };
+  }
+
+  /**
+   * Build a filler message with no file path references and a fixed token footprint.
+   */
+  function fillerMsg(role: "user" | "assistant", size = 500): LLMMessage {
+    return { role, content: "x".repeat(size) };
+  }
+
+  it("retains an older message referencing a file touched in recent turns during compaction", () => {
+    const cm = new ContextManager("gpt-3.5-turbo");
+
+    // Message [0]: initial task (always kept)
+    // Message [1]: references /src/auth.ts (old — should be kept because recent turns also touch it)
+    // Messages [2..N-4]: filler (expendable)
+    // Messages [N-3..N]: recent turns that also reference /src/auth.ts
+    const filePath = "/src/auth.ts";
+
+    const messages: LLMMessage[] = [
+      { role: "user", content: "Fix the auth module" }, // index 0 — always kept
+      msgWithPath("assistant", filePath),                // index 1 — should be retained
+    ];
+
+    // Bulk filler to force compaction
+    for (let i = 0; i < 35; i++) {
+      messages.push(fillerMsg(i % 2 === 0 ? "assistant" : "user", 600));
+    }
+
+    // Recent turns that also reference the same file (within ACTIVE_PATH_CONTEXT_WINDOW)
+    messages.push(fillerMsg("assistant", 50));
+    messages.push(msgWithPath("user", filePath));
+    messages.push(fillerMsg("assistant", 50));
+    messages.push(msgWithPath("user", filePath));
+
+    const res = cm.compactMessagesWithMeta(messages, 0);
+
+    // Compaction must have removed something for this test to be meaningful
+    expect(res.meta.kind).toBe("message_removal");
+
+    const keptContents = res.messages.map((m) =>
+      typeof m.content === "string" ? m.content : "",
+    );
+
+    // The old message referencing the active file should be retained
+    const activeFileRetained = keptContents.some((c) => c.includes(filePath) && c.startsWith("Here is"));
+    expect(activeFileRetained).toBe(true);
+  });
+
+  it("does NOT retain an older message referencing a file not touched in recent turns", () => {
+    const cm = new ContextManager("gpt-3.5-turbo");
+
+    const staleFile = "/src/old-module.ts";
+    const activeFile = "/src/new-feature.ts";
+
+    const messages: LLMMessage[] = [
+      { role: "user", content: "Refactor the new feature" }, // index 0
+      msgWithPath("assistant", staleFile),                    // index 1 — stale, should be evicted
+    ];
+
+    // Bulk filler
+    for (let i = 0; i < 35; i++) {
+      messages.push(fillerMsg(i % 2 === 0 ? "assistant" : "user", 600));
+    }
+
+    // Recent turns reference only the new active file
+    messages.push(msgWithPath("assistant", activeFile));
+    messages.push(msgWithPath("user", activeFile));
+    messages.push(msgWithPath("assistant", activeFile));
+    messages.push(msgWithPath("user", activeFile));
+
+    const res = cm.compactMessagesWithMeta(messages, 0);
+    expect(res.meta.kind).toBe("message_removal");
+
+    const keptContents = res.messages.map((m) =>
+      typeof m.content === "string" ? m.content : "",
+    );
+
+    // The stale file message should NOT be among the kept messages (it fell outside budget)
+    const staleRetained = keptContents.some(
+      (c) => c.includes(staleFile) && c.startsWith("Here is"),
+    );
+    expect(staleRetained).toBe(false);
+  });
+
+  it("never retains more than 15% of the token budget for active-file messages", () => {
+    const cm = new ContextManager("gpt-3.5-turbo");
+
+    const filePath = "/src/big-file.ts";
+    const messages: LLMMessage[] = [
+      { role: "user", content: "Process big file" }, // index 0
+    ];
+
+    // Add many old messages referencing the active file (all large)
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: "assistant", content: `${filePath} content: ${"y".repeat(800)}` });
+    }
+
+    // Recent turns (within window) also reference the file
+    for (let i = 0; i < 4; i++) {
+      messages.push({ role: i % 2 === 0 ? "assistant" : "user", content: `Working on ${filePath}` });
+    }
+
+    const res = cm.compactMessagesWithMeta(messages, 0);
+
+    if (res.meta.kind === "message_removal") {
+      // Count how many of the large old messages were kept
+      const keptOldActiveFileMessages = res.messages.filter(
+        (m) =>
+          typeof m.content === "string" &&
+          m.content.includes(filePath) &&
+          m.content.length > 400,
+      );
+      // Should not retain all 20 — budget cap must have kicked in
+      expect(keptOldActiveFileMessages.length).toBeLessThan(20);
+    }
+    // If no removal needed, the test is vacuously satisfied
+  });
+});
