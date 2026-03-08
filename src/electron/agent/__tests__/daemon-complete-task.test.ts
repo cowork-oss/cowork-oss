@@ -482,6 +482,71 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
+  it("auto-waives unresolved failures when partial_success already has substantive outputs", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.getUnresolvedFailedSteps.mockReturnValue(["step:build"]);
+    daemonLike.eventRepo.findByTaskId.mockReturnValue([
+      {
+        id: "event-output-1",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "timeline_step_finished",
+        stepId: "step:build",
+        status: "failed",
+        legacyType: "step_failed",
+        payload: {
+          legacyType: "step_failed",
+          step: {
+            id: "step:build",
+            description: "Write the remaining validation artifact",
+            error:
+              "Step contract failure [contract_unmet_write_required][artifact_write_checkpoint_failed]: iteration 7 reached without successful file/canvas mutation.",
+          },
+        },
+      },
+    ]);
+
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Created the main deliverables and documented the remaining blocker for the unfinished validation artifact.",
+      {
+        terminalStatus: "partial_success",
+        failureClass: "contract_unmet_write_required",
+        failedMutationRequiredStepIds: ["step:build"],
+        outputSummary: {
+          created: ["artifacts/report.md"],
+          primaryOutputPath: "artifacts/report.md",
+          outputCount: 1,
+          folders: ["artifacts"],
+        },
+      },
+    );
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "partial_success",
+        failureClass: "contract_unmet_write_required",
+      }),
+    );
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "log",
+      expect.objectContaining({
+        metric: "completion_gate_auto_waive_evidence_backed_steps",
+        blocked: false,
+      }),
+    );
+  });
+
   it("does not auto-waive when latest failure for the step is non-budget", () => {
     const daemonLike = createDaemonLike();
     daemonLike.getUnresolvedFailedSteps.mockReturnValue(["4"]);
