@@ -21,3 +21,4 @@ When a user reports a failure, error, or unexpected behavior:
 - Use `npm run dev` for normal development startup; it routes through the log-aware wrapper.
 - Use `npm run dev:start` only when you explicitly need the raw underlying startup command.
 - Use `npm run dev:log` to force timestamped capture to `logs/dev-*.log` and `logs/dev-latest.log`.
+- Avoid using `npm run dev:react` alone for desktop debugging; it skips Electron preload APIs and can produce misleading behavior.
