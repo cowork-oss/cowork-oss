@@ -695,7 +695,7 @@ export interface SuccessCriteria {
  */
 export type AgentType = "main" | "sub" | "parallel";
 export type ConversationMode = "task" | "chat" | "hybrid" | "think";
-export type ExecutionMode = "execute" | "propose" | "analyze";
+export type ExecutionMode = "execute" | "propose" | "analyze" | "verified";
 export type ExecutionModeSource = "user" | "strategy" | "auto_promote";
 export type TurnBudgetPolicy = "hard_window" | "adaptive_unbounded";
 export type VerificationArtifactPathPolicy =
@@ -1333,6 +1333,25 @@ export interface WorkspacePermissions {
   dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
 }
 
+/**
+ * External verification configuration for a plan step (used in "verified" execution mode).
+ * When present, the step must pass external verification before being marked complete.
+ */
+export interface ExternalStepVerification {
+  /** Type of external verification to run */
+  type: "shell_command" | "file_exists" | "grep_absent";
+  /** Shell command whose exit code determines pass/fail (for shell_command type) */
+  command?: string;
+  /** Files that must exist after step completion (for file_exists type) */
+  filePaths?: string[];
+  /** Pattern that must NOT appear in grepTarget (for grep_absent type) */
+  grepPattern?: string;
+  /** File or directory to search for grepPattern */
+  grepTarget?: string;
+  /** Max retries before the step is considered permanently failed (default: 2) */
+  maxRetries?: number;
+}
+
 export interface PlanStep {
   id: string;
   description: string;
@@ -1344,6 +1363,10 @@ export interface PlanStep {
   startedAt?: number;
   completedAt?: number;
   error?: string;
+  /** External verification for "verified" execution mode */
+  externalVerification?: ExternalStepVerification;
+  /** Number of external verification attempts (tracked during execution) */
+  verificationAttempts?: number;
 }
 
 export interface Plan {
