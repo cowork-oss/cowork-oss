@@ -143,8 +143,9 @@ export function SuggestionsPanel({
             lineHeight: 1.4,
           }}
         >
-          AI-generated suggestions based on your task patterns, goals, and knowledge graph. Updated
-          after each completed task and during daily briefings.
+          AI-generated suggestions based on your task patterns, goals, and knowledge graph. They
+          learn from when you act on them, surface during lower-noise windows, and can be bundled
+          into daily briefings when now is not the right time.
         </p>
       </div>
 
