@@ -105,4 +105,87 @@ describe("LLMProviderFactory custom provider config resolution", () => {
 
     expect(modelId).toBe("us.anthropic.claude-opus-4-6-20260115-v1:0");
   });
+
+  it("uses cached custom-provider models when available", () => {
+    const modelStatus = LLMProviderFactory.getProviderModelStatus({
+      providerType: "minimax-portal",
+      modelKey: "sonnet-3-5",
+      customProviders: {
+        "minimax-portal": {
+          apiKey: "minimax-test",
+          model: "MiniMax-M2.5",
+          cachedModels: [
+            {
+              key: "MiniMax-M2.5",
+              displayName: "MiniMax M2.5",
+              description: "MiniMax Portal model",
+            },
+            {
+              key: "MiniMax-M2.1",
+              displayName: "MiniMax M2.1",
+              description: "MiniMax Portal model",
+            },
+          ],
+        },
+      },
+    } as Any);
+
+    expect(modelStatus.currentModel).toBe("MiniMax-M2.5");
+    expect(modelStatus.models).toEqual([
+      {
+        key: "MiniMax-M2.5",
+        displayName: "MiniMax M2.5",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.1",
+        displayName: "MiniMax M2.1",
+        description: "MiniMax Portal model",
+      },
+    ]);
+  });
+
+  it("returns documented MiniMax Portal models when refreshing custom-provider models", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "minimax-portal",
+      modelKey: "sonnet-3-5",
+      customProviders: {
+        "minimax-portal": {
+          apiKey: "minimax-test",
+          model: "MiniMax-M2.5",
+        },
+      },
+    } as Any);
+    const saveSpy = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+
+    await expect(LLMProviderFactory.getCustomProviderModels("minimax-portal")).resolves.toEqual([
+      {
+        key: "MiniMax-M2.5",
+        displayName: "MiniMax-M2.5",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.5-highspeed",
+        displayName: "MiniMax-M2.5-highspeed",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.1",
+        displayName: "MiniMax-M2.1",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2.1-highspeed",
+        displayName: "MiniMax-M2.1-highspeed",
+        description: "MiniMax Portal model",
+      },
+      {
+        key: "MiniMax-M2",
+        displayName: "MiniMax-M2",
+        description: "MiniMax Portal model",
+      },
+    ]);
+
+    expect(saveSpy).toHaveBeenCalled();
+  });
 });
