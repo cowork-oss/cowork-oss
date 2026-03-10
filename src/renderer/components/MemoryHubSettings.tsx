@@ -19,6 +19,7 @@ export function MemoryHubSettings(props?: {
   const [kitStatus, setKitStatus] = useState<WorkspaceKitStatus | null>(null);
   const [kitLoading, setKitLoading] = useState(false);
   const [kitBusy, setKitBusy] = useState(false);
+  const [kitPreset, setKitPreset] = useState<"default" | "venture_operator">("default");
   const [newProjectId, setNewProjectId] = useState("");
 
   const selectedWorkspace = useMemo(() => {
@@ -86,6 +87,7 @@ export function MemoryHubSettings(props?: {
       const status = await window.electronAPI.initWorkspaceKit({
         workspaceId: selectedWorkspaceId,
         mode: "missing",
+        templatePreset: kitPreset,
       });
       setKitStatus(status);
     } catch (error) {
@@ -189,8 +191,9 @@ export function MemoryHubSettings(props?: {
                 Enable Maintenance Heartbeats
               </div>
               <p className="settings-form-hint" style={{ marginTop: "4px", marginBottom: 0 }}>
-                When enabled, lead agents can create a daily maintenance task if{" "}
-                <code>.cowork/HEARTBEAT.md</code> exists.
+                When enabled, lead agents treat <code>.cowork/HEARTBEAT.md</code> as the recurring
+                checks contract for proactive maintenance, while staying silent unless they find
+                something actionable.
               </p>
             </div>
             <label className="settings-toggle" style={{ flexShrink: 0, marginTop: "2px" }}>
@@ -230,6 +233,25 @@ export function MemoryHubSettings(props?: {
                 Path: <code>{selectedWorkspace.path}</code>
               </p>
             )}
+            <div style={{ marginTop: "10px" }}>
+              <label className="settings-label">Kit Preset</label>
+              <select
+                value={kitPreset}
+                onChange={(e) =>
+                  setKitPreset(
+                    e.target.value === "venture_operator" ? "venture_operator" : "default",
+                  )
+                }
+                className="settings-select"
+              >
+                <option value="default">Default workspace kit</option>
+                <option value="venture_operator">Venture operator kit</option>
+              </select>
+              <p className="settings-form-hint">
+                Venture operator mode seeds company, KPI, and operating-loop files for founder-led
+                autonomous workflows.
+              </p>
+            </div>
           </div>
         )}
 
