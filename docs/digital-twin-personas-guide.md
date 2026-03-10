@@ -563,7 +563,7 @@ Each twin learns over time through CoWork OS's playbook and relationship memory 
 
 ## Expanding to Other Job Areas
 
-The 10 built-in templates cover core technology roles. The persona template system is designed to be extended to any job function where cognitive overhead exists. Below are additional areas where digital twins would apply, with the cognitive offload categories they would target and example proactive tasks.
+The built-in templates cover core technology and venture/operator roles. The persona template system is designed to be extended to any job function where cognitive overhead exists. Below are additional areas where digital twins would apply, with the cognitive offload categories they would target and example proactive tasks.
 
 ### Design
 
