@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from "../../shared/types";
 import type { ActivatePersonaTemplateRequest, PersonaTemplateCategory } from "../../shared/types";
 import type { PersonaTemplateService } from "../agents/PersonaTemplateService";
 import { rateLimiter } from "../utils/rate-limiter";
+import { validateInput, UUIDSchema } from "../utils/validation";
 
 /**
  * Rate limit check helper
@@ -50,6 +51,16 @@ export function setupPersonaTemplateHandlers(deps: PersonaTemplateDeps): void {
 
       if (!request || !request.templateId) {
         throw new Error("Template ID is required for activation");
+      }
+
+      if (request.customization?.companyId) {
+        request = {
+          ...request,
+          customization: {
+            ...request.customization,
+            companyId: validateInput(UUIDSchema, request.customization.companyId, "company ID"),
+          },
+        };
       }
 
       return personaTemplateService.activate(request);
