@@ -322,6 +322,14 @@ function getCustomProviderEntry(providerType: LLMProviderType): ProviderCatalogE
   return CUSTOM_PROVIDER_MAP.get(resolveCustomProviderId(providerType));
 }
 
+function getKnownCustomProviderModels(entry: ProviderCatalogEntry): CachedModelInfo[] {
+  return (entry.knownModels || []).map((modelId) => ({
+    key: modelId,
+    displayName: modelId,
+    description: entry.description || `${entry.name} model`,
+  }));
+}
+
 function getCustomProviderConfig(
   customProviders: Record<string, CustomProviderConfig> | undefined,
   providerType: LLMProviderType,
@@ -1690,16 +1698,45 @@ export class LLMProviderFactory {
       const customConfig =
         settings.customProviders?.[resolvedProviderType] ||
         settings.customProviders?.[settings.providerType];
-      const currentModel = customConfig?.model || customEntry.defaultModel || "";
+
+      // Guard against cross-provider model contamination: if the stored model for this
+      // custom provider matches a model that belongs to a different provider (e.g. an
+      // Azure deployment name stored as minimax-portal's model), ignore it and fall
+      // back to this provider's catalog default.
+      const storedModel = customConfig?.model;
+      const isFromAnotherProvider =
+        storedModel != null &&
+        (settings.azure?.deployments?.includes(storedModel) ||
+          settings.azure?.deployment === storedModel ||
+          settings.openai?.model === storedModel ||
+          settings.gemini?.model === storedModel ||
+          settings.openrouter?.model === storedModel ||
+          settings.ollama?.model === storedModel ||
+          settings.groq?.model === storedModel ||
+          settings.xai?.model === storedModel ||
+          settings.kimi?.model === storedModel ||
+          settings.openaiCompatible?.model === storedModel);
+      const currentModel =
+        (!isFromAnotherProvider && storedModel) || customEntry.defaultModel || "";
+      const cachedModels =
+        customConfig?.cachedModels && customConfig.cachedModels.length > 0
+          ? customConfig.cachedModels
+          : currentModel
+            ? [
+                {
+                  key: currentModel,
+                  displayName: currentModel,
+                  description: customEntry.description || `${customEntry.name} model`,
+                },
+              ]
+            : [];
       return {
         currentModel,
-        models: [
-          {
-            key: currentModel,
-            displayName: currentModel,
-            description: customEntry.description || `${customEntry.name} model`,
-          },
-        ],
+        models: ensureCurrentModel(
+          cachedModels,
+          currentModel,
+          customEntry.description || `${customEntry.name} model`,
+        ),
       };
     }
 
@@ -2846,5 +2883,107 @@ export class LLMProviderFactory {
 
     this.saveCachedModels("openai-compatible", cachedModels);
     return cachedModels;
+  }
+
+  static async getCustomProviderModels(
+    providerType: LLMProviderType,
+    overrides?: {
+      apiKey?: string;
+      baseUrl?: string;
+    },
+  ): Promise<CachedModelInfo[]> {
+    const resolvedProviderType = resolveCustomProviderId(providerType);
+    const entry = getCustomProviderEntry(resolvedProviderType);
+    if (!entry) {
+      return [];
+    }
+
+    const settings = this.loadSettings();
+    const existingConfig = getCustomProviderConfig(settings.customProviders, resolvedProviderType) || {};
+    const apiKey = overrides?.apiKey?.trim() || existingConfig.apiKey || "";
+    const baseUrl = overrides?.baseUrl?.trim() || existingConfig.baseUrl || entry.baseUrl || "";
+    const documentedModels = getKnownCustomProviderModels(entry);
+    const fallbackCachedModels = Array.from(
+      new Set([
+        existingConfig.model?.trim(),
+        entry.defaultModel?.trim(),
+        ...documentedModels.map((model) => model.key),
+      ].filter(Boolean)),
+    ).map((modelId) => ({
+      key: modelId!,
+      displayName: modelId!,
+      description: entry.description || `${entry.name} model`,
+    }));
+
+    // MiniMax documents its supported model IDs, but the Anthropic-compatible
+    // endpoint does not expose a usable public /models listing endpoint.
+    if (documentedModels.length > 0 && (resolvedProviderType === "minimax" || resolvedProviderType === "minimax-portal")) {
+      const updatedSettings = this.loadSettings();
+      updatedSettings.customProviders = {
+        ...updatedSettings.customProviders,
+        [resolvedProviderType]: {
+          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          cachedModels: fallbackCachedModels,
+        },
+      };
+      this.saveSettings(updatedSettings);
+      return fallbackCachedModels;
+    }
+
+    if (!baseUrl) {
+      return existingConfig.cachedModels || fallbackCachedModels;
+    }
+
+    const provider =
+      entry.compatibility === "anthropic"
+        ? new AnthropicCompatibleProvider({
+            type: resolvedProviderType,
+            providerName: entry.name,
+            apiKey,
+            baseUrl,
+            defaultModel: entry.defaultModel,
+          })
+        : new OpenAICompatibleProvider({
+            type: resolvedProviderType,
+            providerName: entry.name,
+            apiKey,
+            baseUrl,
+            defaultModel: entry.defaultModel,
+          });
+
+    const models = await provider.getAvailableModels();
+    const cachedModels = models.map((model) => ({
+      key: model.id,
+      displayName: model.name || model.id,
+      description: entry.description || `${entry.name} model`,
+    }));
+
+    if (cachedModels.length > 0) {
+      const updatedSettings = this.loadSettings();
+      updatedSettings.customProviders = {
+        ...updatedSettings.customProviders,
+        [resolvedProviderType]: {
+          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          cachedModels,
+        },
+      };
+      this.saveSettings(updatedSettings);
+      return cachedModels;
+    }
+
+    if (fallbackCachedModels.length > 0) {
+      const updatedSettings = this.loadSettings();
+      updatedSettings.customProviders = {
+        ...updatedSettings.customProviders,
+        [resolvedProviderType]: {
+          ...(updatedSettings.customProviders?.[resolvedProviderType] || {}),
+          cachedModels: fallbackCachedModels,
+        },
+      };
+      this.saveSettings(updatedSettings);
+      return fallbackCachedModels;
+    }
+
+    return existingConfig.cachedModels || [];
   }
 }
