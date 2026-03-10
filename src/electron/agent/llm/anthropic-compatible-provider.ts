@@ -31,6 +31,18 @@ function resolveMessagesUrl(baseUrl: string): string {
   return joinUrl(trimmedBase, "/v1/messages");
 }
 
+function resolveModelsUrl(baseUrl: string): string {
+  const trimmedBase = baseUrl.replace(/\/+$/, "");
+  const lowerBase = trimmedBase.toLowerCase();
+  if (lowerBase.endsWith("/models")) {
+    return trimmedBase;
+  }
+  if (/\/v\d+(?:[a-z]+\d*)?$/i.test(trimmedBase)) {
+    return joinUrl(trimmedBase, "/models");
+  }
+  return joinUrl(trimmedBase, "/v1/models");
+}
+
 export interface AnthropicCompatibleProviderOptions {
   type: LLMProviderType;
   providerName: string;
@@ -42,6 +54,7 @@ export interface AnthropicCompatibleProviderOptions {
 export class AnthropicCompatibleProvider implements LLMProvider {
   readonly type: LLMProviderType;
   private apiKey: string;
+  private baseUrl: string;
   private messagesUrl: string;
   private defaultModel: string;
   private providerName: string;
@@ -49,6 +62,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   constructor(options: AnthropicCompatibleProviderOptions) {
     this.type = options.type;
     this.apiKey = options.apiKey;
+    this.baseUrl = options.baseUrl;
     this.messagesUrl = resolveMessagesUrl(options.baseUrl);
     this.defaultModel = options.defaultModel;
     this.providerName = options.providerName;
@@ -136,6 +150,70 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         success: false,
         error: error.message || `Failed to connect to ${this.providerName} API`,
       };
+    }
+  }
+
+  async getAvailableModels(): Promise<Array<{ id: string; name: string }>> {
+    try {
+      const headers: Record<string, string> = {
+        "anthropic-version": ANTHROPIC_VERSION,
+      };
+      if (this.apiKey) {
+        headers["x-api-key"] = this.apiKey;
+        headers.Authorization = `Bearer ${this.apiKey}`;
+      }
+
+      const response = await fetch(resolveModelsUrl(this.baseUrl), {
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.warn(
+          `[${this.providerName}] Model refresh failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ""}`,
+        );
+        return [];
+      }
+
+      const data = (await response.json()) as Any;
+      const collections = [
+        data,
+        data?.data,
+        data?.models,
+        data?.data?.models,
+        data?.result,
+        data?.result?.models,
+        data?.model_list,
+        data?.modelList,
+      ];
+      const modelList = collections.find((value) => Array.isArray(value)) as Any[] | undefined;
+      if (!modelList || modelList.length === 0) {
+        console.warn(
+          `[${this.providerName}] Model refresh returned no parseable models. Response keys: ${
+            data && typeof data === "object" ? Object.keys(data).join(", ") : typeof data
+          }`,
+        );
+        return [];
+      }
+
+      return modelList
+        .map((model: Any) => {
+          const id = model.id || model.model || model.model_id || model.name;
+          if (!id || typeof id !== "string") return null;
+          return {
+            id,
+            name:
+              model.display_name ||
+              model.displayName ||
+              model.model_name ||
+              model.name ||
+              id,
+          };
+        })
+        .filter((model): model is { id: string; name: string } => !!model);
+    } catch (error) {
+      console.error(`[${this.providerName}] Failed to fetch models:`, error);
+      return [];
     }
   }
 
