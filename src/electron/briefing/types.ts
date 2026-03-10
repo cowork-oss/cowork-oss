@@ -72,9 +72,11 @@ export interface DailyBriefingServiceDeps {
   /** Get priorities from .cowork/PRIORITIES.md */
   getPriorities: (workspaceId: string) => string | null;
   /** Get upcoming cron jobs */
-  getUpcomingJobs: (limit: number) => Any[];
+  getUpcomingJobs: (workspaceId: string, limit: number) => Any[] | Promise<Any[]>;
   /** Get open loops from daily log */
   getOpenLoops: (workspaceId: string) => string[];
+  /** Best-effort suggestion refresh before briefing generation */
+  refreshSuggestions?: (workspaceId: string) => Promise<void>;
   /** Deliver to channel */
   deliverToChannel?: (params: {
     channelType: string;
