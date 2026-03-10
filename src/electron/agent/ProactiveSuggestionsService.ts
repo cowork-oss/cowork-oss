@@ -9,6 +9,25 @@ const SUGGESTION_MARKER = "[SUGGESTION]";
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ACTIVE_SUGGESTIONS = 10;
 const MIN_RECURRING_COUNT = 3;
+const SURFACE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const MAX_TELEMETRY_EVENTS = 1000;
+
+type SuggestionTelemetryEventType = "created" | "surfaced" | "dismissed" | "acted_on";
+
+interface SuggestionTelemetryEvent {
+  workspaceId: string;
+  suggestionId: string;
+  type: SuggestionTelemetryEventType;
+  at: number;
+  hour: number;
+}
+
+interface PersistedSuggestionState {
+  dismissed: string[];
+  actedOn: string[];
+  surfacedAt: Record<string, number>;
+  telemetryEvents: SuggestionTelemetryEvent[];
+}
 
 // ─── Follow-Up Templates ──────────────────────────────────────────
 
@@ -159,6 +178,8 @@ const ACTION_KEYWORDS =
 export class ProactiveSuggestionsService {
   private static dismissedIds: Set<string> = new Set();
   private static actedOnIds: Set<string> = new Set();
+  private static surfacedAt: Map<string, number> = new Map();
+  private static telemetryEvents: SuggestionTelemetryEvent[] = [];
   private static loaded = false;
   /** Tracks titles generated within the current generateAll() cycle for cross-generator dedup */
   private static pendingTitles: Set<string> = new Set();
@@ -172,12 +193,12 @@ export class ProactiveSuggestionsService {
     if (!SecureSettingsRepository.isInitialized()) return;
     try {
       const repo = SecureSettingsRepository.getInstance();
-      const data = repo.load<{ dismissed: string[]; actedOn: string[] }>(
-        "proactive-suggestions-state",
-      );
+      const data = repo.load<PersistedSuggestionState>("proactive-suggestions-state");
       if (data) {
         this.dismissedIds = new Set(data.dismissed || []);
         this.actedOnIds = new Set(data.actedOn || []);
+        this.surfacedAt = new Map(Object.entries(data.surfacedAt || {}));
+        this.telemetryEvents = Array.isArray(data.telemetryEvents) ? data.telemetryEvents : [];
       }
     } catch {
       // best-effort
@@ -191,6 +212,8 @@ export class ProactiveSuggestionsService {
       repo.save("proactive-suggestions-state", {
         dismissed: [...this.dismissedIds].slice(-200), // cap stored IDs
         actedOn: [...this.actedOnIds].slice(-200),
+        surfacedAt: Object.fromEntries(this.surfacedAt),
+        telemetryEvents: this.telemetryEvents.slice(-MAX_TELEMETRY_EVENTS),
       });
     } catch {
       // best-effort
@@ -202,7 +225,10 @@ export class ProactiveSuggestionsService {
   /**
    * List active (non-expired, non-dismissed) suggestions for a workspace.
    */
-  static listActive(workspaceId: string): ProactiveSuggestion[] {
+  static listActive(
+    workspaceId: string,
+    opts?: { includeDeferred?: boolean; recordSurface?: boolean },
+  ): ProactiveSuggestion[] {
     this.loadDismissed();
 
     try {
@@ -220,9 +246,26 @@ export class ProactiveSuggestionsService {
         suggestions.push(parsed);
       }
 
-      return suggestions
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, MAX_ACTIVE_SUGGESTIONS);
+      const ranked = suggestions
+        .map((suggestion) => ({
+          suggestion,
+          score: suggestion.confidence + this.getTimingAdjustment(workspaceId, suggestion),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .map((entry) => entry.suggestion);
+
+      const visible = (opts?.includeDeferred ? ranked : ranked.filter((s) => !this.shouldDefer(workspaceId, s))).slice(
+        0,
+        MAX_ACTIVE_SUGGESTIONS,
+      );
+
+      if (opts?.recordSurface !== false) {
+        for (const suggestion of visible) {
+          this.recordSurface(workspaceId, suggestion.id);
+        }
+      }
+
+      return visible;
     } catch {
       return [];
     }
@@ -234,6 +277,7 @@ export class ProactiveSuggestionsService {
   static dismiss(workspaceId: string, suggestionId: string): boolean {
     this.loadDismissed();
     this.dismissedIds.add(suggestionId);
+    this.recordTelemetry(workspaceId, suggestionId, "dismissed");
     this.saveDismissed();
     return true;
   }
@@ -252,6 +296,7 @@ export class ProactiveSuggestionsService {
         if (!parsed || parsed.id !== suggestionId) continue;
 
         this.actedOnIds.add(suggestionId);
+        this.recordTelemetry(workspaceId, suggestionId, "acted_on");
         this.saveDismissed();
         return parsed.actionPrompt || null;
       }
@@ -266,7 +311,10 @@ export class ProactiveSuggestionsService {
    * Get top N suggestions for inclusion in daily briefing.
    */
   static getTopForBriefing(workspaceId: string, limit = 3): ProactiveSuggestion[] {
-    return this.listActive(workspaceId).slice(0, limit);
+    return this.listActive(workspaceId, {
+      includeDeferred: true,
+      recordSurface: false,
+    }).slice(0, limit);
   }
 
   // ─── Generators ─────────────────────────────────────────────────
@@ -498,7 +546,10 @@ export class ProactiveSuggestionsService {
     },
   ): Promise<void> {
     // Enforce max active count
-    const active = this.listActive(workspaceId);
+    const active = this.listActive(workspaceId, {
+      includeDeferred: true,
+      recordSurface: false,
+    });
     if (active.length >= MAX_ACTIVE_SUGGESTIONS) {
       // Evict lowest-confidence to make room
       const lowest = active[active.length - 1]; // already sorted desc
@@ -528,6 +579,7 @@ export class ProactiveSuggestionsService {
 
     try {
       await MemoryService.capture(workspaceId, undefined, "insight", content);
+      this.recordTelemetry(workspaceId, id, "created");
     } catch {
       /* best-effort */
     }
@@ -568,7 +620,10 @@ export class ProactiveSuggestionsService {
     // Check in-memory pending titles from current generation cycle
     if (this.pendingTitles.has(normalizedNew)) return true;
     // Check already-persisted suggestions
-    const active = this.listActive(workspaceId);
+    const active = this.listActive(workspaceId, {
+      includeDeferred: true,
+      recordSurface: false,
+    });
     return active.some((s) => s.title.toLowerCase().trim().slice(0, 60) === normalizedNew);
   }
 
@@ -596,5 +651,69 @@ export class ProactiveSuggestionsService {
     if (/\b(research|analyze|investigate|explore|compare)\b/.test(combined)) return "research";
     if (/\b(api|endpoint|route|rest|graphql)\b/.test(combined)) return "api";
     return null;
+  }
+
+  private static recordSurface(workspaceId: string, suggestionId: string): void {
+    const now = Date.now();
+    const lastSurfacedAt = this.surfacedAt.get(suggestionId) || 0;
+    if (lastSurfacedAt && now - lastSurfacedAt < SURFACE_COOLDOWN_MS) {
+      return;
+    }
+    this.surfacedAt.set(suggestionId, now);
+    this.recordTelemetry(workspaceId, suggestionId, "surfaced", now, false);
+    this.saveDismissed();
+  }
+
+  private static recordTelemetry(
+    workspaceId: string,
+    suggestionId: string,
+    type: SuggestionTelemetryEventType,
+    at = Date.now(),
+    save = true,
+  ): void {
+    this.loadDismissed();
+    this.telemetryEvents.push({
+      workspaceId,
+      suggestionId,
+      type,
+      at,
+      hour: new Date(at).getHours(),
+    });
+    if (this.telemetryEvents.length > MAX_TELEMETRY_EVENTS) {
+      this.telemetryEvents = this.telemetryEvents.slice(-MAX_TELEMETRY_EVENTS);
+    }
+    if (save) {
+      this.saveDismissed();
+    }
+  }
+
+  private static getTimingAdjustment(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+    now = new Date(),
+  ): number {
+    const currentHour = now.getHours();
+    const workspaceEvents = this.telemetryEvents.filter(
+      (event) => event.workspaceId === workspaceId && event.suggestionId !== suggestion.id,
+    );
+    if (workspaceEvents.length === 0) return 0;
+
+    let score = 0;
+    for (const event of workspaceEvents) {
+      const distance = Math.min(Math.abs(event.hour - currentHour), 24 - Math.abs(event.hour - currentHour));
+      const proximity = Math.max(0, 1 - distance / 6);
+      if (event.type === "acted_on") score += 0.35 * proximity;
+      if (event.type === "dismissed") score -= 0.2 * proximity;
+    }
+    return score;
+  }
+
+  private static shouldDefer(workspaceId: string, suggestion: ProactiveSuggestion): boolean {
+    const workspaceEvents = this.telemetryEvents.filter((event) => event.workspaceId === workspaceId);
+    const acted = workspaceEvents.filter((event) => event.type === "acted_on");
+    if (acted.length < 3) return false;
+    const adjustment = this.getTimingAdjustment(workspaceId, suggestion);
+    const ageMs = Date.now() - suggestion.createdAt;
+    return adjustment < -0.1 && ageMs < 24 * 60 * 60 * 1000;
   }
 }
