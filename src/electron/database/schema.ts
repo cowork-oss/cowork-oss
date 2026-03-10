@@ -949,6 +949,7 @@ export class DatabaseManager {
         CREATE TABLE IF NOT EXISTS agent_roles (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL UNIQUE,
+          company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
           display_name TEXT NOT NULL,
           description TEXT,
           icon TEXT DEFAULT '🤖',
@@ -968,6 +969,7 @@ export class DatabaseManager {
 
         CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
         CREATE INDEX IF NOT EXISTS idx_agent_roles_name ON agent_roles(name);
+        CREATE INDEX IF NOT EXISTS idx_agent_roles_company ON agent_roles(company_id);
       `);
     } catch {
       // Table already exists, ignore
@@ -1227,6 +1229,7 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN heartbeat_stagger_offset INTEGER DEFAULT 0",
       "ALTER TABLE agent_roles ADD COLUMN last_heartbeat_at INTEGER",
       "ALTER TABLE agent_roles ADD COLUMN heartbeat_status TEXT DEFAULT 'idle'",
+      "ALTER TABLE agent_roles ADD COLUMN company_id TEXT REFERENCES companies(id) ON DELETE SET NULL",
     ];
 
     for (const sql of missionControlColumns) {
@@ -1235,6 +1238,12 @@ export class DatabaseManager {
       } catch {
         // Column already exists, ignore
       }
+    }
+
+    try {
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_agent_roles_company ON agent_roles(company_id)");
+    } catch {
+      // Index already exists, ignore
     }
 
     // Migration: Create task_subscriptions table for thread subscriptions
@@ -1755,6 +1764,84 @@ export class DatabaseManager {
       `);
     } catch {
       // Table already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS improvement_candidates (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          severity REAL NOT NULL DEFAULT 0,
+          recurrence_count INTEGER NOT NULL DEFAULT 1,
+          fixability_score REAL NOT NULL DEFAULT 0,
+          priority_score REAL NOT NULL DEFAULT 0,
+          evidence TEXT NOT NULL,
+          last_task_id TEXT,
+          last_event_type TEXT,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
+          last_experiment_at INTEGER,
+          resolved_at INTEGER
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_improvement_candidates_fingerprint
+          ON improvement_candidates(workspace_id, fingerprint);
+        CREATE INDEX IF NOT EXISTS idx_improvement_candidates_status
+          ON improvement_candidates(status, priority_score DESC, last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_improvement_candidates_workspace
+          ON improvement_candidates(workspace_id, status, priority_score DESC);
+
+        CREATE TABLE IF NOT EXISTS improvement_runs (
+          id TEXT PRIMARY KEY,
+          candidate_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          review_status TEXT NOT NULL,
+          promotion_status TEXT DEFAULT 'idle',
+          task_id TEXT,
+          branch_name TEXT,
+          merge_result TEXT,
+          pull_request TEXT,
+          promotion_error TEXT,
+          baseline_metrics TEXT,
+          outcome_metrics TEXT,
+          verdict_summary TEXT,
+          evaluation_notes TEXT,
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          completed_at INTEGER,
+          promoted_at INTEGER,
+          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_improvement_runs_candidate
+          ON improvement_runs(candidate_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_improvement_runs_status
+          ON improvement_runs(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_improvement_runs_review
+          ON improvement_runs(review_status, created_at DESC);
+      `);
+    } catch {
+      // Table already exists
+    }
+
+    for (const statement of [
+      "ALTER TABLE improvement_runs ADD COLUMN promotion_status TEXT DEFAULT 'idle'",
+      "ALTER TABLE improvement_runs ADD COLUMN merge_result TEXT",
+      "ALTER TABLE improvement_runs ADD COLUMN pull_request TEXT",
+      "ALTER TABLE improvement_runs ADD COLUMN promotion_error TEXT",
+      "ALTER TABLE improvement_runs ADD COLUMN promoted_at INTEGER",
+    ]) {
+      try {
+        this.db.exec(statement);
+      } catch {
+        // Column already exists or table not created yet.
+      }
     }
 
     // Seed built-in entity types for all workspaces that don't have them yet
