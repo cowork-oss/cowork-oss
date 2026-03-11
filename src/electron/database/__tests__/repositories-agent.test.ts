@@ -37,6 +37,13 @@ class MockTaskRepository {
     "agentConfig",
     "depth",
     "resultSummary",
+    "issueId",
+    "heartbeatRunId",
+    "companyId",
+    "goalId",
+    "projectId",
+    "requestDepth",
+    "billingCode",
     "pinned",
     "worktreePath",
     "worktreeBranch",
@@ -146,6 +153,14 @@ class MockTaskRepository {
       pinned: Number(stored.pinned) === 1,
       depth: stored.depth ?? 0,
       resultSummary: stored.resultSummary || undefined,
+      issueId: stored.issueId || undefined,
+      heartbeatRunId: stored.heartbeatRunId || undefined,
+      companyId: stored.companyId || undefined,
+      goalId: stored.goalId || undefined,
+      projectId: stored.projectId || undefined,
+      requestDepth:
+        typeof stored.requestDepth === "number" ? stored.requestDepth : undefined,
+      billingCode: stored.billingCode || undefined,
       worktreePath: stored.worktreePath || undefined,
       worktreeBranch: stored.worktreeBranch || undefined,
       worktreeStatus: stored.worktreeStatus || undefined,
@@ -349,6 +364,34 @@ describe("TaskRepository - Agent Fields", () => {
 
       const retrieved = repository.findById(task.id);
       expect(retrieved?.resultSummary).toBe("Analysis complete: 3 issues found");
+    });
+
+    it("should persist control plane linkage fields", () => {
+      const task = repository.create({
+        title: "Control plane task",
+        prompt: "Test",
+        status: "pending",
+        workspaceId: "workspace-1",
+      });
+
+      repository.update(task.id, {
+        issueId: "issue-123",
+        heartbeatRunId: "run-123",
+        companyId: "company-123",
+        goalId: "goal-123",
+        projectId: "project-123",
+        requestDepth: 2,
+        billingCode: "ops/company-planner",
+      });
+
+      const retrieved = repository.findById(task.id);
+      expect(retrieved?.issueId).toBe("issue-123");
+      expect(retrieved?.heartbeatRunId).toBe("run-123");
+      expect(retrieved?.companyId).toBe("company-123");
+      expect(retrieved?.goalId).toBe("goal-123");
+      expect(retrieved?.projectId).toBe("project-123");
+      expect(retrieved?.requestDepth).toBe(2);
+      expect(retrieved?.billingCode).toBe("ops/company-planner");
     });
 
     it("should handle multiple field updates", () => {
