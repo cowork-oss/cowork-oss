@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import { createHash } from "crypto";
+import mermaid from "mermaid";
 import {
   Workspace,
   GatewayContextType,
@@ -325,6 +326,7 @@ export function getMcpPaymentLimitError(input: unknown, toolSchema?: MCPTool): s
  * Integrates with SecurityPolicyManager for context-aware tool filtering
  */
 export class ToolRegistry {
+  private static mermaidValidationInitialized = false;
   private fileTools: FileTools;
   private skillTools: SkillTools;
   private searchTools: SearchTools;
@@ -753,6 +755,9 @@ export class ToolRegistry {
 
     // Document generation tools (PDF, PPTX, XLSX)
     allTools.push(...DocumentTools.getToolDefinitions());
+
+    // Mermaid diagram tool (renders diagrams in the UI)
+    allTools.push(this.getMermaidDiagramToolDefinition());
 
     // Session scratchpad tools (agent self-notes during long runs)
     allTools.push(...ScratchpadTools.getToolDefinitions());
@@ -1428,6 +1433,15 @@ Shell Commands:
 
     descriptions += `
 
+Diagrams & Charts (PREFERRED over HTML files):
+- create_diagram: Create and display a Mermaid diagram inline in the UI — no file needed.
+  - Use for ANY diagram/chart/flowchart/visualization request (workflows, architecture, sequences, data models, timelines, mind maps, ERDs, Gantt charts, pie charts, etc.)
+  - Supports all Mermaid diagram types: flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, pie, gitGraph, mindmap, timeline, etc.
+  - The diagram renders live in the conversation — the user sees it immediately without opening a file.
+  - ALWAYS prefer create_diagram over writing an HTML file for any visualization/diagram need.`;
+
+    descriptions += `
+
 Image Generation:
 - generate_image: Generate images from text descriptions using an image-capable model.
   - Uses the best configured image provider automatically (Azure OpenAI / OpenAI / Gemini), independent of the active chat model.
@@ -1896,6 +1910,29 @@ ${skillDescriptions}`;
       return await this.documentTools.generatePresentation(input);
     if (name === "generate_spreadsheet") return await this.documentTools.generateSpreadsheet(input);
 
+    // Mermaid diagram tool
+    if (name === "create_diagram") {
+      const title = typeof input?.title === "string" ? input.title : "Diagram";
+      const diagram = typeof input?.diagram === "string" ? input.diagram : "";
+      if (!diagram.trim()) {
+        return { success: false, error: "diagram is required and must be non-empty Mermaid syntax" };
+      }
+      try {
+        ToolRegistry.initializeMermaidValidation();
+        await mermaid.parse(diagram, { suppressErrors: false });
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error && error.message
+              ? `invalid Mermaid syntax: ${error.message}`
+              : "invalid Mermaid syntax",
+        };
+      }
+      this.daemon.logEvent(this.taskId, "diagram_created", { title, diagram });
+      return { success: true, message: `Diagram "${title}" is now displayed in the UI.` };
+    }
+
     // Meta tools
     if (name === "task_history") {
       return this.taskHistory(input);
@@ -1934,6 +1971,119 @@ ${skillDescriptions}`;
 
     if (name === "switch_workspace") {
       return await this.switchWorkspace(input);
+    }
+
+    if (name === "list_projects") {
+      const projects = this.daemon.listProjects({ includeArchived: input?.include_archived === true });
+      return {
+        projects: projects.map((p: Any) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status,
+          description: p.description ?? null,
+        })),
+      };
+    }
+
+    if (name === "list_workspaces") {
+      const workspaces = this.daemon.listWorkspaces();
+      return {
+        workspaces: workspaces.map((w: Any) => ({
+          id: w.id,
+          name: w.name,
+          path: w.path,
+        })),
+      };
+    }
+
+    if (name === "link_project_workspace") {
+      const { project_id, workspace_id, is_primary } = input as {
+        project_id: string;
+        workspace_id: string;
+        is_primary?: boolean;
+      };
+      if (!project_id || !workspace_id) {
+        return { success: false, error: "project_id and workspace_id are required" };
+      }
+      try {
+        const link = this.daemon.linkProjectWorkspace({
+          projectId: project_id,
+          workspaceId: workspace_id,
+          isPrimary: is_primary,
+        });
+        return {
+          success: true,
+          link: {
+            id: link.id,
+            projectId: link.projectId,
+            workspaceId: link.workspaceId,
+            isPrimary: link.isPrimary,
+          },
+        };
+      } catch (err: Any) {
+        return { success: false, error: err?.message ?? "Failed to link workspace" };
+      }
+    }
+
+    if (name === "list_goals") {
+      const goals = this.daemon.listGoals(input?.company_id);
+      return {
+        goals: goals.map((g: Any) => ({
+          id: g.id,
+          title: g.title,
+          status: g.status,
+          description: g.description ?? null,
+        })),
+      };
+    }
+
+    if (name === "list_issues") {
+      const issues = this.daemon.listIssues({
+        projectId: input?.project_id,
+        goalId: input?.goal_id,
+        status: Array.isArray(input?.status) ? input.status : undefined,
+        limit: typeof input?.limit === "number" ? input.limit : undefined,
+      });
+      return {
+        issues: issues.map((i: Any) => ({
+          id: i.id,
+          title: i.title,
+          status: i.status,
+          priority: i.priority,
+          projectId: i.projectId ?? null,
+          goalId: i.goalId ?? null,
+          description: i.description ?? null,
+        })),
+      };
+    }
+
+    if (name === "create_issue") {
+      if (!input?.title) {
+        return { success: false, error: "title is required" };
+      }
+      try {
+        const issue = this.daemon.createIssue({
+          title: input.title,
+          description: input.description,
+          projectId: input.project_id,
+          goalId: input.goal_id,
+          status: input.status,
+          priority: typeof input.priority === "number" ? input.priority : 2,
+        });
+        return {
+          success: true,
+          issue: {
+            id: issue.id,
+            title: issue.title,
+            status: issue.status,
+            priority: issue.priority,
+            projectId: issue.projectId ?? null,
+            goalId: issue.goalId ?? null,
+          },
+        };
+      } catch (err: Any) {
+        return { success: false, error: err?.message ?? "Failed to create issue" };
+      }
     }
 
     if (name === "integration_setup") {
@@ -7173,6 +7323,49 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Define the Mermaid diagram tool
+   */
+  private getMermaidDiagramToolDefinition(): LLMTool {
+    return {
+      name: "create_diagram",
+      description:
+        "Create and display a Mermaid diagram in the UI. Use this to visualize workflows, " +
+        "architecture, data models, timelines, sequences, or any structured information as an " +
+        "interactive diagram. Supports all Mermaid diagram types: flowchart, sequenceDiagram, " +
+        "classDiagram, stateDiagram, erDiagram, gantt, pie, gitGraph, mindmap, timeline, etc.",
+      input_schema: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Short descriptive title for the diagram",
+          },
+          diagram: {
+            type: "string",
+            description:
+              "The Mermaid diagram definition. Must be valid Mermaid syntax, e.g.:\n" +
+              "  flowchart TD\n" +
+              "    A[Start] --> B{Decision}\n" +
+              "    B -->|Yes| C[Do it]\n" +
+              "    B -->|No| D[Skip]",
+          },
+        },
+        required: ["title", "diagram"],
+      },
+    };
+  }
+
+  private static initializeMermaidValidation(): void {
+    if (ToolRegistry.mermaidValidationInitialized) return;
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "default",
+    });
+    ToolRegistry.mermaidValidationInitialized = true;
+  }
+
+  /**
    * Define meta tools for execution control
    */
   private getMetaToolDefinitions(): LLMTool[] {
@@ -7234,6 +7427,148 @@ ${skillDescriptions}`;
               description: "ID of an existing workspace to switch to",
             },
           },
+        },
+      },
+      {
+        name: "list_projects",
+        description:
+          "List all projects in the CoWork OS control plane. " +
+          "Returns each project's id, name, status, and description. " +
+          "Use this to discover the correct project_id before calling link_project_workspace.",
+        input_schema: {
+          type: "object",
+          properties: {
+            include_archived: {
+              type: "boolean",
+              description: "Set to true to include archived projects. Defaults to false.",
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "list_workspaces",
+        description:
+          "List all workspaces registered in CoWork OS. " +
+          "Returns each workspace's id, name, and path. " +
+          "Use this to discover the correct workspace_id before calling link_project_workspace.",
+        input_schema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "link_project_workspace",
+        description:
+          "Link a workspace to a project in the CoWork OS control plane database. " +
+          "This is the definitive way to associate a workspace with a project so that " +
+          "autonomous agents can operate with durable context. " +
+          "Call list_projects and list_workspaces first if you need to discover the correct IDs. " +
+          "The first link created for a project is automatically set as primary.",
+        input_schema: {
+          type: "object",
+          properties: {
+            project_id: {
+              type: "string",
+              description: "The UUID of the project to link (from list_projects).",
+            },
+            workspace_id: {
+              type: "string",
+              description: "The UUID of the workspace to link (from list_workspaces).",
+            },
+            is_primary: {
+              type: "boolean",
+              description:
+                "Set to true to mark this as the primary workspace for the project. " +
+                "Defaults to true when no workspace is currently linked.",
+            },
+          },
+          required: ["project_id", "workspace_id"],
+        },
+      },
+      {
+        name: "list_goals",
+        description:
+          "List all goals in the CoWork OS control plane. " +
+          "Returns each goal's id, title, status, and description. " +
+          "Use this to audit the goal-to-work graph (e.g. during a heartbeat Goal-to-Work Audit).",
+        input_schema: {
+          type: "object",
+          properties: {
+            company_id: {
+              type: "string",
+              description: "Optional company UUID to filter goals. Omit to return all goals.",
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "list_issues",
+        description:
+          "List issues in the CoWork OS control plane with optional filters. " +
+          "Returns each issue's id, title, status, priority, projectId, and goalId. " +
+          "Use this during backlog reviews or goal-to-work audits.",
+        input_schema: {
+          type: "object",
+          properties: {
+            project_id: {
+              type: "string",
+              description: "Filter to issues belonging to this project UUID.",
+            },
+            goal_id: {
+              type: "string",
+              description: "Filter to issues belonging to this goal UUID.",
+            },
+            status: {
+              type: "array",
+              description:
+                "Filter by status values, e.g. [\"backlog\", \"todo\", \"in_progress\", \"blocked\"].",
+              items: { type: "string" },
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of issues to return (default 200, max 1000).",
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "create_issue",
+        description:
+          "Create a new issue in the CoWork OS control plane. " +
+          "Use this during a Goal-to-Work Audit when a goal or project has no actionable issues yet.",
+        input_schema: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Short, action-oriented title for the issue.",
+            },
+            description: {
+              type: "string",
+              description: "Detailed description of the work to be done.",
+            },
+            project_id: {
+              type: "string",
+              description: "UUID of the project this issue belongs to (from list_projects).",
+            },
+            goal_id: {
+              type: "string",
+              description: "UUID of the goal this issue belongs to (from list_goals).",
+            },
+            status: {
+              type: "string",
+              description: "Initial status: backlog (default), todo, in_progress, or blocked.",
+            },
+            priority: {
+              type: "number",
+              description: "Priority 1 (highest) to 5 (lowest). Defaults to 2.",
+            },
+          },
+          required: ["title"],
         },
       },
       {
