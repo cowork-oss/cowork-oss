@@ -116,6 +116,10 @@ export class ImprovementCandidateRepository {
     return row ? this.mapCandidate(row) : undefined;
   }
 
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM improvement_candidates WHERE id = ?").run(id);
+  }
+
   list(params?: {
     workspaceId?: string;
     status?: ImprovementCandidate["status"] | ImprovementCandidate["status"][];
@@ -286,6 +290,12 @@ export class ImprovementRunRepository {
       .prepare("SELECT * FROM improvement_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1")
       .get(taskId) as Any;
     return row ? this.mapRun(row) : undefined;
+  }
+
+  reassignCandidate(fromCandidateId: string, toCandidateId: string): void {
+    this.db
+      .prepare("UPDATE improvement_runs SET candidate_id = ? WHERE candidate_id = ?")
+      .run(toCandidateId, fromCandidateId);
   }
 
   list(params?: {
