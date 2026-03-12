@@ -6,6 +6,7 @@ import { TaskRepository, WorkspaceRepository } from "../database/repositories";
 import type {
   ImprovementCampaign,
   ImprovementCandidate,
+  ImprovementFailureClass,
   ImprovementLoopSettings,
   ImprovementReviewStatus,
   ImprovementVariantLane,
@@ -15,7 +16,6 @@ import type {
   Workspace,
 } from "../../shared/types";
 import {
-  buildImprovementJudgeSummaryPrompt,
   buildImprovementVariantPrompt,
   loadImprovementProgram,
 } from "./ExperimentPromptBuilder";
@@ -39,12 +39,8 @@ interface ImprovementLoopServiceDeps {
   }) => Promise<void> | void;
 }
 
-const DEFAULT_LANES: ImprovementVariantLane[] = [
-  "minimal_patch",
-  "test_first",
-  "root_cause",
-  "guardrail_hardening",
-];
+const SCOUT_LANE: ImprovementVariantLane = "root_cause";
+const IMPLEMENT_LANE: ImprovementVariantLane = "minimal_patch";
 
 export class ImprovementLoopService {
   private readonly workspaceRepo: WorkspaceRepository;
@@ -59,7 +55,6 @@ export class ImprovementLoopService {
   private worktreeCreatedListener?: (evt: Any) => void;
   private taskCompletedListener?: (evt: Any) => void;
   private taskStatusListener?: (evt: Any) => void;
-  private readonly finalizingCampaignIds = new Set<string>();
   private started = false;
 
   constructor(
@@ -188,15 +183,17 @@ export class ImprovementLoopService {
     if (reviewStatus === "dismissed") {
       this.campaignRepo.update(campaignId, {
         reviewStatus,
-        status: "failed",
-        promotionStatus:
-          campaign.promotionStatus === "merged" || campaign.promotionStatus === "pr_opened"
-            ? campaign.promotionStatus
-            : "idle",
-        promotionError: undefined,
+        status: "parked",
+        stage: "completed",
+        promotionStatus: "promotion_failed",
+        promotionError: campaign.promotionError || "Campaign was dismissed before opening a PR.",
+        stopReason: "dismissed_from_review",
         completedAt: campaign.completedAt || Date.now(),
       });
-      this.candidateService.reopenCandidate(campaign.candidateId);
+      this.candidateService.markCandidateParked(
+        campaign.candidateId,
+        campaign.promotionError || "Campaign was dismissed before opening a PR.",
+      );
       void this.notify({
         type: "info",
         title: "Improvement campaign dismissed",
@@ -206,10 +203,14 @@ export class ImprovementLoopService {
       return this.getCampaign(campaignId);
     }
 
-    if (campaign.status !== "ready_for_review" && campaign.status !== "promoted") {
+    if (campaign.status === "pr_opened") {
+      return this.getCampaign(campaignId);
+    }
+
+    if (!["verifying", "ready_for_review", "promoted"].includes(campaign.status)) {
       this.campaignRepo.update(campaignId, {
         promotionStatus: "promotion_failed",
-        promotionError: "Only reviewed campaigns with a winner can be promoted.",
+        promotionError: "Only promotable campaigns can open a PR.",
       });
       return this.getCampaign(campaignId);
     }
@@ -226,15 +227,22 @@ export class ImprovementLoopService {
     const task = this.taskRepo.findById(winner.taskId);
     if (!this.canPromoteVariant(winner, task)) {
       this.campaignRepo.update(campaignId, {
-        reviewStatus,
-        status: "promoted",
-        promotionStatus: "applied",
-        promotionError: undefined,
-        promotedAt: Date.now(),
-        promotedTaskId: winner.taskId,
-        promotedBranchName: winner.branchName,
+        reviewStatus: "dismissed",
+        status: "failed",
+        stage: "completed",
+        promotionStatus: "promotion_failed",
+        promotionError: "Winner did not satisfy PR promotion gates.",
+        stopReason: "winner_not_promotable",
+        completedAt: Date.now(),
       });
-      this.candidateService.markCandidateResolved(campaign.candidateId);
+      this.candidateService.recordCampaignFailure(campaign.candidateId, {
+        failureClass: "non_promotable_result",
+        attemptFingerprint: this.buildAttemptFingerprint(
+          this.candidateRepo.findById(campaign.candidateId),
+          "review",
+        ),
+        reason: "Winner did not satisfy PR promotion gates.",
+      });
       return this.getCampaign(campaignId);
     }
 
@@ -287,13 +295,15 @@ export class ImprovementLoopService {
 
     const rootTask = this.taskRepo.create({
       title: `Improve campaign: ${candidate.title}`,
-      prompt: `Population-based self-improvement campaign for candidate "${candidate.title}".`,
-      rawPrompt: `Population-based self-improvement campaign for candidate "${candidate.title}".`,
-      status: "planning",
+      prompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
+      rawPrompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
+      status: "queued",
       workspaceId: executionWorkspace.id,
       source: "improvement",
       agentType: "main",
       depth: 0,
+      budgetTokens: settings.campaignTokenBudget,
+      budgetCost: settings.campaignCostBudget,
       agentConfig: {
         autonomousMode: true,
         allowUserInput: false,
@@ -301,8 +311,9 @@ export class ImprovementLoopService {
         taskDomain: "code",
         reviewPolicy: "strict",
         gatewayContext: "private",
+        maxTokens: settings.campaignTokenBudget,
       },
-      resultSummary: `Preparing ${settings.variantsPerCampaign} improvement variants.`,
+      resultSummary: "Preparing staged self-improvement campaign.",
     });
 
     const campaign = this.campaignRepo.create({
@@ -310,107 +321,64 @@ export class ImprovementLoopService {
       workspaceId: candidate.workspaceId,
       executionWorkspaceId: executionWorkspace.id,
       rootTaskId: rootTask.id,
-      status: "planning",
+      status: "queued",
+      stage: "queued",
       reviewStatus: "pending",
       promotionStatus: "idle",
       baselineMetrics,
       trainingEvidence,
       holdoutEvidence,
       replayCases,
+      prRequired: true,
+      providerHealthSnapshot: {},
+      stageBudget: {
+        preflight: { maxMinutes: 2, maxLlmCalls: 2 },
+        reproduce: { maxMinutes: 10, maxLlmCalls: 10 },
+        implement: { maxMinutes: 15, maxLlmCalls: 16 },
+        verifyAndPr: { maxMinutes: 5, maxLlmCalls: 6 },
+        wholeCampaign: {
+          maxMinutes: settings.campaignTimeoutMinutes,
+          tokenBudget: settings.campaignTokenBudget,
+          costBudget: settings.campaignCostBudget,
+        },
+      },
     });
 
     this.candidateService.markCandidateRunning(candidate.id);
 
-    const lanes = this.selectVariantLanes(settings.variantsPerCampaign);
-    const shouldRequireWorktree = await this.shouldRequireWorktreeForWorkspace(
-      executionWorkspace.path,
-      executionWorkspace.isTemp,
-      settings.requireWorktree,
-    );
-    const program = loadImprovementProgram(executionWorkspace, settings.improvementProgramPath);
-
     try {
-      if (!this.agentDaemon) throw new Error("Agent daemon unavailable");
-      const variants = await Promise.all(
-        lanes.map(async (lane) => {
-          const variant = this.variantRepo.create({
-            campaignId: campaign.id,
-            candidateId: candidate.id,
-            workspaceId: candidate.workspaceId,
-            executionWorkspaceId: executionWorkspace.id,
-            lane,
-            status: "queued",
-            baselineMetrics,
-          });
-          const task = await this.agentDaemon!.createChildTask({
-            title: `Improve (${lane}): ${candidate.title}`,
-            prompt: buildImprovementVariantPrompt(candidate, lane, {
-              sourceWorkspace,
-              executionWorkspace,
-              relevantLogPaths: this.collectRelevantLogPaths(sourceWorkspace, executionWorkspace),
-              trainingEvidence,
-              holdoutEvidence,
-              replayCases,
-              program,
-            }),
-            workspaceId: executionWorkspace.id,
-            parentTaskId: rootTask.id,
-            agentType: "sub",
-            depth: 1,
-            agentConfig: {
-              autonomousMode: true,
-              allowUserInput: false,
-              requireWorktree: shouldRequireWorktree,
-              autoApproveTypes: ["run_command"],
-              pauseForRequiredDecision: false,
-              executionMode: "verified",
-              taskDomain: "code",
-              reviewPolicy: "strict",
-              verificationAgent: true,
-              deepWorkMode: true,
-              autoContinueOnTurnLimit: true,
-              maxAutoContinuations: 1,
-              progressJournalEnabled: true,
-              gatewayContext: "private",
-            },
-          });
-          this.variantRepo.update(variant.id, {
-            taskId: task.id,
-            status: "running",
-            startedAt: Date.now(),
-          });
-          return this.variantRepo.findById(variant.id)!;
-        }),
-      );
+      const preflight = await this.runPreflightChecks(candidate, sourceWorkspace, executionWorkspace, settings);
+      if (!preflight.ok) {
+        await this.failCampaign(campaign.id, candidate, {
+          failureClass: preflight.failureClass,
+          message: preflight.message,
+        });
+        return this.getCampaign(campaign.id) || null;
+      }
 
       this.campaignRepo.update(campaign.id, {
-        status: "running_variants",
+        status: "reproducing",
+        stage: "reproducing",
         startedAt: Date.now(),
+        providerHealthSnapshot: preflight.providerHealthSnapshot,
       });
       this.taskRepo.update(rootTask.id, {
         status: "executing",
-        resultSummary: `Running ${variants.length} parallel improvement variants.`,
+        resultSummary: "Running scout stage to reproduce and scope the failure.",
       });
+      await this.startScoutVariant(campaign.id, candidate, sourceWorkspace, executionWorkspace, settings);
 
       void this.notify({
         type: "info",
         title: "Improvement campaign started",
-        message: `Started ${variants.length} parallel improvement variants for "${candidate.title}".`,
+        message: `Started staged self-improvement campaign for "${candidate.title}".`,
         workspaceId: candidate.workspaceId,
       });
     } catch (error) {
-      this.campaignRepo.update(campaign.id, {
-        status: "failed",
-        completedAt: Date.now(),
-        verdictSummary: String((error as Error)?.message || error),
+      await this.failCampaign(campaign.id, candidate, {
+        failureClass: "preflight_failed",
+        message: String((error as Error)?.message || error),
       });
-      this.taskRepo.update(rootTask.id, {
-        status: "failed",
-        terminalStatus: "failed",
-        completedAt: Date.now(),
-        resultSummary: String((error as Error)?.message || error),
-      });
-      this.candidateService.reopenCandidate(candidate.id);
       void this.notify({
         type: "task_failed",
         title: "Improvement campaign failed to start",
@@ -452,86 +420,40 @@ export class ImprovementLoopService {
       evaluationNotes: evaluation.notes.join("\n"),
       branchName: variant.branchName || task.worktreeBranch,
     });
+    const updatedVariant = this.variantRepo.findById(variant.id);
+    const enriched = this.getCampaign(campaign.id);
+    const candidate = this.candidateRepo.findById(campaign.candidateId);
+    if (!updatedVariant || !enriched || !candidate) return;
 
-    await this.finalizeCampaignIfReady(campaign.id);
-  }
-
-  private async finalizeCampaignIfReady(campaignId: string): Promise<void> {
-    if (this.finalizingCampaignIds.has(campaignId)) return;
-    const variants = this.variantRepo.listByCampaignId(campaignId);
-    if (variants.some((variant) => variant.status === "queued" || variant.status === "running")) return;
-
-    this.finalizingCampaignIds.add(campaignId);
-    try {
-      const campaign = this.campaignRepo.findById(campaignId);
-      if (!campaign) return;
-
-      const settings = this.getSettings();
-      this.campaignRepo.update(campaignId, { status: "judging" });
-      const enriched = this.getCampaign(campaignId);
-      if (!enriched) return;
-
-      const evaluation = this.evaluationService.evaluateCampaign({
-        campaign: enriched,
-        variants: enriched.variants,
-        evalWindowDays: settings.evalWindowDays,
-      });
-
-      this.judgeVerdictRepo.upsert(evaluation.verdict);
-      const winner = evaluation.winner
-        ? this.variantRepo.findById(evaluation.winner.variantId)
-        : undefined;
-
-      const judgePrompt = buildImprovementJudgeSummaryPrompt({
-        candidate: this.candidateRepo.findById(enriched.candidateId)!,
-        variants: enriched.variants,
-        replayCases: enriched.replayCases,
-        holdoutEvidence: enriched.holdoutEvidence,
-      });
-
-      this.campaignRepo.update(campaignId, {
-        status: evaluation.verdict.status === "passed" ? "ready_for_review" : "failed",
-        reviewStatus: evaluation.verdict.status === "passed" ? "pending" : "dismissed",
-        winnerVariantId: winner?.id,
-        verdictSummary: evaluation.verdict.summary,
-        evaluationNotes: `${evaluation.verdict.notes.join("\n")}\n\nJudge context:\n${judgePrompt}`,
-        outcomeMetrics: evaluation.outcomeMetrics,
-        completedAt: Date.now(),
-      });
-      if (enriched.rootTaskId) {
-        this.taskRepo.update(enriched.rootTaskId, {
-          status: evaluation.verdict.status === "passed" ? "completed" : "failed",
-          terminalStatus: evaluation.verdict.status === "passed" ? "ok" : "failed",
-          completedAt: Date.now(),
-          resultSummary: evaluation.verdict.summary,
-        });
-      }
-
-      if (evaluation.verdict.status !== "passed") {
-        this.candidateService.reopenCandidate(enriched.candidateId);
-        void this.notify({
-          type: "task_failed",
-          title: "Improvement campaign failed",
-          message: evaluation.verdict.summary,
-          workspaceId: enriched.workspaceId,
+    if (campaign.stage === "reproducing") {
+      if (!evaluation.targetedVerificationPassed) {
+        await this.failCampaign(campaign.id, candidate, {
+          failureClass: this.classifyFailureFromTask(task),
+          message: evaluation.summary,
         });
         return;
       }
+      await this.startImplementationVariant(campaign.id, candidate, settings);
+      return;
+    }
 
-      this.candidateService.markCandidateReview(enriched.candidateId);
-      if (settings.reviewRequired) {
-        void this.notify({
-          type: "task_completed",
-          title: "Improvement campaign ready for review",
-          message: evaluation.verdict.summary,
-          taskId: winner?.taskId,
-          workspaceId: enriched.workspaceId,
+    if (campaign.stage === "implementing") {
+      if (!evaluation.targetedVerificationPassed) {
+        await this.failCampaign(campaign.id, candidate, {
+          failureClass: this.classifyFailureFromTask(task),
+          message: evaluation.summary,
         });
-      } else if (winner) {
-        await this.promoteCampaign(campaignId, winner, "accepted");
+        return;
       }
-    } finally {
-      this.finalizingCampaignIds.delete(campaignId);
+      this.campaignRepo.update(campaign.id, {
+        status: "verifying",
+        stage: "verifying",
+        winnerVariantId: updatedVariant.id,
+        verdictSummary: evaluation.summary,
+        evaluationNotes: evaluation.notes.join("\n"),
+        outcomeMetrics: this.evaluationService.snapshot(settings.evalWindowDays),
+      });
+      await this.promoteCampaign(campaign.id, updatedVariant, "accepted");
     }
   }
 
@@ -543,12 +465,14 @@ export class ImprovementLoopService {
     const campaign = this.campaignRepo.findById(campaignId);
     if (!campaign) return undefined;
     const candidate = this.candidateRepo.findById(campaign.candidateId);
-    const promotionMode = this.getSettings().promotionMode;
+    const promotionMode = "github_pr";
 
     this.campaignRepo.update(campaignId, {
       reviewStatus,
       promotionStatus: "promoting",
       promotionError: undefined,
+      status: "verifying",
+      stage: "verifying",
     });
     if (campaign.rootTaskId) {
       this.taskRepo.update(campaign.rootTaskId, {
@@ -557,76 +481,31 @@ export class ImprovementLoopService {
     }
 
     if (!this.agentDaemon || !winner.taskId) {
-      this.campaignRepo.update(campaignId, {
-        reviewStatus: "pending",
-        promotionStatus: "promotion_failed",
-        promotionError: "Agent daemon unavailable",
-      });
+      await this.failPromotion(campaignId, candidate, "Agent daemon unavailable");
       return this.getCampaign(campaignId);
     }
 
-    if (promotionMode === "github_pr") {
-      const pullRequest = await this.agentDaemon.getWorktreeManager().openPullRequest(winner.taskId, {
-        title: this.buildPullRequestTitle(candidate, campaign),
-        body: this.buildPullRequestBody(candidate, campaign, winner),
-      });
-      if (pullRequest.success) {
-        this.campaignRepo.update(campaignId, {
-          status: "promoted",
-          reviewStatus,
-          promotionStatus: "pr_opened",
-          pullRequest,
-          promotionError: undefined,
-          promotedAt: Date.now(),
-          promotedTaskId: winner.taskId,
-          promotedBranchName: winner.branchName,
-        });
-        this.candidateService.markCandidateResolved(campaign.candidateId);
-        if (campaign.rootTaskId) {
-          this.taskRepo.update(campaign.rootTaskId, {
-            status: "completed",
-            terminalStatus: "ok",
-            completedAt: Date.now(),
-            resultSummary: `Promotion succeeded via pull request from ${winner.lane}.`,
-          });
-        }
-        void this.notify({
-          type: "task_completed",
-          title: "Improvement PR created",
-          message: `Opened a PR for "${candidate?.title || campaign.verdictSummary || "self-improvement campaign"}".`,
-          taskId: winner.taskId,
-          workspaceId: campaign.workspaceId,
-        });
-        return this.getCampaign(campaignId);
-      }
-
-      this.campaignRepo.update(campaignId, {
-        reviewStatus: "pending",
-        promotionStatus: "promotion_failed",
-        pullRequest,
-        promotionError: pullRequest.error || "Failed to open pull request",
-      });
-      if (campaign.rootTaskId) {
-        this.taskRepo.update(campaign.rootTaskId, {
-          status: "completed",
-          terminalStatus: "partial_success",
-          resultSummary: pullRequest.error || "Promotion failed.",
-        });
-      }
+    if (promotionMode !== "github_pr") {
+      await this.failPromotion(campaignId, candidate, "Self-improvement campaigns only support GitHub PR promotion.");
       return this.getCampaign(campaignId);
     }
 
-    const mergeResult = await this.agentDaemon.getWorktreeManager().mergeToBase(winner.taskId);
-    if (mergeResult.success) {
+    const pullRequest = await this.agentDaemon.getWorktreeManager().openPullRequest(winner.taskId, {
+      title: this.buildPullRequestTitle(candidate, campaign),
+      body: this.buildPullRequestBody(candidate, campaign, winner),
+    });
+    if (pullRequest.success) {
       this.campaignRepo.update(campaignId, {
-        status: "promoted",
+        status: "pr_opened",
+        stage: "completed",
         reviewStatus,
-        promotionStatus: "merged",
-        mergeResult,
+        promotionStatus: "pr_opened",
+        pullRequest,
         promotionError: undefined,
         promotedAt: Date.now(),
         promotedTaskId: winner.taskId,
         promotedBranchName: winner.branchName,
+        completedAt: Date.now(),
       });
       this.candidateService.markCandidateResolved(campaign.candidateId);
       if (campaign.rootTaskId) {
@@ -634,45 +513,37 @@ export class ImprovementLoopService {
           status: "completed",
           terminalStatus: "ok",
           completedAt: Date.now(),
-          resultSummary: `Promotion succeeded via merge from ${winner.lane}.`,
+          resultSummary: `Draft PR opened from ${winner.lane}.`,
         });
       }
       void this.notify({
         type: "task_completed",
-        title: "Improvement merged",
-        message: `Merged "${candidate?.title || campaign.verdictSummary || "self-improvement campaign"}" into the base branch.`,
+        title: "Improvement PR created",
+        message: `Opened a PR for "${candidate?.title || campaign.verdictSummary || "self-improvement campaign"}".`,
         taskId: winner.taskId,
         workspaceId: campaign.workspaceId,
       });
       return this.getCampaign(campaignId);
     }
 
-    this.campaignRepo.update(campaignId, {
-      reviewStatus: "pending",
-      promotionStatus: "promotion_failed",
-      promotionError: mergeResult?.error || "Merge failed",
-    });
-    if (campaign.rootTaskId) {
-      this.taskRepo.update(campaign.rootTaskId, {
-        status: "completed",
-        terminalStatus: "partial_success",
-        resultSummary: mergeResult?.error || "Merge failed.",
-      });
-    }
+    await this.failPromotion(campaignId, candidate, pullRequest.error || "Failed to open pull request", pullRequest);
     return this.getCampaign(campaignId);
   }
 
   private async reconcileActiveCampaigns(): Promise<void> {
-    const activeCampaigns = this.campaignRepo.list({ status: ["planning", "running_variants", "judging"] });
+    const activeCampaigns = this.campaignRepo.list({
+      status: ["queued", "preflight", "reproducing", "implementing", "verifying", "planning", "running_variants", "judging"],
+    });
     for (const campaign of activeCampaigns) {
       const variants = this.variantRepo.listByCampaignId(campaign.id);
       if (variants.length === 0) {
-        this.campaignRepo.update(campaign.id, {
-          status: "failed",
-          completedAt: Date.now(),
-          verdictSummary: "Campaign had no linked variants and was marked failed during reconciliation.",
-        });
-        this.candidateService.reopenCandidate(campaign.candidateId);
+        const candidate = this.candidateRepo.findById(campaign.candidateId);
+        if (candidate) {
+          await this.failCampaign(campaign.id, candidate, {
+            failureClass: "missing_resumable_state",
+            message: "Campaign had no linked variants and was marked failed during reconciliation.",
+          });
+        }
         continue;
       }
       for (const variant of variants) {
@@ -691,13 +562,19 @@ export class ImprovementLoopService {
             completedAt: Date.now(),
             verdictSummary: "Variant task record was missing during reconciliation.",
           });
+          const candidate = this.candidateRepo.findById(campaign.candidateId);
+          if (candidate) {
+            await this.failCampaign(campaign.id, candidate, {
+              failureClass: "missing_resumable_state",
+              message: "Variant task record was missing during reconciliation.",
+            });
+          }
           continue;
         }
         if (["completed", "failed", "cancelled"].includes(task.status) && (variant.status === "queued" || variant.status === "running")) {
           await this.finalizeVariant(variant.id, variant.taskId);
         }
       }
-      await this.finalizeCampaignIfReady(campaign.id);
     }
   }
 
@@ -814,12 +691,267 @@ export class ImprovementLoopService {
     return { trainingEvidence, holdoutEvidence, replayCases };
   }
 
-  private selectVariantLanes(count: number): ImprovementVariantLane[] {
-    const lanes: ImprovementVariantLane[] = [];
-    for (let index = 0; index < count; index += 1) {
-      lanes.push(DEFAULT_LANES[index % DEFAULT_LANES.length]);
+  private async runPreflightChecks(
+    candidate: ImprovementCandidate,
+    sourceWorkspace: Workspace,
+    executionWorkspace: Workspace,
+    settings: ImprovementLoopSettings,
+  ): Promise<
+    | { ok: true; providerHealthSnapshot: Record<string, unknown> }
+    | { ok: false; failureClass: ImprovementFailureClass; message: string }
+  > {
+    if (!this.agentDaemon) {
+      return { ok: false, failureClass: "preflight_failed", message: "Agent daemon unavailable." };
     }
-    return lanes;
+    if (candidate.status === "parked") {
+      return { ok: false, failureClass: "preflight_failed", message: "Candidate is parked." };
+    }
+    if (candidate.cooldownUntil && candidate.cooldownUntil > Date.now()) {
+      return {
+        ok: false,
+        failureClass: "preflight_failed",
+        message: `Candidate is cooling down until ${new Date(candidate.cooldownUntil).toISOString()}.`,
+      };
+    }
+    const worktreeRequired = await this.shouldRequireWorktreeForWorkspace(
+      executionWorkspace.path,
+      executionWorkspace.isTemp,
+      settings.requireWorktree,
+    );
+    if (worktreeRequired && executionWorkspace.isTemp) {
+      return {
+        ok: false,
+        failureClass: "preflight_failed",
+        message: "Temporary execution workspace is not eligible for PR-based promotion.",
+      };
+    }
+    if (!fs.existsSync(path.join(sourceWorkspace.path, ".git")) && !fs.existsSync(path.join(executionWorkspace.path, ".git"))) {
+      return {
+        ok: false,
+        failureClass: "preflight_failed",
+        message: "No git repository found for PR-based self-improvement.",
+      };
+    }
+    return {
+      ok: true,
+      providerHealthSnapshot: {
+        sourceWorkspaceId: sourceWorkspace.id,
+        executionWorkspaceId: executionWorkspace.id,
+        requireWorktree: worktreeRequired,
+        automationEligible: true,
+      },
+    };
+  }
+
+  private async startScoutVariant(
+    campaignId: string,
+    candidate: ImprovementCandidate,
+    sourceWorkspace: Workspace,
+    executionWorkspace: Workspace,
+    settings: ImprovementLoopSettings,
+  ): Promise<void> {
+    await this.startVariantTask({
+      campaignId,
+      candidate,
+      lane: SCOUT_LANE,
+      stage: "reproducing",
+      sourceWorkspace,
+      executionWorkspace,
+      settings,
+      executionMode: "analyze",
+      verificationAgent: false,
+      maxTurns: 8,
+      maxTokens: 12000,
+    });
+  }
+
+  private async startImplementationVariant(
+    campaignId: string,
+    candidate: ImprovementCandidate,
+    settings: ImprovementLoopSettings,
+  ): Promise<void> {
+    const campaign = this.campaignRepo.findById(campaignId);
+    if (!campaign) return;
+    const sourceWorkspace = this.workspaceRepo.findById(candidate.workspaceId);
+    const executionWorkspace = campaign.executionWorkspaceId
+      ? this.workspaceRepo.findById(campaign.executionWorkspaceId)
+      : sourceWorkspace;
+    if (!sourceWorkspace || !executionWorkspace) {
+      await this.failCampaign(campaignId, candidate, {
+        failureClass: "missing_resumable_state",
+        message: "Campaign workspace context was missing before implementation.",
+      });
+      return;
+    }
+    this.campaignRepo.update(campaignId, {
+      status: "implementing",
+      stage: "implementing",
+      verdictSummary: "Scout stage passed. Starting implementation stage.",
+    });
+    await this.startVariantTask({
+      campaignId,
+      candidate,
+      lane: IMPLEMENT_LANE,
+      stage: "implementing",
+      sourceWorkspace,
+      executionWorkspace,
+      settings,
+      executionMode: "verified",
+      verificationAgent: true,
+      maxTurns: 12,
+      maxTokens: 24000,
+    });
+  }
+
+  private async startVariantTask(params: {
+    campaignId: string;
+    candidate: ImprovementCandidate;
+    lane: ImprovementVariantLane;
+    stage: "reproducing" | "implementing";
+    sourceWorkspace: Workspace;
+    executionWorkspace: Workspace;
+    settings: ImprovementLoopSettings;
+    executionMode: "analyze" | "verified";
+    verificationAgent: boolean;
+    maxTurns: number;
+    maxTokens: number;
+  }): Promise<void> {
+    if (!this.agentDaemon) throw new Error("Agent daemon unavailable");
+    const campaign = this.campaignRepo.findById(params.campaignId);
+    if (!campaign?.rootTaskId) throw new Error("Campaign root task missing");
+    const shouldRequireWorktree = await this.shouldRequireWorktreeForWorkspace(
+      params.executionWorkspace.path,
+      params.executionWorkspace.isTemp,
+      params.settings.requireWorktree,
+    );
+    const program = loadImprovementProgram(params.executionWorkspace, params.settings.improvementProgramPath);
+    const variant = this.variantRepo.create({
+      campaignId: params.campaignId,
+      candidateId: params.candidate.id,
+      workspaceId: params.candidate.workspaceId,
+      executionWorkspaceId: params.executionWorkspace.id,
+      lane: params.lane,
+      status: "queued",
+      baselineMetrics: campaign.baselineMetrics,
+    });
+    const stageInstruction =
+      params.stage === "reproducing"
+        ? "Do not make repository changes. Reproduce or tightly validate the failure, collect evidence, and produce a concrete fix plan."
+        : "Implement the smallest viable fix, verify it, and explicitly state PR readiness.";
+    const task = await this.agentDaemon.createChildTask({
+      title: `Improve (${params.lane}): ${params.candidate.title}`,
+      prompt: `${buildImprovementVariantPrompt(params.candidate, params.lane, {
+        sourceWorkspace: params.sourceWorkspace,
+        executionWorkspace: params.executionWorkspace,
+        relevantLogPaths: this.collectRelevantLogPaths(params.sourceWorkspace, params.executionWorkspace),
+        trainingEvidence: campaign.trainingEvidence,
+        holdoutEvidence: campaign.holdoutEvidence,
+        replayCases: campaign.replayCases,
+        program,
+      })}\n\nSTAGE REQUIREMENTS:\n- ${stageInstruction}\n- Final response must include: reproduction method, changed files summary, verification commands and result, PR readiness decision.`,
+      workspaceId: params.executionWorkspace.id,
+      parentTaskId: campaign.rootTaskId,
+      agentType: "sub",
+      depth: 1,
+      agentConfig: {
+        autonomousMode: true,
+        allowUserInput: false,
+        requireWorktree: params.stage === "implementing" ? shouldRequireWorktree : false,
+        autoApproveTypes: ["run_command"],
+        pauseForRequiredDecision: false,
+        executionMode: params.executionMode,
+        taskDomain: "code",
+        reviewPolicy: "strict",
+        verificationAgent: params.verificationAgent,
+        deepWorkMode: false,
+        autoContinueOnTurnLimit: false,
+        progressJournalEnabled: false,
+        gatewayContext: "private",
+        maxTurns: params.maxTurns,
+        maxTokens: params.maxTokens,
+        bypassQueue: false,
+      },
+    });
+    this.variantRepo.update(variant.id, {
+      taskId: task.id,
+      status: "running",
+      startedAt: Date.now(),
+    });
+  }
+
+  private async failCampaign(
+    campaignId: string,
+    candidate: ImprovementCandidate,
+    params: { failureClass: ImprovementFailureClass; message: string },
+  ): Promise<void> {
+    const campaign = this.campaignRepo.findById(campaignId);
+    if (!campaign) return;
+    this.campaignRepo.update(campaignId, {
+      status: params.failureClass.startsWith("provider_") ? "parked" : "failed",
+      stage: "completed",
+      reviewStatus: "dismissed",
+      promotionStatus: "promotion_failed",
+      promotionError: params.message,
+      stopReason: params.failureClass,
+      verdictSummary: params.message,
+      completedAt: Date.now(),
+    });
+    if (campaign.rootTaskId) {
+      this.taskRepo.update(campaign.rootTaskId, {
+        status: "failed",
+        terminalStatus: "failed",
+        completedAt: Date.now(),
+        resultSummary: params.message,
+      });
+    }
+    this.candidateService.recordCampaignFailure(candidate.id, {
+      failureClass: params.failureClass,
+      attemptFingerprint: this.buildAttemptFingerprint(candidate, campaign.stage || campaign.status),
+      reason: params.message,
+    });
+    void this.notify({
+      type: "task_failed",
+      title: params.failureClass.startsWith("provider_")
+        ? "Improvement campaign parked"
+        : "Improvement campaign failed",
+      message: params.message,
+      workspaceId: campaign.workspaceId,
+    });
+  }
+
+  private async failPromotion(
+    campaignId: string,
+    candidate: ImprovementCandidate | undefined,
+    message: string,
+    pullRequest?: { success?: boolean; error?: string; url?: string; number?: number },
+  ): Promise<void> {
+    const campaign = this.campaignRepo.findById(campaignId);
+    if (!campaign) return;
+    this.campaignRepo.update(campaignId, {
+      status: "parked",
+      stage: "completed",
+      reviewStatus: "dismissed",
+      promotionStatus: "promotion_failed",
+      promotionError: message,
+      pullRequest: pullRequest as Any,
+      stopReason: "promotion_failed",
+      completedAt: Date.now(),
+    });
+    if (campaign.rootTaskId) {
+      this.taskRepo.update(campaign.rootTaskId, {
+        status: "failed",
+        terminalStatus: "failed",
+        completedAt: Date.now(),
+        resultSummary: message,
+      });
+    }
+    if (candidate) {
+      this.candidateService.recordCampaignFailure(candidate.id, {
+        failureClass: this.classifyFailureFromText(message),
+        attemptFingerprint: this.buildAttemptFingerprint(candidate, "promotion"),
+        reason: message,
+      });
+    }
   }
 
   private readPackageMetadata(workspacePath: string): { name?: string } | null {
@@ -877,7 +1009,39 @@ export class ImprovementLoopService {
   }
 
   private canPromoteVariant(variant: ImprovementVariantRun, task: Task | undefined): boolean {
-    return Boolean(variant.branchName || task?.worktreePath);
+    if (!task) return false;
+    if (task.status !== "completed" || task.terminalStatus !== "ok") return false;
+    if (!variant.taskId || !variant.branchName || !task.worktreePath) return false;
+    const summary = `${task.resultSummary || ""}\n${variant.evaluationNotes || ""}`;
+    return /reproduction method/i.test(summary) && /verification/i.test(summary) && /pr readiness/i.test(summary);
+  }
+
+  private buildAttemptFingerprint(candidate: ImprovementCandidate | undefined, stage: string): string {
+    if (!candidate) return `missing:${stage}`;
+    return `${candidate.id}:${candidate.fingerprint}:${stage}`;
+  }
+
+  private classifyFailureFromTask(task: Task | undefined): ImprovementFailureClass {
+    if (!task) return "missing_resumable_state";
+    if (/mutation-required|contract unmet/i.test(`${task.failureClass || ""} ${String(task.resultSummary || "")}`)) {
+      return "mutation_contract_unmet";
+    }
+    return this.classifyFailureFromText(`${task.failureClass || ""} ${task.error || ""} ${task.resultSummary || ""}`);
+  }
+
+  private classifyFailureFromText(text: string): ImprovementFailureClass {
+    const normalized = text.toLowerCase();
+    if (/429|rate limit|too many requests|free-models-per-min/.test(normalized)) return "provider_rate_limited";
+    if (/tool.+mismatch|tool protocol|tool call.+400|malformed json|failed to parse tool arguments/.test(normalized)) {
+      return "provider_tool_protocol_error";
+    }
+    if (/model.+not found|does not exist|unknown model/.test(normalized)) return "provider_model_missing";
+    if (/fetch failed|network|econn|socket hang up/.test(normalized)) return "provider_network_failure";
+    if (/api key|auth|insufficient balance|quota|billing/.test(normalized)) return "provider_config_error";
+    if (/artifact.*missing|missing artifact evidence/.test(normalized)) return "artifact_contract_unmet";
+    if (/verification failed|review quality failure/.test(normalized)) return "verification_failed";
+    if (/timed out|timeout/.test(normalized)) return "task_timeout";
+    return "unknown";
   }
 
   private resetInterval(): void {
