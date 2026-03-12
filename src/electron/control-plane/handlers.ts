@@ -76,6 +76,67 @@ export interface ControlPlaneMethodDeps {
 let controlPlaneDeps: ControlPlaneMethodDeps | null = null;
 let detachAgentDaemonBridge: (() => void) | null = null;
 
+function toNodePlatform(platform?: string): "ios" | "android" | "macos" | "linux" | "windows" {
+  switch (platform) {
+    case "darwin":
+    case "macos":
+      return "macos";
+    case "win32":
+    case "windows":
+      return "windows";
+    case "android":
+      return "android";
+    case "ios":
+      return "ios";
+    case "linux":
+    default:
+      return "linux";
+  }
+}
+
+async function getRemoteGatewayNodeInfo():
+  Promise<import("../../shared/types").NodeInfo | null> {
+  const client = getRemoteGatewayClient();
+  if (!client || client.getStatus().state !== "connected") {
+    return null;
+  }
+
+  const status = client.getStatus();
+  let remoteConfig: Any = null;
+  try {
+    remoteConfig = await client.request(Methods.CONFIG_GET, undefined, 5000);
+  } catch {
+    remoteConfig = null;
+  }
+
+  const runtime = remoteConfig?.runtime || {};
+  const hostname = (() => {
+    try {
+      return status.url ? new URL(status.url).hostname : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
+  return {
+    id: status.clientId || status.url || "remote-gateway",
+    displayName:
+      hostname && hostname !== "127.0.0.1" && hostname !== "localhost"
+        ? `CoWork Remote (${hostname})`
+        : "CoWork Remote",
+    platform: toNodePlatform(runtime.platform),
+    version: typeof runtime.coworkVersion === "string" ? runtime.coworkVersion : "unknown",
+    deviceId: status.clientId,
+    modelIdentifier: hostname,
+    capabilities: [],
+    commands: [],
+    permissions: {},
+    connectedAt: status.connectedAt || Date.now(),
+    lastActivityAt: status.lastActivityAt || status.connectedAt || Date.now(),
+    isForeground: false,
+  };
+}
+
 /**
  * Get the current control plane server instance
  */
@@ -1780,10 +1841,14 @@ export function setupControlPlaneHandlers(
   // Get raw token for local display/copy actions
   ipcMain.handle(
     IPC_CHANNELS.CONTROL_PLANE_GET_TOKEN,
-    async (): Promise<{ ok: boolean; token?: string; error?: string }> => {
+    async (): Promise<{ ok: boolean; token?: string; remoteToken?: string; error?: string }> => {
       try {
         const settings = ControlPlaneSettingsManager.loadSettings();
-        return { ok: true, token: settings.token || "" };
+        return {
+          ok: true,
+          token: settings.token || "",
+          remoteToken: settings.remote?.token || "",
+        };
       } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
@@ -2215,11 +2280,13 @@ export function setupControlPlaneHandlers(
       error?: string;
     }> => {
       try {
-        if (!controlPlaneServer || !controlPlaneServer.isRunning) {
-          return { ok: true, nodes: [] };
+        if (controlPlaneServer?.isRunning) {
+          const nodes = (controlPlaneServer as Any).clients.getNodeInfoList();
+          return { ok: true, nodes };
         }
-        const nodes = (controlPlaneServer as Any).clients.getNodeInfoList();
-        return { ok: true, nodes };
+
+        const remoteNode = await getRemoteGatewayNodeInfo();
+        return { ok: true, nodes: remoteNode ? [remoteNode] : [] };
       } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
@@ -2238,14 +2305,22 @@ export function setupControlPlaneHandlers(
       error?: string;
     }> => {
       try {
-        if (!controlPlaneServer || !controlPlaneServer.isRunning) {
+        if (controlPlaneServer?.isRunning) {
+          const client = (controlPlaneServer as Any).clients.getNodeByIdOrName(nodeId);
+          if (!client) {
+            return { ok: false, error: `Node not found: ${nodeId}` };
+          }
+          return { ok: true, node: client.getNodeInfo() };
+        }
+
+        const remoteNode = await getRemoteGatewayNodeInfo();
+        if (!remoteNode) {
           return { ok: false, error: "Control Plane is not running" };
         }
-        const client = (controlPlaneServer as Any).clients.getNodeByIdOrName(nodeId);
-        if (!client) {
+        if (remoteNode.id !== nodeId && remoteNode.displayName !== nodeId) {
           return { ok: false, error: `Node not found: ${nodeId}` };
         }
-        return { ok: true, node: client.getNodeInfo() };
+        return { ok: true, node: remoteNode };
       } catch (error: Any) {
         return { ok: false, error: error.message || String(error) };
       }
@@ -2310,6 +2385,68 @@ export function setupControlPlaneHandlers(
           ok: false,
           error: { code: "INVOKE_FAILED", message: error.message || String(error) },
         };
+      }
+    },
+  );
+
+  // ── Device management IPC handlers ──
+
+  ipcMain.handle(IPC_CHANNELS.DEVICE_LIST_TASKS, async (_, nodeId: string) => {
+    try {
+      if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
+      const db = controlPlaneDeps.dbManager.getDatabase();
+      const rows = db
+        .prepare(
+          "SELECT * FROM tasks WHERE target_node_id = ? ORDER BY updated_at DESC LIMIT 50",
+        )
+        .all(nodeId);
+      return { ok: true, tasks: rows };
+    } catch (error: Any) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.DEVICE_ASSIGN_TASK,
+    async (_, params: { nodeId: string; prompt: string; workspaceId?: string }) => {
+      try {
+        if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
+        const db = controlPlaneDeps.dbManager.getDatabase();
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        db.prepare(
+          `INSERT INTO tasks (id, title, prompt, status, workspace_id, target_node_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,
+        ).run(id, params.prompt.slice(0, 80), params.prompt, params.workspaceId || "", params.nodeId, now, now);
+        return { ok: true, taskId: id };
+      } catch (error: Any) {
+        return { ok: false, error: error.message || String(error) };
+      }
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.DEVICE_GET_PROFILES, async () => {
+    try {
+      if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
+      const { DeviceProfileRepository } = await import("../database/DeviceProfileRepository");
+      const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
+      return { ok: true, profiles: repo.list() };
+    } catch (error: Any) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.DEVICE_UPDATE_PROFILE,
+    async (_, deviceId: string, data: { customName?: string; platform?: string; modelIdentifier?: string }) => {
+      try {
+        if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
+        const { DeviceProfileRepository } = await import("../database/DeviceProfileRepository");
+        const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
+        repo.upsert(deviceId, data);
+        return { ok: true };
+      } catch (error: Any) {
+        return { ok: false, error: error.message || String(error) };
       }
     },
   );

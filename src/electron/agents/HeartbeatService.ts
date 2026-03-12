@@ -10,6 +10,11 @@ import {
   Task,
   Activity,
   ProactiveTaskDefinition,
+  CompanyOutputContract,
+  CompanyOutputType,
+  CompanyLoopType,
+  CompanyPriority,
+  CompanyReviewReason,
 } from "../../shared/types";
 import { AgentRoleRepository } from "./AgentRoleRepository";
 import { MentionRepository } from "./MentionRepository";
@@ -85,6 +90,7 @@ export interface HeartbeatServiceDeps {
       agentConfig?: Task["agentConfig"];
     },
   ) => Promise<Task>;
+  updateTask?: (taskId: string, updates: Partial<Task>) => void;
   getTasksForAgent: (agentRoleId: string, workspaceId?: string) => Task[];
   getDefaultWorkspaceId: () => string | undefined;
   getDefaultWorkspacePath: () => string | undefined;
@@ -344,8 +350,11 @@ export class HeartbeatService extends EventEmitter {
       const currentAgent = this.deps.agentRoleRepo.findById(agent.id);
       if (currentAgent && currentAgent.heartbeatEnabled) {
         await this.executeHeartbeat(currentAgent);
-        // Reschedule for next interval
-        this.scheduleHeartbeat(currentAgent);
+        // Reschedule from fresh state so lastHeartbeatAt reflects the completed run.
+        const refreshedAgent = this.deps.agentRoleRepo.findById(agent.id);
+        if (refreshedAgent && refreshedAgent.heartbeatEnabled) {
+          this.scheduleHeartbeat(refreshedAgent);
+        }
       }
     }, delayMs);
 
@@ -398,6 +407,7 @@ export class HeartbeatService extends EventEmitter {
       const maintenanceWorkspace = this.selectMaintenanceWorkspace(workItems);
       const checklistItems = this.extractDueChecklistItems(agent, maintenanceWorkspace);
       const proactiveTasks = this.extractProactiveTasks(agent);
+      const immediateWakeRequests = wakeRequests.filter((request) => request.mode === "now");
       if (maintenanceWorkspace) {
         result.maintenanceWorkspaceId = maintenanceWorkspace.workspaceId;
       }
@@ -407,7 +417,7 @@ export class HeartbeatService extends EventEmitter {
       const hasWork =
         workItems.pendingMentions.length > 0 ||
         workItems.assignedTasks.length > 0 ||
-        wakeRequests.length > 0 ||
+        immediateWakeRequests.length > 0 ||
         proactiveTasks.length > 0 ||
         checklistItems.length > 0;
 
@@ -429,6 +439,22 @@ export class HeartbeatService extends EventEmitter {
           checklistItems,
           workspacePath,
         );
+        const outputContract = this.buildOutputContract(
+          agent,
+          workItems,
+          immediateWakeRequests,
+          proactiveTasks,
+          checklistItems,
+        );
+        result.triggerReason = outputContract.triggerReason;
+        result.loopType = outputContract.loopType;
+        result.outputType = outputContract.outputType;
+        result.expectedOutputType = outputContract.expectedOutputType;
+        result.valueReason = outputContract.valueReason;
+        result.reviewRequired = outputContract.reviewRequired;
+        result.reviewReason = outputContract.reviewReason;
+        result.evidenceRefs = outputContract.evidenceRefs;
+        result.companyPriority = outputContract.companyPriority;
         const workspaceId = selectedWorkspace?.workspaceId || this.deps.getDefaultWorkspaceId();
 
         if (workspaceId) {
@@ -452,16 +478,29 @@ export class HeartbeatService extends EventEmitter {
             },
           );
           result.taskCreated = task.id;
+          this.deps.updateTask?.(task.id, {
+            assignedAgentRoleId: agent.id,
+            companyId: agent.companyId,
+          });
+          const updatableRepo = this.deps.agentRoleRepo as typeof this.deps.agentRoleRepo & {
+            update?: (request: { id: string; lastUsefulOutputAt?: number }) => unknown;
+          };
+          updatableRepo.update?.({
+            id: agent.id,
+            lastUsefulOutputAt: Date.now(),
+          });
           this.deps.recordActivity?.({
             workspaceId,
             agentRoleId: agent.id,
             title: `Heartbeat surfaced work for ${agent.displayName}`,
-            description: this.describeHeartbeatWork(workItems, wakeRequests, proactiveTasks, checklistItems),
+            description: outputContract.valueReason,
             metadata: {
               taskId: task.id,
               maintenanceChecks: checklistItems.length,
-              wakeRequests: wakeRequests.length,
+              wakeRequests: immediateWakeRequests.length,
               proactiveTasks: proactiveTasks.length,
+              companyId: agent.companyId,
+              outputContract,
             },
           });
           this.commitChecklistRunState(checklistItems, Date.now());
@@ -1085,12 +1124,104 @@ export class HeartbeatService extends EventEmitter {
     checklistItems: DueChecklistItem[],
   ): string {
     const parts: string[] = [];
+    const immediateWakeRequests = wakeRequests.filter((request) => request.mode === "now");
     if (work.pendingMentions.length > 0) parts.push(`${work.pendingMentions.length} mention(s)`);
     if (work.assignedTasks.length > 0) parts.push(`${work.assignedTasks.length} assigned task(s)`);
-    if (wakeRequests.length > 0) parts.push(`${wakeRequests.length} wake request(s)`);
+    if (immediateWakeRequests.length > 0) parts.push(`${immediateWakeRequests.length} immediate wake request(s)`);
     if (proactiveTasks.length > 0) parts.push(`${proactiveTasks.length} proactive task(s)`);
     if (checklistItems.length > 0) parts.push(`${checklistItems.length} HEARTBEAT.md check(s)`);
     return parts.length > 0 ? parts.join(", ") : "Scheduled maintenance heartbeat found follow-up work.";
+  }
+
+  private buildOutputContract(
+    agent: AgentRole,
+    workItems: WorkItems,
+    immediateWakeRequests: HeartbeatWakeRequest[],
+    proactiveTasks: DueProactiveTask[],
+    checklistItems: DueChecklistItem[],
+  ): CompanyOutputContract {
+    const loopType: CompanyLoopType =
+      proactiveTasks.length > 0 || checklistItems.length > 0
+        ? "review"
+        : workItems.pendingMentions.length > 0 || workItems.assignedTasks.length > 0
+          ? "execution"
+          : "monitor";
+
+    let outputType: CompanyOutputType = "status_digest";
+    let reviewRequired = false;
+    let reviewReason: CompanyReviewReason | undefined;
+    if (workItems.pendingMentions.length > 0 || workItems.assignedTasks.length > 0) {
+      outputType = "work_order";
+    } else if (proactiveTasks.length > 0 || checklistItems.length > 0) {
+      outputType = "review_request";
+      reviewRequired = true;
+      reviewReason = "operator_attention";
+    }
+
+    const evidenceRefs = [
+      ...workItems.pendingMentions.map((mention) => ({
+        type: "mention",
+        id: mention.id,
+        label: mention.mentionType,
+      })),
+      ...workItems.assignedTasks.map((task) => ({
+        type: "task",
+        id: task.id,
+        label: task.title,
+      })),
+      ...proactiveTasks.map((task) => ({
+        type: "proactive_task",
+        id: task.task.id,
+        label: task.task.name,
+      })),
+      ...checklistItems.map((item) => ({
+        type: "heartbeat_check",
+        id: item.stateKey,
+        label: item.item.title,
+      })),
+      ...immediateWakeRequests.slice(0, 3).map((wake, index) => ({
+        type: "wake_request",
+        id: `${wake.requestedAt}:${index}`,
+        label: wake.source,
+      })),
+    ];
+
+    const valueReason = this.describeHeartbeatWork(
+      workItems,
+      immediateWakeRequests,
+      proactiveTasks,
+      checklistItems,
+    );
+
+    return {
+      companyId: agent.companyId || "personal",
+      operatorRoleId: agent.id,
+      loopType,
+      outputType,
+      sourceIssueId: undefined,
+      sourceGoalId: undefined,
+      valueReason,
+      reviewRequired,
+      reviewReason,
+      evidenceRefs,
+      companyPriority: this.resolveCompanyPriority(workItems, proactiveTasks, checklistItems),
+      triggerReason: valueReason,
+      expectedOutputType: outputType,
+    };
+  }
+
+  private resolveCompanyPriority(
+    workItems: WorkItems,
+    proactiveTasks: DueProactiveTask[],
+    checklistItems: DueChecklistItem[],
+  ): CompanyPriority {
+    if (workItems.pendingMentions.length > 0 || workItems.assignedTasks.length > 1) {
+      return "high";
+    }
+    if (proactiveTasks.length > 0 || checklistItems.length > 0) {
+      return "normal";
+    }
+    return "low";
   }
 
   private clearProactiveTaskRunState(agentRoleId: string): void {

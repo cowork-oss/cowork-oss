@@ -21,15 +21,15 @@ export function setupImprovementHandlers(service: ImprovementLoopService): void 
   );
 
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, async (_event, workspaceId?: string) =>
-    service.listRunsFresh(workspaceId),
+    service.listCampaignsFresh(workspaceId),
   );
 
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_REFRESH, async () => service.refreshCandidates());
 
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT, async () => service.runNextExperiment());
 
-  ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, async (_event, runId: string) =>
-    service.retryRun(runId),
+  ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, async (_event, campaignId: string) =>
+    service.retryCampaign(campaignId),
   );
 
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, async (_event, candidateId: string) =>
@@ -38,7 +38,7 @@ export function setupImprovementHandlers(service: ImprovementLoopService): void 
 
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN,
-    async (_event, runId: string, reviewStatus: "accepted" | "dismissed") =>
-      await service.reviewRun(runId, reviewStatus),
+    async (_event, campaignId: string, reviewStatus: "accepted" | "dismissed") =>
+      await service.reviewCampaign(campaignId, reviewStatus),
   );
 }

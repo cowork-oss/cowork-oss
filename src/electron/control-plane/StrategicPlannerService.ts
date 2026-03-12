@@ -3,6 +3,10 @@ import { randomUUID } from "crypto";
 import type {
   AgentRole,
   Company,
+  CompanyLoopType,
+  CompanyOutputContract,
+  CompanyOutputType,
+  CompanyReviewReason,
   Issue,
   StrategicPlannerConfig,
   StrategicPlannerConfigUpdate,
@@ -43,6 +47,14 @@ interface PlannerManagedIssueSeed {
   targetIssueId?: string;
 }
 
+interface PlannerScore {
+  coverageGapScore: number;
+  stalenessScore: number;
+  businessImpactScore: number;
+  confidenceScore: number;
+  totalScore: number;
+}
+
 interface StrategicPlannerServiceDeps {
   db: Database.Database;
   agentDaemon?: AgentDaemon;
@@ -55,6 +67,7 @@ export class StrategicPlannerService {
   private readonly workspaceRepo: WorkspaceRepository;
   private readonly agentRoleRepo: AgentRoleRepository;
   private intervalHandle: NodeJS.Timeout | null = null;
+  private readonly activeRuns = new Set<string>();
 
   constructor(private readonly deps: StrategicPlannerServiceDeps) {
     this.core = new ControlPlaneCoreService(deps.db);
@@ -198,6 +211,10 @@ export class StrategicPlannerService {
     if (!company) {
       throw new Error(`Company not found: ${request.companyId}`);
     }
+    if (this.activeRuns.has(request.companyId)) {
+      throw new Error(`Planner run already active for company: ${request.companyId}`);
+    }
+    this.activeRuns.add(request.companyId);
 
     const runId = randomUUID();
     const now = Date.now();
@@ -214,6 +231,12 @@ export class StrategicPlannerService {
 
     try {
       const outcome = await this.executePlanningRun(company, config);
+      const outputType: CompanyOutputType =
+        outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
+          ? "issue_batch"
+          : outcome.suppressedOutputs.some((entry) => entry.outputType === "decision_brief")
+            ? "decision_brief"
+            : "status_digest";
       const summaryParts = [
         `${outcome.createdIssueIds.length} issue(s) created`,
         `${outcome.updatedIssueIds.length} issue(s) updated`,
@@ -237,6 +260,28 @@ export class StrategicPlannerService {
             createdIssueIds: outcome.createdIssueIds,
             updatedIssueIds: outcome.updatedIssueIds,
             dispatchedTaskIds: outcome.dispatchedTaskIds,
+            suppressedOutputs: outcome.suppressedOutputs,
+            outputContract: {
+              companyId: company.id,
+              operatorRoleId: config.plannerAgentRoleId,
+              loopType: "work_generation" as CompanyLoopType,
+              outputType,
+              valueReason:
+                outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
+                  ? `Planner refreshed ${outcome.createdIssueIds.length + outcome.updatedIssueIds.length} issue(s)`
+                  : "Planner found no high-confidence work to dispatch",
+              reviewRequired: outputType !== "issue_batch",
+              reviewReason: outputType !== "issue_batch" ? ("strategy" as CompanyReviewReason) : undefined,
+              evidenceRefs: [
+                ...outcome.createdIssueIds.map((id) => ({ type: "issue", id, label: "created" })),
+                ...outcome.updatedIssueIds.map((id) => ({ type: "issue", id, label: "updated" })),
+                ...outcome.dispatchedTaskIds.map((id) => ({ type: "task", id, label: "dispatched" })),
+              ],
+              companyPriority:
+                outcome.createdIssueIds.length > 0 || outcome.dispatchedTaskIds.length > 0 ? "high" : "normal",
+              triggerReason: `planner:${trigger}`,
+              expectedOutputType: outputType,
+            } satisfies CompanyOutputContract,
           }),
           Date.now(),
           Date.now(),
@@ -256,12 +301,15 @@ export class StrategicPlannerService {
         )
         .run(message, Date.now(), Date.now(), runId);
       throw error;
+    } finally {
+      this.activeRuns.delete(request.companyId);
     }
   }
 
   private async tick(): Promise<void> {
     for (const config of this.listConfigs()) {
       if (!config.enabled) continue;
+      if (this.activeRuns.has(config.companyId)) continue;
       const lastRunAt = config.lastRunAt || 0;
       const intervalMs = config.intervalMinutes * 60 * 1000;
       if (lastRunAt && Date.now() - lastRunAt < intervalMs) continue;
@@ -280,7 +328,9 @@ export class StrategicPlannerService {
     createdIssueIds: string[];
     updatedIssueIds: string[];
     dispatchedTaskIds: string[];
+    suppressedOutputs: Array<{ seedTitle: string; summary: string; outputType: CompanyOutputType }>;
   }> {
+    const runStartedAt = Date.now();
     const activeGoals = this.core.listGoals(company.id).filter((goal) => goal.status === "active");
     const projects = this.core.listProjects({ companyId: company.id, includeArchived: false });
     const issues = this.core.listIssues({ companyId: company.id, limit: 5000 });
@@ -289,6 +339,11 @@ export class StrategicPlannerService {
     const plannerAgent = this.pickPlannerAgent(config);
     const createdIssueIds: string[] = [];
     const updatedIssueIds: string[] = [];
+    const suppressedOutputs: Array<{
+      seedTitle: string;
+      summary: string;
+      outputType: CompanyOutputType;
+    }> = [];
 
     const seeds: PlannerManagedIssueSeed[] = [];
 
@@ -381,6 +436,15 @@ export class StrategicPlannerService {
     const managedOpenIssues = openIssues.filter((issue) => this.getPlannerMetadata(issue)?.plannerManaged === true);
 
     for (const seed of uniqueSeeds) {
+      const score = this.scoreSeed(seed, companyWorkspaceId);
+      if (score.totalScore < 0.55) {
+        suppressedOutputs.push({
+          seedTitle: seed.title,
+          summary: `Suppressed low-confidence planner work (${score.totalScore.toFixed(2)}): ${seed.title}`,
+          outputType: score.businessImpactScore >= 0.6 ? "decision_brief" : "status_digest",
+        });
+        continue;
+      }
       const existing = this.findManagedIssue(openIssues, seed);
       if (existing) {
         const nextPriority = Math.min(existing.priority || seed.priority, seed.priority);
@@ -388,6 +452,7 @@ export class StrategicPlannerService {
           existing.priority !== nextPriority ||
           (seed.assigneeAgentRoleId && existing.assigneeAgentRoleId !== seed.assigneeAgentRoleId);
         if (shouldUpdate) {
+          const outputContract = this.buildIssueOutputContract(company, plannerAgent, seed, score, existing.id);
           this.core.updateIssue(existing.id, {
             priority: nextPriority,
             assigneeAgentRoleId: seed.assigneeAgentRoleId || existing.assigneeAgentRoleId,
@@ -397,6 +462,9 @@ export class StrategicPlannerService {
               plannerKind: seed.kind,
               targetIssueId: seed.targetIssueId,
               plannerTouchedAt: Date.now(),
+              plannerScore: score,
+              outputContract,
+              completionContract: this.buildCompletionContract(seed),
             },
           });
           updatedIssueIds.push(existing.id);
@@ -404,6 +472,7 @@ export class StrategicPlannerService {
         continue;
       }
 
+      const outputContract = this.buildIssueOutputContract(company, plannerAgent, seed, score);
       const created = this.core.createIssue({
         companyId: company.id,
         goalId: seed.goalId,
@@ -420,6 +489,9 @@ export class StrategicPlannerService {
           plannerKind: seed.kind,
           targetIssueId: seed.targetIssueId,
           source: "strategic_planner",
+          plannerScore: score,
+          outputContract,
+          completionContract: this.buildCompletionContract(seed),
         },
       });
       createdIssueIds.push(created.id);
@@ -427,8 +499,18 @@ export class StrategicPlannerService {
       managedOpenIssues.push(created);
     }
 
+    const touchedIssueIds = new Set<string>([...createdIssueIds, ...updatedIssueIds]);
     const dispatchable = [...managedOpenIssues]
       .filter((issue) => !issue.activeRunId && ["backlog", "todo", "blocked"].includes(issue.status))
+      .filter((issue) => {
+        if (touchedIssueIds.has(issue.id)) {
+          return true;
+        }
+        if (!issue.taskId) {
+          return true;
+        }
+        return issue.updatedAt >= runStartedAt;
+      })
       .sort((a, b) => a.priority - b.priority || b.updatedAt - a.updatedAt)
       .slice(0, config.autoDispatch ? config.maxIssuesPerRun : 0);
 
@@ -442,6 +524,7 @@ export class StrategicPlannerService {
       createdIssueIds,
       updatedIssueIds,
       dispatchedTaskIds,
+      suppressedOutputs,
     };
   }
 
@@ -571,12 +654,84 @@ export class StrategicPlannerService {
     plannerManaged?: boolean;
     plannerKind?: PlannerManagedIssueKind;
     targetIssueId?: string;
+    outputContract?: CompanyOutputContract;
   } | null {
     if (!issue.metadata || typeof issue.metadata !== "object") return null;
     return issue.metadata as {
       plannerManaged?: boolean;
       plannerKind?: PlannerManagedIssueKind;
       targetIssueId?: string;
+      outputContract?: CompanyOutputContract;
+    };
+  }
+
+  private scoreSeed(seed: PlannerManagedIssueSeed, companyWorkspaceId?: string): PlannerScore {
+    const coverageGapScore =
+      seed.kind === "goal_planning"
+        ? 1
+        : seed.kind === "project_workspace" || seed.kind === "project_next_step"
+          ? 0.85
+          : seed.kind === "project_blocked_review"
+            ? 0.7
+            : 0.55;
+    const stalenessScore =
+      seed.kind === "issue_refresh" ? 0.9 : seed.kind === "project_blocked_review" ? 0.75 : 0.35;
+    const businessImpactScore = seed.priority === 1 ? 0.9 : seed.priority === 2 ? 0.7 : 0.5;
+    const confidenceScore =
+      seed.workspaceId || companyWorkspaceId
+        ? seed.assigneeAgentRoleId
+          ? 0.85
+          : 0.7
+        : 0.45;
+    const totalScore =
+      coverageGapScore * 0.35 +
+      stalenessScore * 0.2 +
+      businessImpactScore * 0.3 +
+      confidenceScore * 0.15;
+    return {
+      coverageGapScore,
+      stalenessScore,
+      businessImpactScore,
+      confidenceScore,
+      totalScore,
+    };
+  }
+
+  private buildIssueOutputContract(
+    company: Company,
+    plannerAgent: AgentRole | undefined,
+    seed: PlannerManagedIssueSeed,
+    score: PlannerScore,
+    issueId?: string,
+  ): CompanyOutputContract {
+    return {
+      companyId: company.id,
+      operatorRoleId: seed.assigneeAgentRoleId || plannerAgent?.id,
+      loopType: "work_generation",
+      outputType: "issue_batch",
+      sourceIssueId: issueId || seed.targetIssueId,
+      sourceGoalId: seed.goalId,
+      valueReason: `Planner created scoped work for ${seed.kind.replace(/_/g, " ")}`,
+      reviewRequired: score.confidenceScore < 0.65,
+      reviewReason: score.confidenceScore < 0.65 ? "strategy" : undefined,
+      evidenceRefs: [
+        ...(seed.goalId ? [{ type: "goal", id: seed.goalId, label: "source goal" }] : []),
+        ...(seed.projectId ? [{ type: "project", id: seed.projectId, label: "source project" }] : []),
+        ...(seed.targetIssueId ? [{ type: "issue", id: seed.targetIssueId, label: "stale issue" }] : []),
+      ],
+      companyPriority: seed.priority === 1 ? "high" : "normal",
+      triggerReason: seed.kind,
+      expectedOutputType: "work_order",
+    };
+  }
+
+  private buildCompletionContract(seed: PlannerManagedIssueSeed): Record<string, unknown> {
+    return {
+      expectedArtifactType: seed.kind === "goal_planning" ? "decision_brief" : "work_order",
+      doneWhen:
+        seed.kind === "project_workspace"
+          ? ["project linked to durable workspace", "workspace captured in control plane"]
+          : ["concrete next deliverable defined", "responsible operator identified", "next step captured"],
     };
   }
 

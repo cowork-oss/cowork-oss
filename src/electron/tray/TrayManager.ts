@@ -548,6 +548,15 @@ export class TrayManager {
       this.tray = new Tray(icon);
       this.tray.setToolTip("CoWork OS");
 
+      // Supply a live tray bounds provider so notifications always appear below the tray icon
+      try {
+        const { NotificationOverlayManager } = require("../notifications/NotificationOverlayWindow");
+        const trayRef = this.tray;
+        NotificationOverlayManager.getInstance().setAnchorBoundsProvider(
+          () => trayRef?.getBounds() ?? null,
+        );
+      } catch {}
+
       // Build and set context menu
       this.updateContextMenu();
 
@@ -563,105 +572,160 @@ export class TrayManager {
   /**
    * Get or create tray icon
    */
-  private getTrayIcon(state: "idle" | "active" | "error"): NativeImage {
-    // Try to load from file first
-    const iconPath = this.getIconPath("trayTemplate");
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
-    const fs = require("fs");
-
-    if (fs.existsSync(iconPath)) {
-      let icon = nativeImage.createFromPath(iconPath);
-      // Resize to standard macOS menu bar icon size (~18x18 pt)
-      icon = icon.resize({ width: 18, height: 18 });
-      if (process.platform === "darwin") {
-        icon.setTemplateImage(true);
-      }
-      return icon;
-    }
-
-    // Create programmatic icon if file doesn't exist
-    return this.createProgrammaticIcon(state);
+  private getTrayIcon(_state: "idle" | "active" | "error"): NativeImage {
+    return this.createProgrammaticIcon();
   }
 
   /**
-   * Create a programmatic tray icon using raw RGBA bitmap
-   * More reliable than SVG data URLs for Electron tray icons
+   * Create a programmatic tray icon — Mac Mini device icon
+   * Matches the icon used in notification overlays
    */
-  private createProgrammaticIcon(state: "idle" | "active" | "error"): NativeImage {
-    // Standard macOS menu bar icon size (16x16 for 1x, 32x32 for 2x retina)
-    const size = 16;
-    const scale = 2; // Create at 2x for retina
-    const actualSize = size * scale;
+  private createProgrammaticIcon(): NativeImage {
+    const size = 18;
+    const scale = 2;
+    const s = size * scale; // 36px actual
 
-    // Create RGBA buffer (4 bytes per pixel)
-    const buffer = Buffer.alloc(actualSize * actualSize * 4);
+    const buffer = Buffer.alloc(s * s * 4);
 
-    // Get color based on state
-    const [r, g, b] =
-      state === "error"
-        ? [255, 59, 48] // Red
-        : state === "active"
-          ? [0, 122, 255] // Blue
-          : [255, 255, 255]; // White
+    // Helper to set a pixel with alpha blending
+    const setPixel = (x: number, y: number, alpha: number) => {
+      if (x < 0 || x >= s || y < 0 || y >= s) return;
+      const ix = Math.round(x);
+      const iy = Math.round(y);
+      if (ix < 0 || ix >= s || iy < 0 || iy >= s) return;
+      const idx = (iy * s + ix) * 4;
+      const a = Math.max(0, Math.min(255, Math.round(alpha)));
+      // Template image: use black with alpha (macOS inverts automatically)
+      if (a > buffer[idx + 3]) {
+        buffer[idx] = 0;
+        buffer[idx + 1] = 0;
+        buffer[idx + 2] = 0;
+        buffer[idx + 3] = a;
+      }
+    };
 
-    // Draw a simple filled circle
-    const centerX = actualSize / 2;
-    const centerY = actualSize / 2;
-    const outerRadius = actualSize / 2 - 2;
-    const innerRadius = outerRadius - 4;
+    // Draw anti-aliased line (horizontal or vertical)
+    const drawHLine = (x1: number, x2: number, y: number, thickness: number) => {
+      for (let x = Math.floor(x1); x <= Math.ceil(x2); x++) {
+        for (let dy = -thickness / 2; dy < thickness / 2; dy++) {
+          const py = y + dy;
+          // Coverage-based alpha
+          const xCov = Math.min(x + 1, x2) - Math.max(x, x1);
+          const yCov = Math.min(py + 1, y + thickness / 2) - Math.max(py, y - thickness / 2);
+          setPixel(x, Math.floor(py), xCov * yCov * 255);
+        }
+      }
+    };
 
-    for (let y = 0; y < actualSize; y++) {
-      for (let x = 0; x < actualSize; x++) {
-        const dx = x - centerX;
-        const dy = y - centerY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+    const drawVLine = (x: number, y1: number, y2: number, thickness: number) => {
+      for (let y = Math.floor(y1); y <= Math.ceil(y2); y++) {
+        for (let dx = -thickness / 2; dx < thickness / 2; dx++) {
+          const px = x + dx;
+          const yCov = Math.min(y + 1, y2) - Math.max(y, y1);
+          const xCov = Math.min(px + 1, x + thickness / 2) - Math.max(px, x - thickness / 2);
+          setPixel(Math.floor(px), y, xCov * yCov * 255);
+        }
+      }
+    };
 
-        const idx = (y * actualSize + x) * 4;
+    // Draw stroked rounded rect
+    const strokeRoundedRect = (
+      rx: number, ry: number, rw: number, rh: number,
+      radius: number, strokeWidth: number
+    ) => {
+      // Top and bottom edges
+      drawHLine(rx + radius, rx + rw - radius, ry, strokeWidth);
+      drawHLine(rx + radius, rx + rw - radius, ry + rh, strokeWidth);
+      // Left and right edges
+      drawVLine(rx, ry + radius, ry + rh - radius, strokeWidth);
+      drawVLine(rx + rw, ry + radius, ry + rh - radius, strokeWidth);
 
-        // Draw ring (between inner and outer radius)
-        if (distance <= outerRadius && distance >= innerRadius) {
-          // Anti-aliasing at edges
-          let alpha = 255;
-          if (distance > outerRadius - 1) {
-            alpha = Math.round(255 * (outerRadius - distance));
-          } else if (distance < innerRadius + 1) {
-            alpha = Math.round(255 * (distance - innerRadius));
+      // Draw rounded corners
+      const cornerCenters = [
+        [rx + radius, ry + radius, Math.PI, Math.PI * 1.5],
+        [rx + rw - radius, ry + radius, Math.PI * 1.5, Math.PI * 2],
+        [rx + radius, ry + rh - radius, Math.PI * 0.5, Math.PI],
+        [rx + rw - radius, ry + rh - radius, 0, Math.PI * 0.5],
+      ];
+      for (const [cx, cy, startAngle, endAngle] of cornerCenters) {
+        const steps = Math.ceil(radius * 8);
+        for (let i = 0; i <= steps; i++) {
+          const angle = startAngle + (endAngle - startAngle) * (i / steps);
+          const px = cx + Math.cos(angle) * radius;
+          const py = cy + Math.sin(angle) * radius;
+          // Draw thick point
+          for (let dy = -strokeWidth / 2; dy < strokeWidth / 2; dy++) {
+            for (let dx = -strokeWidth / 2; dx < strokeWidth / 2; dx++) {
+              setPixel(Math.floor(px + dx), Math.floor(py + dy), 255);
+            }
           }
-          alpha = Math.max(0, Math.min(255, alpha));
+        }
+      }
+    };
 
-          buffer[idx] = r;
-          buffer[idx + 1] = g;
-          buffer[idx + 2] = b;
-          buffer[idx + 3] = alpha;
-        } else {
-          // Transparent
-          buffer[idx] = 0;
-          buffer[idx + 1] = 0;
-          buffer[idx + 2] = 0;
-          buffer[idx + 3] = 0;
+    // Draw filled circle
+    const fillCircle = (cx: number, cy: number, r: number) => {
+      for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++) {
+        for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
+          const dx = x + 0.5 - cx;
+          const dy = y + 0.5 - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= r + 0.5) {
+            const a = dist > r - 0.5 ? (r + 0.5 - dist) * 255 : 255;
+            setPixel(x, y, a);
+          }
+        }
+      }
+    };
+
+    // === Draw Mac Mini icon ===
+    // Scale from 24-unit viewBox to our 36px canvas
+    const sc = s / 24;
+
+    // Main body: rounded rectangle
+    const bodyX = 2.2 * sc;
+    const bodyY = 6.5 * sc;
+    const bodyW = 19.6 * sc;
+    const bodyH = 9.4 * sc;
+    const bodyR = 1.8 * sc;
+    const sw = 1.7 * sc; // stroke width
+
+    strokeRoundedRect(bodyX, bodyY, bodyW, bodyH, bodyR, sw);
+
+    // Stand/base: curved line beneath the body
+    // Draw as a filled arc shape
+    const baseY = bodyY + bodyH + 0.3 * sc;
+    const baseLeft = 6.5 * sc;
+    const baseRight = s - 6.5 * sc;
+    const baseSag = 2.2 * sc;
+    const baseStroke = 1.5 * sc;
+    const baseSteps = 40;
+    for (let i = 0; i <= baseSteps; i++) {
+      const t = i / baseSteps;
+      const x = baseLeft + (baseRight - baseLeft) * t;
+      const sag = Math.sin(t * Math.PI) * baseSag;
+      const py = baseY + sag;
+      for (let dy = -baseStroke / 2; dy < baseStroke / 2; dy++) {
+        for (let dx = -0.5; dx <= 0.5; dx++) {
+          setPixel(Math.floor(x + dx), Math.floor(py + dy), 255);
         }
       }
     }
 
-    return nativeImage.createFromBuffer(buffer, {
-      width: actualSize,
-      height: actualSize,
+    // Indicator dots (right side of body)
+    const dotR = 1.1 * sc;
+    const smallDotR = 0.55 * sc;
+    const dotY = 11.2 * sc;
+    fillCircle(17.0 * sc, dotY, dotR);
+    fillCircle(19.6 * sc, dotY, smallDotR);
+
+    const icon = nativeImage.createFromBuffer(buffer, {
+      width: s,
+      height: s,
       scaleFactor: scale,
     });
-  }
-
-  /**
-   * Get the path to a tray icon
-   */
-  private getIconPath(name: string): string {
-    const isDev = process.env.NODE_ENV === "development";
-    const basePath = isDev
-      ? path.join(__dirname, "../../../../assets/tray")
-      : path.join(process.resourcesPath, "assets/tray");
-
-    // Use PNG for cross-platform compatibility
-    const extension = process.platform === "darwin" ? "png" : "png";
-    return path.join(basePath, `${name}.${extension}`);
+    icon.setTemplateImage(true);
+    return icon;
   }
 
   /**
@@ -1058,22 +1122,17 @@ export class TrayManager {
   /**
    * Show a notification from the tray
    */
-  showNotification(title: string, body: string): void {
+  showNotification(title: string, body: string, taskId?: string): void {
     if (!this.settings.showNotifications) return;
 
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
-    const { Notification } = require("electron");
-    if (Notification.isSupported()) {
-      const notification = new Notification({
-        title,
-        body,
-        silent: false,
-      });
-      notification.on("click", () => {
-        this.showMainWindow();
-      });
-      notification.show();
-    }
+    // Use custom overlay notification banner
+    const { NotificationOverlayManager } = require("../notifications/NotificationOverlayWindow");
+    NotificationOverlayManager.getInstance().show({
+      id: `tray-${Date.now()}`,
+      title,
+      message: body,
+      taskId,
+    });
   }
 
   /**

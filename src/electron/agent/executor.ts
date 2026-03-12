@@ -4468,6 +4468,7 @@ ${transcript}
     timeoutMs: number,
     operation: string,
   ): Promise<Any> {
+    this.refreshProviderIfSettingsChanged();
     const parentSignal = this.abortController.signal;
     const requestAbort = new AbortController();
     const onParentAbort = () => requestAbort.abort();
@@ -4495,6 +4496,7 @@ ${transcript}
       return await withTimeout(
         this.provider.createMessage({
           ...request,
+          model: this.modelId,
           signal: requestAbort.signal,
           onStreamProgress,
         }),
@@ -22243,11 +22245,26 @@ TASK / CONVERSATION HISTORY:
    * model overrides since those are intentional.
    */
   private refreshProviderIfSettingsChanged(): void {
-    const hasExplicitOverride =
-      this.task.agentConfig?.providerType != null || this.task.agentConfig?.modelKey != null;
-    if (hasExplicitOverride) return;
+    const explicitProviderOverride = this.task.agentConfig?.providerType;
+    if (explicitProviderOverride != null) return;
 
-    const newSelection = LLMProviderFactory.resolveTaskModelSelection(this.task.agentConfig, {
+    const currentSettings = LLMProviderFactory.loadSettings();
+    const currentSettingsProvider = String(currentSettings.providerType || "").trim();
+    const providerChangedInSettings =
+      currentSettingsProvider.length > 0 && currentSettingsProvider !== this.provider.type;
+
+    const explicitModelOverride = String(this.task.agentConfig?.modelKey || "").trim();
+    if (explicitModelOverride && !providerChangedInSettings) return;
+
+    const selectionConfig = providerChangedInSettings
+      ? {
+          ...this.task.agentConfig,
+          // A task-scoped model choice should not pin the task to the previous provider.
+          modelKey: undefined,
+        }
+      : this.task.agentConfig;
+
+    const newSelection = LLMProviderFactory.resolveTaskModelSelection(selectionConfig, {
       isVerificationTask:
         this.task.agentConfig?.verificationAgent === true ||
         /^verify\s*:/i.test(this.task.title) ||
@@ -22270,6 +22287,7 @@ TASK / CONVERSATION HISTORY:
         this.modelKey = newSelection.modelKey;
         this.llmProfileUsed = newSelection.llmProfileUsed;
         this.resolvedModelKey = newSelection.resolvedModelKey;
+        this.contextManager = new ContextManager(this.modelKey);
         this.emitEvent("log", {
           message: `LLM provider updated mid-session: provider=${newSelection.providerType}, model=${newSelection.modelId}`,
         });

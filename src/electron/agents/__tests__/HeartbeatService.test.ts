@@ -446,6 +446,36 @@ describe("HeartbeatService", () => {
       expect(agent?.lastHeartbeatAt).toBeDefined();
     });
 
+    it("does not create a task for passive next-heartbeat wake requests alone", async () => {
+      createAgent("agent-1", { heartbeatEnabled: true });
+
+      service.submitWakeRequest("agent-1", {
+        mode: "next-heartbeat",
+        source: "hook",
+        text: "Git state changed in workspace-1",
+      });
+
+      const result = await service.triggerHeartbeat("agent-1");
+
+      expect(result.status).toBe("ok");
+      expect(createdTasks).toHaveLength(0);
+    });
+
+    it("creates a task for explicit immediate wake requests", async () => {
+      createAgent("agent-1", { heartbeatEnabled: true });
+
+      service.submitWakeRequest("agent-1", {
+        mode: "now",
+        source: "manual",
+        text: "Check this now",
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0]?.title).toBe("Heartbeat: Agent agent-1");
+    });
+
     it("respects proactive task frequencyMinutes and does not run every heartbeat", async () => {
       createAgent("agent-1", {
         heartbeatEnabled: true,
@@ -672,6 +702,34 @@ describe("HeartbeatService", () => {
 
       expect(
         heartbeatEvents.some((e) => e.agentRoleId === "agent-1" && e.type === "completed"),
+      ).toBe(true);
+    });
+
+    it("reschedules from updated heartbeat state instead of running again immediately", async () => {
+      createAgent("agent-1", {
+        heartbeatEnabled: true,
+        heartbeatIntervalMinutes: 15,
+        lastHeartbeatAt: Date.now() - 60 * 60 * 1000,
+      });
+
+      await service.start();
+
+      await vi.runOnlyPendingTimersAsync();
+
+      const completed = heartbeatEvents.filter(
+        (event) => event.agentRoleId === "agent-1" && event.type === "completed",
+      );
+      expect(completed).toHaveLength(1);
+
+      heartbeatEvents.length = 0;
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+      expect(
+        heartbeatEvents.some((event) => event.agentRoleId === "agent-1" && event.type === "completed"),
+      ).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+      expect(
+        heartbeatEvents.some((event) => event.agentRoleId === "agent-1" && event.type === "completed"),
       ).toBe(true);
     });
   });

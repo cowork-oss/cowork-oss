@@ -16,7 +16,6 @@ import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "control-plane-settings.json";
-const MASKED_VALUE = "***configured***";
 const ENCRYPTED_PREFIX = "encrypted:";
 const logger = createLogger("ControlPlane Settings");
 
@@ -88,31 +87,10 @@ export function generateControlPlaneToken(bytes = 32): string {
 }
 
 /**
- * Encrypt a secret using OS keychain via safeStorage
- */
-function _encryptSecret(value?: string): string | undefined {
-  if (!value || !value.trim()) return undefined;
-  const trimmed = value.trim();
-  if (trimmed === MASKED_VALUE) return undefined;
-
-  try {
-    const safeStorage = getSafeStorage();
-    if (safeStorage?.isEncryptionAvailable()) {
-      const encrypted = safeStorage.encryptString(trimmed);
-      return ENCRYPTED_PREFIX + encrypted.toString("base64");
-    }
-  } catch (error) {
-    logger.warn("Failed to encrypt secret:", error);
-  }
-  return MASKED_VALUE;
-}
-
-/**
  * Decrypt a secret that was encrypted with safeStorage
  */
 function decryptSecret(value?: string): string | undefined {
   if (!value) return undefined;
-  if (value === MASKED_VALUE) return undefined;
 
   if (value.startsWith(ENCRYPTED_PREFIX)) {
     try {
@@ -127,7 +105,7 @@ function decryptSecret(value?: string): string | undefined {
   }
 
   // Backwards compatibility - unencrypted value
-  if (value !== MASKED_VALUE && !value.startsWith(ENCRYPTED_PREFIX)) {
+  if (!value.startsWith(ENCRYPTED_PREFIX)) {
     return value.trim() || undefined;
   }
 
@@ -320,7 +298,12 @@ export class ControlPlaneSettingsManager {
       ? { ...DEFAULT_REMOTE_GATEWAY_CONFIG, ...settings.remote, ...updates.remote }
       : settings.remote;
 
-    const updated = { ...settings, ...updates, tailscale, remote };
+    const updated = {
+      ...settings,
+      ...updates,
+      tailscale,
+      remote,
+    };
     this.saveSettings(updated);
     return updated;
   }
@@ -359,24 +342,10 @@ export class ControlPlaneSettingsManager {
   }
 
   /**
-   * Get settings for display (masks sensitive data)
+   * Get settings for display
    */
   static getSettingsForDisplay(): ControlPlaneSettings {
-    const settings = this.loadSettings();
-    const displaySettings: ControlPlaneSettings = {
-      ...settings,
-      token: settings.token ? MASKED_VALUE : "",
-    };
-
-    // Mask remote token if present
-    if (settings.remote) {
-      displaySettings.remote = {
-        ...settings.remote,
-        token: settings.remote.token ? MASKED_VALUE : "",
-      };
-    }
-
-    return displaySettings;
+    return this.loadSettings();
   }
 
   /**

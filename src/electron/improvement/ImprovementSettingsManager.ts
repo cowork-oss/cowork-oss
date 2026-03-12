@@ -49,8 +49,12 @@ export class ImprovementSettingsManager {
       autoRun: input.autoRun !== false,
       includeDevLogs: input.includeDevLogs !== false,
       intervalMinutes: Math.min(Math.max(Math.round(input.intervalMinutes || 24 * 60), 15), 7 * 24 * 60),
-      maxConcurrentExperiments: Math.min(
-        Math.max(Math.round(input.maxConcurrentExperiments || 1), 1),
+      variantsPerCampaign: Math.min(
+        Math.max(Math.round(input.variantsPerCampaign || 4), 2),
+        6,
+      ),
+      maxConcurrentCampaigns: Math.min(
+        Math.max(Math.round(input.maxConcurrentCampaigns || 1), 1),
         3,
       ),
       maxOpenCandidatesPerWorkspace: Math.min(
@@ -59,8 +63,14 @@ export class ImprovementSettingsManager {
       ),
       requireWorktree: input.requireWorktree !== false,
       reviewRequired: input.reviewRequired !== false,
+      judgeRequired: input.judgeRequired !== false,
       promotionMode: input.promotionMode === "merge" ? "merge" : "github_pr",
       evalWindowDays: Math.min(Math.max(Math.round(input.evalWindowDays || 14), 1), 90),
+      replaySetSize: Math.min(Math.max(Math.round(input.replaySetSize || 3), 1), 10),
+      improvementProgramPath:
+        typeof input.improvementProgramPath === "string" && input.improvementProgramPath.trim().length > 0
+          ? input.improvementProgramPath.trim()
+          : undefined,
     };
   }
 }

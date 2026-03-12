@@ -270,4 +270,62 @@ describeWithSqlite("StrategicPlannerService", () => {
     expect(prompts[0]).toContain("link_project_workspace");
     expect(prompts[0]).toContain("Do not treat ad hoc files in .cowork/");
   });
+
+  it("does not redispatch the same planner-managed issue on the next run when it already has a task", async () => {
+    const workspace = insertWorkspace();
+    const company = core.getDefaultCompany();
+    const project = core.createProject({
+      companyId: company.id,
+      name: "Repeat Dispatch Guard",
+    });
+    core.linkProjectWorkspace({
+      projectId: project.id,
+      workspaceId: workspace.id,
+      isPrimary: true,
+    });
+
+    const plannerAgent =
+      agentRoleRepo.findByName("project_manager") ||
+      agentRoleRepo.create({
+        name: "planner-agent",
+        displayName: "Planner Agent",
+        capabilities: ["plan", "manage"],
+        heartbeatEnabled: true,
+      });
+
+    const createdTaskIds: string[] = [];
+    planner = new (await import("../StrategicPlannerService")).StrategicPlannerService({
+      db,
+      agentDaemon: {
+        createTask: async (params: { title: string; prompt: string; workspaceId: string; agentConfig?: Any }) => {
+          const task = taskRepo.create({
+            title: params.title,
+            prompt: params.prompt,
+            status: "pending",
+            workspaceId: params.workspaceId,
+            agentConfig: params.agentConfig,
+            source: "api",
+          });
+          createdTaskIds.push(task.id);
+          return task;
+        },
+      } as Any,
+    });
+
+    planner.updateConfig(company.id, {
+      enabled: true,
+      autoDispatch: true,
+      maxIssuesPerRun: 2,
+      plannerAgentRoleId: plannerAgent.id,
+      planningWorkspaceId: workspace.id,
+    });
+
+    const firstRun = await planner.runNow({ companyId: company.id });
+    expect(firstRun.status).toBe("completed");
+    expect(createdTaskIds).toHaveLength(1);
+
+    const secondRun = await planner.runNow({ companyId: company.id });
+    expect(secondRun.status).toBe("completed");
+    expect(createdTaskIds).toHaveLength(1);
+  });
 });

@@ -17,9 +17,9 @@ import type {
   EvalSuite,
   InfraSettings,
   InfraStatus,
+  ImprovementCampaign,
   ImprovementCandidate,
   ImprovementLoopSettings,
-  ImprovementRun,
   WalletInfo,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
@@ -479,6 +479,7 @@ const IPC_CHANNELS = {
   NOTIFICATION_DELETE: "notification:delete",
   NOTIFICATION_DELETE_ALL: "notification:deleteAll",
   NOTIFICATION_EVENT: "notification:event",
+  NAVIGATE_TO_TASK: "navigate-to-task",
   // Hooks (Webhooks & Gmail Pub/Sub)
   HOOKS_GET_SETTINGS: "hooks:getSettings",
   HOOKS_SAVE_SETTINGS: "hooks:saveSettings",
@@ -554,6 +555,11 @@ const IPC_CHANNELS = {
   NODE_GET: "node:get",
   NODE_INVOKE: "node:invoke",
   NODE_EVENT: "node:event",
+  // Device Management
+  DEVICE_LIST_TASKS: "device:listTasks",
+  DEVICE_ASSIGN_TASK: "device:assignTask",
+  DEVICE_GET_PROFILES: "device:getProfiles",
+  DEVICE_UPDATE_PROFILE: "device:updateProfile",
   // Memory System
   MEMORY_GET_SETTINGS: "memory:getSettings",
   MEMORY_SAVE_SETTINGS: "memory:saveSettings",
@@ -768,6 +774,7 @@ const IPC_CHANNELS = {
   MC_COMPANY_GET: "missionControl:companyGet",
   MC_COMPANY_CREATE: "missionControl:companyCreate",
   MC_COMPANY_UPDATE: "missionControl:companyUpdate",
+  MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
   MC_GOAL_CREATE: "missionControl:goalCreate",
@@ -1743,6 +1750,13 @@ interface AgentRoleData {
   heartbeatStaggerOffset?: number;
   lastHeartbeatAt?: number;
   heartbeatStatus?: HeartbeatStatus;
+  operatorMandate?: string;
+  allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
+  outputTypes?: import("../shared/types").CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number;
+  operatorHealthScore?: number;
 }
 
 interface CreateAgentRoleRequest {
@@ -1764,6 +1778,13 @@ interface CreateAgentRoleRequest {
   heartbeatEnabled?: boolean;
   heartbeatIntervalMinutes?: number;
   heartbeatStaggerOffset?: number;
+  operatorMandate?: string;
+  allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
+  outputTypes?: import("../shared/types").CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number;
+  operatorHealthScore?: number;
 }
 
 interface UpdateAgentRoleRequest {
@@ -1787,6 +1808,13 @@ interface UpdateAgentRoleRequest {
   heartbeatEnabled?: boolean;
   heartbeatIntervalMinutes?: number;
   heartbeatStaggerOffset?: number;
+  operatorMandate?: string;
+  allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
+  outputTypes?: import("../shared/types").CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number | null;
+  operatorHealthScore?: number | null;
 }
 
 // Activity Feed types (inlined for sandboxed preload)
@@ -1909,6 +1937,15 @@ interface HeartbeatResult {
   maintenanceWorkspaceId?: string;
   silent?: boolean;
   taskCreated?: string;
+  triggerReason?: string;
+  loopType?: import("../shared/types").CompanyLoopType;
+  outputType?: import("../shared/types").CompanyOutputType;
+  expectedOutputType?: import("../shared/types").CompanyOutputType;
+  valueReason?: string;
+  reviewRequired?: boolean;
+  reviewReason?: import("../shared/types").CompanyReviewReason;
+  evidenceRefs?: import("../shared/types").CompanyEvidenceRef[];
+  companyPriority?: import("../shared/types").CompanyPriority;
   error?: string;
 }
 
@@ -2614,6 +2651,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_EVENT, subscription);
   },
+  onNavigateToTask: (callback: (taskId: string) => void) => {
+    const subscription = (_: Any, taskId: string) => callback(taskId);
+    ipcRenderer.on(IPC_CHANNELS.NAVIGATE_TO_TASK, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.NAVIGATE_TO_TASK, subscription);
+  },
 
   // Hooks (Webhooks & Gmail Pub/Sub) APIs
   getHooksSettings: () => ipcRenderer.invoke(IPC_CHANNELS.HOOKS_GET_SETTINGS),
@@ -2750,6 +2792,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NODE_EVENT, subscription);
   },
 
+  // Device Management APIs
+  deviceListTasks: (nodeId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_TASKS, nodeId),
+  deviceAssignTask: (params: { nodeId: string; prompt: string; workspaceId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_ASSIGN_TASK, params),
+  deviceGetProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_PROFILES),
+  deviceUpdateProfile: (deviceId: string, data: { customName?: string; platform?: string; modelIdentifier?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_UPDATE_PROFILE, deviceId, data),
+
   // Memory System APIs
   getMemorySettings: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_SETTINGS, workspaceId),
@@ -2839,21 +2890,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES, workspaceId) as Promise<
       ImprovementCandidate[]
     >,
-  listImprovementRuns: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<ImprovementRun[]>,
+  listImprovementCampaigns: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<ImprovementCampaign[]>,
   refreshImprovementCandidates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REFRESH) as Promise<{ candidateCount: number }>,
   runNextImprovementExperiment: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT) as Promise<ImprovementRun | null>,
-  retryImprovementRun: (runId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, runId) as Promise<ImprovementRun | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT) as Promise<ImprovementCampaign | null>,
+  retryImprovementCampaign: (campaignId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, campaignId) as Promise<ImprovementCampaign | null>,
   dismissImprovementCandidate: (candidateId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, candidateId) as Promise<
       ImprovementCandidate | undefined
     >,
-  reviewImprovementRun: (runId: string, reviewStatus: "accepted" | "dismissed") =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN, runId, reviewStatus) as Promise<
-      ImprovementRun | undefined
+  reviewImprovementCampaign: (campaignId: string, reviewStatus: "accepted" | "dismissed") =>
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN, campaignId, reviewStatus) as Promise<
+      ImprovementCampaign | undefined
     >,
 
   // Workspace Kit (.cowork) APIs
@@ -2981,6 +3032,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_CREATE, input),
   updateCompany: (request: { companyId: string } & import("../shared/types").CompanyUpdate) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_UPDATE, request),
+  getCommandCenterSummary: (companyId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
+      import("../shared/types").CompanyCommandCenterSummary
+    >,
   listCompanyGoals: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_LIST, companyId),
   getGoal: (goalId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_GOAL_GET, goalId),
   createGoal: (input: import("../shared/types").GoalCreateInput) =>
@@ -4340,6 +4395,7 @@ export interface ElectronAPI {
   deleteNotification: (id: string) => Promise<boolean>;
   deleteAllNotifications: () => Promise<void>;
   onNotificationEvent: (callback: (event: NotificationEvent) => void) => () => void;
+  onNavigateToTask: (callback: (taskId: string) => void) => () => void;
   // Hooks (Webhooks & Gmail Pub/Sub)
   getHooksSettings: () => Promise<HooksSettings>;
   saveHooksSettings: (settings: Partial<HooksSettings>) => Promise<HooksSettings>;
@@ -4372,7 +4428,12 @@ export interface ElectronAPI {
   }>;
   stopControlPlane: () => Promise<{ ok: boolean; error?: string }>;
   getControlPlaneStatus: () => Promise<ControlPlaneStatus>;
-  getControlPlaneToken: () => Promise<{ ok: boolean; token?: string; error?: string }>;
+  getControlPlaneToken: () => Promise<{
+    ok: boolean;
+    token?: string;
+    remoteToken?: string;
+    error?: string;
+  }>;
   regenerateControlPlaneToken: () => Promise<{ ok: boolean; token?: string; error?: string }>;
   onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
 
@@ -4464,6 +4525,12 @@ export interface ElectronAPI {
   }) => Promise<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }>;
   onNodeEvent: (callback: (event: NodeEvent) => void) => () => void;
 
+  // Device Management
+  deviceListTasks: (nodeId: string) => Promise<{ ok: boolean; tasks?: Any[]; error?: string }>;
+  deviceAssignTask: (params: { nodeId: string; prompt: string; workspaceId?: string }) => Promise<{ ok: boolean; taskId?: string; error?: string }>;
+  deviceGetProfiles: () => Promise<{ ok: boolean; profiles?: Any[]; error?: string }>;
+  deviceUpdateProfile: (deviceId: string, data: { customName?: string; platform?: string; modelIdentifier?: string }) => Promise<{ ok: boolean; error?: string }>;
+
   // Memory System
   getMemorySettings: (workspaceId: string) => Promise<MemorySettings>;
   saveMemorySettings: (data: {
@@ -4548,15 +4615,15 @@ export interface ElectronAPI {
   getImprovementSettings: () => Promise<ImprovementLoopSettings>;
   saveImprovementSettings: (settings: ImprovementLoopSettings) => Promise<{ success: boolean }>;
   listImprovementCandidates: (workspaceId?: string) => Promise<ImprovementCandidate[]>;
-  listImprovementRuns: (workspaceId?: string) => Promise<ImprovementRun[]>;
+  listImprovementCampaigns: (workspaceId?: string) => Promise<ImprovementCampaign[]>;
   refreshImprovementCandidates: () => Promise<{ candidateCount: number }>;
-  runNextImprovementExperiment: () => Promise<ImprovementRun | null>;
-  retryImprovementRun: (runId: string) => Promise<ImprovementRun | null>;
+  runNextImprovementExperiment: () => Promise<ImprovementCampaign | null>;
+  retryImprovementCampaign: (campaignId: string) => Promise<ImprovementCampaign | null>;
   dismissImprovementCandidate: (candidateId: string) => Promise<ImprovementCandidate | undefined>;
-  reviewImprovementRun: (
-    runId: string,
+  reviewImprovementCampaign: (
+    campaignId: string,
     reviewStatus: "accepted" | "dismissed",
-  ) => Promise<ImprovementRun | undefined>;
+  ) => Promise<ImprovementCampaign | undefined>;
 
   // Workspace Kit (.cowork)
   getWorkspaceKitStatus: (workspaceId: string) => Promise<WorkspaceKitStatus>;
@@ -4661,6 +4728,9 @@ export interface ElectronAPI {
   updateCompany: (
     request: { companyId: string } & import("../shared/types").CompanyUpdate,
   ) => Promise<import("../shared/types").Company | undefined>;
+  getCommandCenterSummary: (
+    companyId: string,
+  ) => Promise<import("../shared/types").CompanyCommandCenterSummary>;
   listCompanyGoals: (companyId: string) => Promise<import("../shared/types").Goal[]>;
   getGoal: (goalId: string) => Promise<import("../shared/types").Goal | undefined>;
   createGoal: (input: import("../shared/types").GoalCreateInput) => Promise<import("../shared/types").Goal>;

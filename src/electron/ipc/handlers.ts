@@ -151,7 +151,7 @@ import {
   MCPRegistrySearchSchema,
   HookMappingSchema,
 } from "../utils/validation";
-import { NotificationService } from "../notifications";
+import { NotificationService, NotificationOverlayManager } from "../notifications";
 import type {
   NotificationType,
   HooksSettingsData,
@@ -4921,6 +4921,23 @@ function setupCronHandlers(): void {
  * Set up Notification IPC handlers
  */
 function setupNotificationHandlers(): void {
+  // Initialize overlay manager for custom macOS-style notification banners
+  const overlayManager = NotificationOverlayManager.getInstance();
+
+  // Clicking a notification overlay brings the main window to focus
+  overlayManager.setOnClick((_notificationId, taskId) => {
+    const windows = BrowserWindow.getAllWindows();
+    const mainWin = windows.find((w) => !w.isDestroyed() && w.webContents);
+    if (mainWin) {
+      if (mainWin.isMinimized()) mainWin.restore();
+      mainWin.show();
+      mainWin.focus();
+      if (taskId) {
+        mainWin.webContents.send(IPC_CHANNELS.NAVIGATE_TO_TASK, taskId);
+      }
+    }
+  });
+
   // Initialize notification service with event forwarding to main window
   notificationService = new NotificationService({
     onEvent: (event) => {
@@ -4933,6 +4950,17 @@ function setupNotificationHandlers(): void {
         if (win.webContents) {
           win.webContents.send(IPC_CHANNELS.NOTIFICATION_EVENT, event);
         }
+      }
+
+      // Show custom overlay notification banner
+      if (event.type === "added" && event.notification) {
+        overlayManager.show({
+          id: event.notification.id,
+          title: event.notification.title,
+          message: event.notification.message,
+          type: event.notification.type,
+          taskId: event.notification.taskId,
+        });
       }
     },
   });

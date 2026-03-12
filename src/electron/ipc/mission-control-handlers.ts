@@ -1,12 +1,24 @@
 import type Database from "better-sqlite3";
 import { ipcMain, BrowserWindow } from "electron";
-import { IPC_CHANNELS, HeartbeatConfig } from "../../shared/types";
+import {
+  IPC_CHANNELS,
+  HeartbeatConfig,
+  CompanyCommandCenterSummary,
+  CompanyEvidenceRef,
+  CompanyExecutionMapItem,
+  CompanyOperatorStatus,
+  CompanyOutputContract,
+  CompanyOutputFeedItem,
+  CompanyReviewQueueItem,
+} from "../../shared/types";
 import type { Issue } from "../../shared/types";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import {
   TaskSubscriptionRepository,
   SubscriptionReason,
 } from "../agents/TaskSubscriptionRepository";
+import { ActivityRepository } from "../activity/ActivityRepository";
+import { TaskRepository } from "../database/repositories";
 import { StandupReportService } from "../reports/StandupReportService";
 import { HeartbeatService } from "../agents/HeartbeatService";
 import { rateLimiter } from "../utils/rate-limiter";
@@ -57,6 +69,65 @@ function optionalUuid(value: unknown, fieldName: string): string | undefined {
   return validateInput(UUIDSchema, value, fieldName);
 }
 
+function getOutputContract(metadata: unknown): CompanyOutputContract | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const raw = metadata as Record<string, unknown>;
+  const candidate =
+    raw.outputContract && typeof raw.outputContract === "object"
+      ? (raw.outputContract as Record<string, unknown>)
+      : raw;
+  if (
+    typeof candidate.companyId !== "string" ||
+    typeof candidate.loopType !== "string" ||
+    typeof candidate.outputType !== "string" ||
+    typeof candidate.valueReason !== "string"
+  ) {
+    return null;
+  }
+  return {
+    companyId: candidate.companyId,
+    operatorRoleId:
+      typeof candidate.operatorRoleId === "string" ? candidate.operatorRoleId : undefined,
+    loopType: candidate.loopType as CompanyOutputContract["loopType"],
+    outputType: candidate.outputType as CompanyOutputContract["outputType"],
+    sourceIssueId:
+      typeof candidate.sourceIssueId === "string" ? candidate.sourceIssueId : undefined,
+    sourceGoalId: typeof candidate.sourceGoalId === "string" ? candidate.sourceGoalId : undefined,
+    valueReason: candidate.valueReason,
+    reviewRequired: Boolean(candidate.reviewRequired),
+    reviewReason:
+      typeof candidate.reviewReason === "string" ? candidate.reviewReason as Any : undefined,
+    evidenceRefs: Array.isArray(candidate.evidenceRefs)
+      ? (candidate.evidenceRefs as CompanyEvidenceRef[])
+      : [],
+    companyPriority:
+      typeof candidate.companyPriority === "string" ? candidate.companyPriority as Any : undefined,
+    triggerReason:
+      typeof candidate.triggerReason === "string" ? candidate.triggerReason : undefined,
+    expectedOutputType:
+      typeof candidate.expectedOutputType === "string"
+        ? candidate.expectedOutputType as Any
+        : undefined,
+  };
+}
+
+function getCompletionNextStep(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const raw = metadata as Record<string, unknown>;
+  const completion = raw.completionContract;
+  if (!completion || typeof completion !== "object") return undefined;
+  const doneWhen = (completion as Record<string, unknown>).doneWhen;
+  if (!Array.isArray(doneWhen) || doneWhen.length === 0) return undefined;
+  return `Next: ${doneWhen[0]}`;
+}
+
+function getLatestLoopForOperator(
+  outputs: CompanyOutputFeedItem[],
+  operatorRoleId: string,
+): CompanyOperatorStatus["activeLoop"] {
+  return outputs.find((item) => item.operatorRoleId === operatorRoleId)?.loopType;
+}
+
 /**
  * Dependencies for Mission Control handlers
  */
@@ -78,6 +149,8 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   const { db, agentRoleRepo, taskSubscriptionRepo, standupService, heartbeatService } = deps;
   const core = new ControlPlaneCoreService(db);
+  const taskRepo = new TaskRepository(db);
+  const activityRepo = new ActivityRepository(db);
   const requirePlannerService = (): StrategicPlannerService => {
     const service = deps.getPlannerService();
     if (!service) {
@@ -306,6 +379,211 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       });
     },
   );
+
+  ipcMain.handle(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, async (_, companyId: string) => {
+    const validated = validateInput(UUIDSchema, companyId, "company ID");
+    const company = core.getCompany(validated);
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    const goals = core.listGoals(validated);
+    const projects = core.listProjects({ companyId: validated, includeArchived: false });
+    const issues = core.listIssues({ companyId: validated, limit: 5000 });
+    const runs = core.listRuns({ companyId: validated, limit: 100 });
+    const plannerRuns = requirePlannerService().listRuns({ companyId: validated, limit: 8 });
+    const operators = agentRoleRepo.findByCompanyId(validated, false);
+    const activityWorkspaceId = company.defaultWorkspaceId;
+    const activities = activityWorkspaceId
+      ? activityRepo.list({ workspaceId: activityWorkspaceId, limit: 100 })
+      : [];
+    const taskIds = (
+      db
+        .prepare("SELECT id FROM tasks WHERE company_id = ? ORDER BY updated_at DESC LIMIT 200")
+        .all(validated) as Array<{ id: string }>
+    ).map((row) => row.id);
+    const tasks = taskIds.map((id) => taskRepo.findById(id)).filter(Boolean);
+
+    const outputs: CompanyOutputFeedItem[] = [];
+    const reviewQueue: CompanyReviewQueueItem[] = [];
+
+    const pushOutput = (item: CompanyOutputFeedItem): void => {
+      outputs.push(item);
+      if (item.reviewRequired && item.reviewReason) {
+        reviewQueue.push({
+          id: `review:${item.id}`,
+          title: item.title,
+          createdAt: item.createdAt,
+          sourceType: item.sourceType,
+          reviewReason: item.reviewReason,
+          outputType: item.outputType,
+          companyPriority: item.companyPriority,
+          summary: item.summary,
+          issueId: item.issueId,
+          runId: item.runId,
+          taskId: item.taskId,
+          operatorRoleId: item.operatorRoleId,
+        });
+      }
+    };
+
+    for (const run of plannerRuns) {
+      const contract = getOutputContract(run.metadata);
+      if (!contract) continue;
+      pushOutput({
+        id: `planner:${run.id}`,
+        sourceType: "planner_run",
+        title: run.summary || "Planner cycle",
+        summary: Array.isArray((run.metadata as Any)?.suppressedOutputs)
+          ? ((run.metadata as Any).suppressedOutputs as Array<{ summary?: string }>)
+              .map((entry) => entry.summary)
+              .filter(Boolean)
+              .join(" | ")
+          : undefined,
+        status: run.status,
+        createdAt: run.createdAt,
+        operatorRoleId: contract.operatorRoleId,
+        loopType: contract.loopType,
+        outputType: contract.outputType,
+        valueReason: contract.valueReason,
+        triggerReason: contract.triggerReason,
+        reviewRequired: contract.reviewRequired,
+        reviewReason: contract.reviewReason,
+        evidenceRefs: contract.evidenceRefs,
+        companyPriority: contract.companyPriority,
+        whatChanged: run.summary,
+        nextStep: contract.expectedOutputType ? `Expected next output: ${contract.expectedOutputType}` : undefined,
+      });
+    }
+
+    for (const issue of issues) {
+      const contract = getOutputContract(issue.metadata);
+      if (!contract) continue;
+      pushOutput({
+        id: `issue:${issue.id}`,
+        sourceType: "issue",
+        title: issue.title,
+        summary: issue.description,
+        status: issue.status,
+        createdAt: issue.updatedAt,
+        operatorRoleId: contract.operatorRoleId || issue.assigneeAgentRoleId,
+        issueId: issue.id,
+        taskId: issue.taskId,
+        loopType: contract.loopType,
+        outputType: contract.outputType,
+        valueReason: contract.valueReason,
+        triggerReason: contract.triggerReason,
+        reviewRequired: contract.reviewRequired || issue.status === "review" || issue.status === "blocked",
+        reviewReason:
+          contract.reviewReason || (issue.status === "blocked" ? "operator_attention" : issue.status === "review" ? "strategy" : undefined),
+        evidenceRefs: contract.evidenceRefs,
+        companyPriority: contract.companyPriority,
+        whatChanged: issue.status === "blocked" ? "Issue is blocked" : `Issue moved to ${issue.status}`,
+        nextStep: getCompletionNextStep(issue.metadata),
+      });
+    }
+
+    for (const activity of activities) {
+      const contract = getOutputContract(activity.metadata);
+      if (!contract) continue;
+      pushOutput({
+        id: `activity:${activity.id}`,
+        sourceType: "activity",
+        title: activity.title,
+        summary: activity.description,
+        createdAt: activity.createdAt,
+        operatorRoleId: contract.operatorRoleId || activity.agentRoleId,
+        taskId: typeof activity.metadata?.taskId === "string" ? activity.metadata.taskId : undefined,
+        loopType: contract.loopType,
+        outputType: contract.outputType,
+        valueReason: contract.valueReason,
+        triggerReason: contract.triggerReason,
+        reviewRequired: contract.reviewRequired,
+        reviewReason: contract.reviewReason,
+        evidenceRefs: contract.evidenceRefs,
+        companyPriority: contract.companyPriority,
+      });
+    }
+
+    outputs.sort((a, b) => b.createdAt - a.createdAt);
+    reviewQueue.sort((a, b) => b.createdAt - a.createdAt);
+
+    const operatorStatuses: CompanyOperatorStatus[] = operators.map((operator) => {
+      const operatorTasks = tasks.filter((task) => task?.assignedAgentRoleId === operator.id);
+      const operatorRuns = runs.filter((run) => run.agentRoleId === operator.id);
+      const failedRuns = operatorRuns.filter((run) => run.status === "failed").length;
+      const currentBottleneck = operatorTasks.find((task) => task?.boardColumn === "review")
+        ? "Pending review"
+        : operatorRuns.find((run) => run.status === "failed")
+          ? "Recent failed run"
+          : undefined;
+      return {
+        agentRoleId: operator.id,
+        displayName: operator.displayName,
+        icon: operator.icon,
+        color: operator.color,
+        autonomyLevel: operator.autonomyLevel,
+        operatorMandate: operator.operatorMandate,
+        allowedLoopTypes: operator.allowedLoopTypes || [],
+        outputTypes: operator.outputTypes || [],
+        suppressionPolicy: operator.suppressionPolicy,
+        maxAutonomousOutputsPerCycle: operator.maxAutonomousOutputsPerCycle,
+        activeLoop: getLatestLoopForOperator(outputs, operator.id),
+        lastHeartbeatAt: operator.lastHeartbeatAt,
+        lastUsefulOutputAt: operator.lastUsefulOutputAt,
+        heartbeatStatus: operator.heartbeatStatus,
+        operatorHealthScore: operator.operatorHealthScore,
+        tokenSpendUsd: operatorTasks.reduce((sum, task) => sum + Number(task?.budgetCost || 0), 0),
+        failureRate: operatorRuns.length > 0 ? failedRuns / operatorRuns.length : 0,
+        currentBottleneck,
+      };
+    });
+
+    const executionMap: CompanyExecutionMapItem[] = issues
+      .slice(0, 50)
+      .map((issue) => {
+        const run = issue.activeRunId ? runs.find((entry) => entry.id === issue.activeRunId) : undefined;
+        const task = issue.taskId ? tasks.find((entry) => entry?.id === issue.taskId) : undefined;
+        const contract = getOutputContract(issue.metadata);
+        return {
+          issueId: issue.id,
+          issueTitle: issue.title,
+          issueStatus: issue.status,
+          goalId: issue.goalId,
+          goalTitle: goals.find((goal) => goal.id === issue.goalId)?.title,
+          projectId: issue.projectId,
+          projectName: projects.find((project) => project.id === issue.projectId)?.name,
+          runId: run?.id,
+          runStatus: run?.status,
+          taskId: task?.id,
+          taskStatus: task?.status,
+          outputType: contract?.outputType,
+          ownerAgentRoleId: issue.assigneeAgentRoleId,
+          stale: Date.now() - issue.updatedAt > 3 * 24 * 60 * 60 * 1000,
+        };
+      });
+
+    const summary: CompanyCommandCenterSummary = {
+      company,
+      overview: {
+        activeGoalCount: goals.filter((goal) => goal.status === "active").length,
+        activeProjectCount: projects.filter((project) => project.status === "active").length,
+        openIssueCount: issues.filter((issue) => !["done", "cancelled"].includes(issue.status)).length,
+        blockedIssueCount: issues.filter((issue) => issue.status === "blocked").length,
+        pendingReviewCount: reviewQueue.length,
+        valuableOutputCount: outputs.length,
+        operatorCount: operators.length,
+        healthyOperatorCount: operatorStatuses.filter((operator) => (operator.operatorHealthScore ?? 0.7) >= 0.6).length,
+      },
+      operators: operatorStatuses,
+      outputs: outputs.slice(0, 30),
+      reviewQueue: reviewQueue.slice(0, 20),
+      executionMap,
+      plannerRuns,
+    };
+
+    return summary;
+  });
 
   ipcMain.handle(IPC_CHANNELS.MC_GOAL_LIST, async (_, companyId: string) => {
     const validated = validateInput(UUIDSchema, companyId, "company ID");

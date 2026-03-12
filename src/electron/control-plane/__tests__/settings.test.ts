@@ -289,13 +289,13 @@ describe("ControlPlaneSettingsManager", () => {
   });
 
   describe("getSettingsForDisplay", () => {
-    it("should mask token", () => {
+    it("should return token unchanged", () => {
       mockStoredSettings = { token: "secret-token" };
       ControlPlaneSettingsManager.clearCache();
 
       const display = ControlPlaneSettingsManager.getSettingsForDisplay();
 
-      expect(display.token).toBe("***configured***");
+      expect(display.token).toBe("secret-token");
     });
 
     it("should show empty string for missing token", () => {
@@ -445,7 +445,7 @@ describe("ControlPlaneSettingsManager", () => {
       expect(settings.remote!.maxReconnectAttempts).toBe(10);
     });
 
-    it("should mask remote token in display settings", () => {
+    it("should return remote token unchanged in display settings", () => {
       mockStoredSettings = {
         remote: {
           url: "ws://host:18789",
@@ -458,7 +458,7 @@ describe("ControlPlaneSettingsManager", () => {
       const display = ControlPlaneSettingsManager.getSettingsForDisplay();
 
       expect(display.remote).toBeDefined();
-      expect(display.remote!.token).toBe("***configured***");
+      expect(display.remote!.token).toBe("secret-remote-token");
       expect(display.remote!.url).toBe("ws://host:18789");
       expect(display.remote!.deviceName).toBe("My Device");
     });
@@ -494,6 +494,7 @@ describe("ControlPlaneSettingsManager", () => {
       expect(((mockStoredSettings as Any).remote as Any).url).toBe("ws://new-host:18789");
       expect(((mockStoredSettings as Any).remote as Any).deviceName).toBe("New Name");
     });
+
   });
 });
 

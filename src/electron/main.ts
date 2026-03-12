@@ -597,7 +597,7 @@ if (!gotTheLock) {
             }
           }
           try {
-            trayManager.showNotification(title, message);
+            trayManager.showNotification(title, message, taskId);
           } catch (error) {
             console.error("[Main] Failed to show improvement desktop notification:", error);
           }
@@ -1002,24 +1002,8 @@ if (!gotTheLock) {
               }
             }
 
-            // Show macOS notification
-            if (Notification.isSupported()) {
-              const notification = new Notification({
-                title: `${statusEmoji} Scheduled Task ${statusText}`,
-                body: evt.error ? `Error: ${evt.error}` : "Click to view results in the app.",
-                silent: false,
-              });
-
-              notification.on("click", () => {
-                // Bring the main window to focus
-                if (mainWindow) {
-                  if (mainWindow.isMinimized()) mainWindow.restore();
-                  mainWindow.focus();
-                }
-              });
-
-              notification.show();
-            }
+            // Custom overlay notification is shown automatically via
+            // notificationService.add() -> onEvent -> NotificationOverlayManager
           }
         },
         log: {
@@ -1143,6 +1127,9 @@ if (!gotTheLock) {
             });
           }
           return task;
+        },
+        updateTask: (taskId, updates) => {
+          taskRepo.update(taskId, updates);
         },
         getTasksForAgent: (agentRoleId, workspaceId) => {
           const tasks = workspaceId

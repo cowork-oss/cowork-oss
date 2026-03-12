@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { AnthropicCompatibleProvider } from "../anthropic-compatible-provider";
+import type { LLMRequest } from "../types";
 
 function mockUnauthorizedResponse(message = "unauthorized"): Response {
   return {
@@ -104,5 +106,122 @@ describe("AnthropicCompatibleProvider URL resolution", () => {
         Authorization: "Bearer minimax-test",
       },
     });
+  });
+});
+
+describe("AnthropicCompatibleProvider tool sequencing", () => {
+  let capturedBody: Any = null;
+
+  beforeEach(() => {
+    capturedBody = null;
+    vi.restoreAllMocks();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        capturedBody = init?.body ? JSON.parse(String(init.body)) : null;
+        return {
+          ok: true,
+          json: async () => ({
+            content: [{ type: "text", text: "ok" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        } as Response;
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rewrites orphan tool_result blocks into text", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      type: "minimax-portal",
+      providerName: "MiniMax Portal",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/anthropic",
+      defaultModel: "MiniMax-M2.5-highspeed",
+    });
+
+    const request: LLMRequest = {
+      model: "MiniMax-M2.5-highspeed",
+      maxTokens: 64,
+      system: "system",
+      messages: [
+        { role: "user", content: "start" },
+        { role: "assistant", content: [{ type: "text", text: "done" }] },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "missing_tool_use",
+              content: '{"error":"orphan"}',
+              is_error: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    await provider.createMessage(request);
+
+    expect(capturedBody.messages[2].content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: "[Recovered prior tool output omitted to preserve valid tool-call sequencing.]",
+        }),
+      ]),
+    );
+    expect(
+      capturedBody.messages[2].content.some((block: Any) => block.type === "tool_result"),
+    ).toBe(false);
+  });
+
+  it("rewrites assistant tool_use blocks when the next user turn does not immediately return a matching tool_result", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      type: "minimax-portal",
+      providerName: "MiniMax Portal",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/anthropic",
+      defaultModel: "MiniMax-M2.5-highspeed",
+    });
+
+    const request: LLMRequest = {
+      model: "MiniMax-M2.5-highspeed",
+      maxTokens: 64,
+      system: "system",
+      messages: [
+        { role: "user", content: "start" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_missing_result",
+              name: "read_file",
+              input: { path: "a.ts" },
+            },
+          ],
+        },
+        { role: "user", content: "no tool results here" },
+      ],
+    };
+
+    await provider.createMessage(request);
+
+    expect(capturedBody.messages[1].content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: "[Recovered prior tool request omitted to preserve valid tool-call sequencing.]",
+        }),
+      ]),
+    );
+    expect(
+      capturedBody.messages[1].content.some((block: Any) => block.type === "tool_use"),
+    ).toBe(false);
   });
 });

@@ -996,6 +996,7 @@ export interface Task {
   // Control plane linkage
   issueId?: string; // Issue this task is executing for
   heartbeatRunId?: string; // Heartbeat run this task belongs to
+  targetNodeId?: string; // ID of the device/node this task is assigned to
   companyId?: string; // Company context
   goalId?: string; // Goal context
   projectId?: string; // Project context
@@ -1150,12 +1151,16 @@ export interface ImprovementLoopSettings {
   autoRun: boolean;
   includeDevLogs: boolean;
   intervalMinutes: number;
-  maxConcurrentExperiments: number;
+  variantsPerCampaign: number;
+  maxConcurrentCampaigns: number;
   maxOpenCandidatesPerWorkspace: number;
   requireWorktree: boolean;
   reviewRequired: boolean;
+  judgeRequired: boolean;
   promotionMode: ImprovementPromotionMode;
   evalWindowDays: number;
+  replaySetSize: number;
+  improvementProgramPath?: string;
 }
 
 export const DEFAULT_IMPROVEMENT_LOOP_SETTINGS: ImprovementLoopSettings = {
@@ -1163,12 +1168,15 @@ export const DEFAULT_IMPROVEMENT_LOOP_SETTINGS: ImprovementLoopSettings = {
   autoRun: true,
   includeDevLogs: true,
   intervalMinutes: 24 * 60,
-  maxConcurrentExperiments: 1,
+  variantsPerCampaign: 4,
+  maxConcurrentCampaigns: 1,
   maxOpenCandidatesPerWorkspace: 25,
   requireWorktree: true,
   reviewRequired: true,
+  judgeRequired: true,
   promotionMode: "github_pr",
   evalWindowDays: 14,
+  replaySetSize: 3,
 };
 
 export interface ImprovementExperimentConfig {
@@ -1209,6 +1217,126 @@ export interface ImprovementRunEvaluation {
   verificationPassed: boolean;
   baselineMetrics: EvalBaselineMetrics;
   outcomeMetrics: EvalBaselineMetrics;
+}
+
+export type ImprovementVariantLane =
+  | "minimal_patch"
+  | "test_first"
+  | "root_cause"
+  | "guardrail_hardening";
+
+export type ImprovementCampaignStatus =
+  | "planning"
+  | "running_variants"
+  | "judging"
+  | "ready_for_review"
+  | "promoted"
+  | "failed";
+
+export type ImprovementVariantStatus =
+  | "queued"
+  | "running"
+  | "passed"
+  | "failed"
+  | "cancelled";
+
+export interface ImprovementReplayCase {
+  id: string;
+  candidateId: string;
+  source: ImprovementCandidateSource;
+  summary: string;
+  details?: string;
+  createdAt: number;
+  taskId?: string;
+  eventType?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ImprovementProgramConfig {
+  path?: string;
+  instructions: string;
+  mutablePaths: string[];
+  forbiddenChanges: string[];
+  scoringPriorities: string[];
+}
+
+export interface ImprovementVariantEvaluation {
+  variantId: string;
+  lane: ImprovementVariantLane;
+  score: number;
+  targetedVerificationPassed: boolean;
+  verificationPassed: boolean;
+  regressionSignals: string[];
+  failureClassResolved: boolean;
+  replayPassRate: number;
+  diffSizePenalty: number;
+  summary: string;
+  notes: string[];
+}
+
+export interface ImprovementJudgeVerdict {
+  id: string;
+  campaignId: string;
+  winnerVariantId?: string;
+  status: "pending" | "passed" | "failed";
+  summary: string;
+  notes: string[];
+  comparedAt: number;
+  variantRankings: Array<{
+    variantId: string;
+    score: number;
+    lane: ImprovementVariantLane;
+  }>;
+  replayCases: ImprovementReplayCase[];
+}
+
+export interface ImprovementVariantRun {
+  id: string;
+  campaignId: string;
+  candidateId: string;
+  workspaceId: string;
+  executionWorkspaceId?: string;
+  lane: ImprovementVariantLane;
+  status: ImprovementVariantStatus;
+  taskId?: string;
+  branchName?: string;
+  baselineMetrics?: EvalBaselineMetrics;
+  outcomeMetrics?: EvalBaselineMetrics;
+  verdictSummary?: string;
+  evaluationNotes?: string;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface ImprovementCampaign {
+  id: string;
+  candidateId: string;
+  workspaceId: string;
+  executionWorkspaceId?: string;
+  rootTaskId?: string;
+  status: ImprovementCampaignStatus;
+  reviewStatus: ImprovementReviewStatus;
+  promotionStatus?: ImprovementPromotionStatus;
+  winnerVariantId?: string;
+  promotedTaskId?: string;
+  promotedBranchName?: string;
+  mergeResult?: MergeResult;
+  pullRequest?: PullRequestResult;
+  promotionError?: string;
+  baselineMetrics?: EvalBaselineMetrics;
+  outcomeMetrics?: EvalBaselineMetrics;
+  verdictSummary?: string;
+  evaluationNotes?: string;
+  trainingEvidence: ImprovementEvidence[];
+  holdoutEvidence: ImprovementEvidence[];
+  replayCases: ImprovementReplayCase[];
+  variants: ImprovementVariantRun[];
+  judgeVerdict?: ImprovementJudgeVerdict;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  promotedAt?: number;
 }
 
 // ============ Agent Comparison Types ============
@@ -1724,6 +1852,49 @@ export interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
+export type CompanyLoopType = "monitor" | "work_generation" | "execution" | "review";
+
+export type CompanyOutputType =
+  | "status_digest"
+  | "decision_brief"
+  | "issue_batch"
+  | "exception_alert"
+  | "work_order"
+  | "review_request"
+  | "metric_report";
+
+export type CompanyPriority = "critical" | "high" | "normal" | "low";
+
+export type CompanyReviewReason =
+  | "strategy"
+  | "irreversible_action"
+  | "policy_exception"
+  | "budget_risk"
+  | "customer_risk"
+  | "operator_attention";
+
+export interface CompanyEvidenceRef {
+  type: string;
+  id: string;
+  label?: string;
+}
+
+export interface CompanyOutputContract {
+  companyId: string;
+  operatorRoleId?: string;
+  loopType: CompanyLoopType;
+  outputType: CompanyOutputType;
+  sourceIssueId?: string;
+  sourceGoalId?: string;
+  valueReason: string;
+  reviewRequired: boolean;
+  reviewReason?: CompanyReviewReason;
+  evidenceRefs: CompanyEvidenceRef[];
+  companyPriority?: CompanyPriority;
+  triggerReason?: string;
+  expectedOutputType?: CompanyOutputType;
+}
+
 /**
  * Agent role defines a specialized agent with specific capabilities and configuration
  */
@@ -1757,6 +1928,13 @@ export interface AgentRole {
   heartbeatStatus?: HeartbeatStatus; // Current heartbeat state
   monthlyBudgetCost?: number; // Monthly cost budget in USD; null = unlimited
   autoPausedAt?: number | null; // Timestamp when agent was auto-paused by budget enforcement
+  operatorMandate?: string;
+  allowedLoopTypes?: CompanyLoopType[];
+  outputTypes?: CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number;
+  operatorHealthScore?: number;
 }
 
 /**
@@ -1782,6 +1960,13 @@ export interface CreateAgentRoleRequest {
   heartbeatIntervalMinutes?: number;
   heartbeatStaggerOffset?: number;
   monthlyBudgetCost?: number;
+  operatorMandate?: string;
+  allowedLoopTypes?: CompanyLoopType[];
+  outputTypes?: CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number;
+  operatorHealthScore?: number;
 }
 
 /**
@@ -1809,6 +1994,13 @@ export interface UpdateAgentRoleRequest {
   heartbeatIntervalMinutes?: number;
   heartbeatStaggerOffset?: number;
   autoPausedAt?: number | null;
+  operatorMandate?: string;
+  allowedLoopTypes?: CompanyLoopType[];
+  outputTypes?: CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  lastUsefulOutputAt?: number | null;
+  operatorHealthScore?: number | null;
 }
 
 // ============ Agent Teams (Mission Control) ============
@@ -2352,6 +2544,15 @@ export interface HeartbeatResult {
   maintenanceWorkspaceId?: string;
   silent?: boolean;
   taskCreated?: string; // ID of task created if work was done
+  triggerReason?: string;
+  loopType?: CompanyLoopType;
+  outputType?: CompanyOutputType;
+  expectedOutputType?: CompanyOutputType;
+  valueReason?: string;
+  reviewRequired?: boolean;
+  reviewReason?: CompanyReviewReason;
+  evidenceRefs?: CompanyEvidenceRef[];
+  companyPriority?: CompanyPriority;
   error?: string;
 }
 
@@ -2829,6 +3030,7 @@ export const IPC_CHANNELS = {
   MC_COMPANY_GET: "missionControl:companyGet",
   MC_COMPANY_CREATE: "missionControl:companyCreate",
   MC_COMPANY_UPDATE: "missionControl:companyUpdate",
+  MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
   MC_GOAL_CREATE: "missionControl:goalCreate",
@@ -3229,6 +3431,7 @@ export const IPC_CHANNELS = {
   NOTIFICATION_DELETE: "notification:delete",
   NOTIFICATION_DELETE_ALL: "notification:deleteAll",
   NOTIFICATION_EVENT: "notification:event",
+  NAVIGATE_TO_TASK: "navigate-to-task",
 
   // Hooks (Webhooks & Gmail Pub/Sub)
   HOOKS_GET_SETTINGS: "hooks:getSettings",
@@ -3306,6 +3509,12 @@ export const IPC_CHANNELS = {
   NODE_GET: "node:get",
   NODE_INVOKE: "node:invoke",
   NODE_EVENT: "node:event",
+
+  // Device Management
+  DEVICE_LIST_TASKS: "device:listTasks",
+  DEVICE_ASSIGN_TASK: "device:assignTask",
+  DEVICE_GET_PROFILES: "device:getProfiles",
+  DEVICE_UPDATE_PROFILE: "device:updateProfile",
 
   // Memory System (Cross-Session Context)
   MEMORY_GET_SETTINGS: "memory:getSettings",
@@ -4236,7 +4445,7 @@ export interface ReputationPolicy {
 export interface ReputationSettingsData {
   enabled: boolean;
   provider: ReputationProvider;
-  /** Stored encrypted at rest; typically masked as "***configured***" in the UI when set. */
+  /** Stored encrypted at rest. */
   apiKey?: string;
   /** When true, unknown hashes may be uploaded for analysis (may leak the artifact). */
   allowUpload: boolean;
@@ -4778,7 +4987,7 @@ export type ClientRole = "operator" | "node";
 /**
  * Node platform type
  */
-export type NodePlatform = "ios" | "android" | "macos";
+export type NodePlatform = "ios" | "android" | "macos" | "linux" | "windows";
 
 /**
  * Node capability categories
@@ -6229,6 +6438,7 @@ export interface HeartbeatRun {
   status: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   summary?: string;
   error?: string;
+  metadata?: Record<string, unknown>;
   resumedFromRunId?: string;
   createdAt: number;
   updatedAt: number;
@@ -6340,6 +6550,103 @@ export interface StrategicPlannerRun {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+}
+
+export interface CompanyOperatorStatus {
+  agentRoleId: string;
+  displayName: string;
+  icon: string;
+  color: string;
+  autonomyLevel?: AgentAutonomyLevel;
+  operatorMandate?: string;
+  allowedLoopTypes: CompanyLoopType[];
+  outputTypes: CompanyOutputType[];
+  suppressionPolicy?: string;
+  maxAutonomousOutputsPerCycle?: number;
+  activeLoop?: CompanyLoopType;
+  lastHeartbeatAt?: number;
+  lastUsefulOutputAt?: number;
+  heartbeatStatus?: HeartbeatStatus;
+  operatorHealthScore?: number;
+  tokenSpendUsd?: number;
+  failureRate?: number;
+  currentBottleneck?: string;
+}
+
+export interface CompanyOutputFeedItem {
+  id: string;
+  sourceType: "planner_run" | "issue" | "run" | "activity";
+  title: string;
+  summary?: string;
+  status?: string;
+  createdAt: number;
+  operatorRoleId?: string;
+  issueId?: string;
+  runId?: string;
+  taskId?: string;
+  loopType: CompanyLoopType;
+  outputType: CompanyOutputType;
+  valueReason: string;
+  triggerReason?: string;
+  reviewRequired: boolean;
+  reviewReason?: CompanyReviewReason;
+  evidenceRefs: CompanyEvidenceRef[];
+  companyPriority?: CompanyPriority;
+  whatChanged?: string;
+  nextStep?: string;
+}
+
+export interface CompanyReviewQueueItem {
+  id: string;
+  title: string;
+  createdAt: number;
+  sourceType: "issue" | "run" | "planner_run" | "activity";
+  reviewReason: CompanyReviewReason;
+  outputType?: CompanyOutputType;
+  companyPriority?: CompanyPriority;
+  summary?: string;
+  issueId?: string;
+  runId?: string;
+  taskId?: string;
+  operatorRoleId?: string;
+}
+
+export interface CompanyExecutionMapItem {
+  issueId: string;
+  issueTitle: string;
+  issueStatus: Issue["status"];
+  goalId?: string;
+  goalTitle?: string;
+  projectId?: string;
+  projectName?: string;
+  runId?: string;
+  runStatus?: HeartbeatRun["status"];
+  taskId?: string;
+  taskStatus?: Task["status"];
+  outputType?: CompanyOutputType;
+  ownerAgentRoleId?: string;
+  stale: boolean;
+}
+
+export interface CompanyCommandCenterOverview {
+  activeGoalCount: number;
+  activeProjectCount: number;
+  openIssueCount: number;
+  blockedIssueCount: number;
+  pendingReviewCount: number;
+  valuableOutputCount: number;
+  operatorCount: number;
+  healthyOperatorCount: number;
+}
+
+export interface CompanyCommandCenterSummary {
+  company: Company;
+  overview: CompanyCommandCenterOverview;
+  operators: CompanyOperatorStatus[];
+  outputs: CompanyOutputFeedItem[];
+  reviewQueue: CompanyReviewQueueItem[];
+  executionMap: CompanyExecutionMapItem[];
+  plannerRuns: StrategicPlannerRun[];
 }
 
 export interface StrategicPlannerRunRequest {
