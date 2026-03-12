@@ -3253,6 +3253,7 @@ export const IPC_CHANNELS = {
   CONTROL_PLANE_START: "controlPlane:start",
   CONTROL_PLANE_STOP: "controlPlane:stop",
   CONTROL_PLANE_GET_STATUS: "controlPlane:getStatus",
+  CONTROL_PLANE_GET_TOKEN: "controlPlane:getToken",
   CONTROL_PLANE_REGENERATE_TOKEN: "controlPlane:regenerateToken",
   CONTROL_PLANE_EVENT: "controlPlane:event",
 
