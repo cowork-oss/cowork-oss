@@ -10,6 +10,7 @@ import type {
   ImprovementEvidence,
   ImprovementFailureClass,
 } from "../../shared/types";
+import { getImprovementResetBaselineAt } from "./ImprovementHistoryState";
 import { ImprovementCandidateRepository } from "./ImprovementRepositories";
 import { ImprovementRunRepository } from "./ImprovementRepositories";
 import { ImprovementSettingsManager } from "./ImprovementSettingsManager";
@@ -168,7 +169,8 @@ export class ImprovementCandidateService {
   }
 
   private async rebuildFromRecentSignals(): Promise<void> {
-    const since = Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const baseline = getImprovementResetBaselineAt() || 0;
+    const since = Math.max(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000, baseline);
     const recentTasks = this.db
       .prepare(
         `
@@ -362,10 +364,19 @@ export class ImprovementCandidateService {
   private async ingestDevLogs(): Promise<void> {
     const settings = ImprovementSettingsManager.loadSettings();
     if (!settings.includeDevLogs) return;
+    const baseline = getImprovementResetBaselineAt() || 0;
 
     for (const workspace of this.workspaceRepo.findAll()) {
       const logPath = path.join(workspace.path, "logs", "dev-latest.log");
       if (!fs.existsSync(logPath)) continue;
+      if (baseline > 0) {
+        try {
+          const stat = fs.statSync(logPath);
+          if (stat.mtimeMs < baseline) continue;
+        } catch {
+          continue;
+        }
+      }
       let content = "";
       try {
         content = fs.readFileSync(logPath, "utf8");
