@@ -19,6 +19,7 @@ import {
   buildImprovementVariantPrompt,
   loadImprovementProgram,
 } from "./ExperimentPromptBuilder";
+import { getImprovementEligibility } from "./ImprovementEligibilityService";
 import { ImprovementCandidateService } from "./ImprovementCandidateService";
 import { ExperimentEvaluationService } from "./ExperimentEvaluationService";
 import {
@@ -28,6 +29,8 @@ import {
   ImprovementVariantRunRepository,
 } from "./ImprovementRepositories";
 import { ImprovementSettingsManager } from "./ImprovementSettingsManager";
+
+type Any = any;
 
 interface ImprovementLoopServiceDeps {
   notify?: (params: {
@@ -41,6 +44,7 @@ interface ImprovementLoopServiceDeps {
 
 const SCOUT_LANE: ImprovementVariantLane = "root_cause";
 const IMPLEMENT_LANE: ImprovementVariantLane = "minimal_patch";
+const COWORK_WORKSPACE_SCORE_THRESHOLD = 18;
 
 export class ImprovementLoopService {
   private readonly workspaceRepo: WorkspaceRepository;
@@ -142,14 +146,14 @@ export class ImprovementLoopService {
   }
 
   getSettings(): ImprovementLoopSettings {
-    return ImprovementSettingsManager.loadSettings();
+    return this.applyEligibilityGuard(ImprovementSettingsManager.loadSettings());
   }
 
   saveSettings(settings: ImprovementLoopSettings): ImprovementLoopSettings {
-    ImprovementSettingsManager.saveSettings(settings);
+    ImprovementSettingsManager.saveSettings(this.applyEligibilityGuard(settings));
     const next = ImprovementSettingsManager.loadSettings();
     this.resetInterval();
-    return next;
+    return this.applyEligibilityGuard(next);
   }
 
   listCandidates(workspaceId?: string): ImprovementCandidate[] {
@@ -177,6 +181,10 @@ export class ImprovementLoopService {
     campaignId: string,
     reviewStatus: ImprovementReviewStatus,
   ): Promise<ImprovementCampaign | undefined> {
+    if (reviewStatus === "accepted") {
+      this.assertImprovementEligible();
+    }
+
     const campaign = this.campaignRepo.findById(campaignId);
     if (!campaign) return undefined;
 
@@ -250,6 +258,7 @@ export class ImprovementLoopService {
   }
 
   async runNextExperiment(): Promise<ImprovementCampaign | null> {
+    this.assertImprovementEligible();
     const settings = this.getSettings();
     if (!settings.enabled) return null;
     await this.reconcileActiveCampaigns();
@@ -263,6 +272,7 @@ export class ImprovementLoopService {
   }
 
   async retryCampaign(campaignId: string): Promise<ImprovementCampaign | null> {
+    this.assertImprovementEligible();
     const settings = this.getSettings();
     if (!settings.enabled) {
       throw new Error("Retry could not start because the self-improvement loop is disabled.");
@@ -298,7 +308,7 @@ export class ImprovementLoopService {
       prompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
       rawPrompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
       status: "queued",
-      workspaceId: executionWorkspace.id,
+      workspaceId: sourceWorkspace.id,
       source: "improvement",
       agentType: "main",
       depth: 0,
@@ -466,6 +476,12 @@ export class ImprovementLoopService {
     if (!campaign) return undefined;
     const candidate = this.candidateRepo.findById(campaign.candidateId);
     const promotionMode = "github_pr";
+    const eligibility = getImprovementEligibility();
+
+    if (!eligibility.eligible) {
+      await this.failPromotion(campaignId, candidate, eligibility.reason);
+      return this.getCampaign(campaignId);
+    }
 
     this.campaignRepo.update(campaignId, {
       reviewStatus,
@@ -585,10 +601,15 @@ export class ImprovementLoopService {
     for (const workspace of workspaces) {
       const candidate = this.candidateService.getTopCandidateForWorkspace(workspace.id);
       if (!candidate) continue;
+      const executionWorkspace = this.resolveExecutionWorkspace(candidate, workspace);
       const promotable =
-        !!worktreeManager &&
-        requireWorktree &&
-        (await worktreeManager.shouldUseWorktree(workspace.path, workspace.isTemp));
+        !!executionWorkspace &&
+        (!requireWorktree ||
+          (!!worktreeManager &&
+            (await worktreeManager.shouldUseWorktree(
+              executionWorkspace.path,
+              executionWorkspace.isTemp,
+            ))));
       ranked.push({ candidate, promotable });
     }
     ranked.sort(
@@ -601,9 +622,9 @@ export class ImprovementLoopService {
   }
 
   private resolveExecutionWorkspace(candidate: ImprovementCandidate, sourceWorkspace: Workspace): Workspace {
+    const canonicalCoworkWorkspace = this.findCanonicalCoworkWorkspace();
+    if (canonicalCoworkWorkspace) return canonicalCoworkWorkspace;
     if (this.isLikelyCoworkCodeWorkspace(sourceWorkspace)) return sourceWorkspace;
-    if (!this.candidateExplicitlyTargetsCowork(candidate)) return sourceWorkspace;
-
     const alternatives = this.workspaceRepo
       .findAll()
       .filter((workspace) => workspace.id !== sourceWorkspace.id)
@@ -611,7 +632,69 @@ export class ImprovementLoopService {
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    return alternatives[0]?.workspace || sourceWorkspace;
+    const bestAlternative = alternatives[0];
+
+    if (sourceWorkspace.isTemp && bestAlternative && bestAlternative.score >= COWORK_WORKSPACE_SCORE_THRESHOLD) {
+      return bestAlternative.workspace;
+    }
+
+    if (!this.candidateExplicitlyTargetsCowork(candidate)) return sourceWorkspace;
+
+    return bestAlternative?.workspace || sourceWorkspace;
+  }
+
+  private findCanonicalCoworkWorkspace(): Workspace | undefined {
+    const workspaces = this.workspaceRepo.findAll();
+    const preferredPath = this.getPreferredCoworkRepoPath();
+
+    if (preferredPath) {
+      const exactMatch = workspaces.find(
+        (workspace) => this.pathsMatch(workspace.path, preferredPath),
+      );
+      if (exactMatch) return exactMatch;
+    }
+
+    return workspaces
+      .map((workspace) => ({ workspace, score: this.scoreExecutionWorkspace(workspace, this.buildWorkspaceScoringCandidate(workspace)) }))
+      .filter((entry) => entry.score >= COWORK_WORKSPACE_SCORE_THRESHOLD)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(Boolean(b.workspace.lastUsedAt)) - Number(Boolean(a.workspace.lastUsedAt)) ||
+          (b.workspace.lastUsedAt || 0) - (a.workspace.lastUsedAt || 0),
+      )[0]?.workspace;
+  }
+
+  private getPreferredCoworkRepoPath(): string | undefined {
+    const explicit = process.env.COWORK_SELF_IMPROVEMENT_REPO;
+    if (typeof explicit === "string" && explicit.trim().length > 0) {
+      return path.resolve(explicit.trim());
+    }
+    const cwd = typeof process.cwd === "function" ? process.cwd() : "";
+    return cwd ? path.resolve(cwd) : undefined;
+  }
+
+  private pathsMatch(left: string, right: string): boolean {
+    return path.resolve(left) === path.resolve(right);
+  }
+
+  private buildWorkspaceScoringCandidate(workspace: Workspace): ImprovementCandidate {
+    return {
+      id: `workspace-score:${workspace.id}`,
+      workspaceId: workspace.id,
+      fingerprint: "",
+      source: "task_failure",
+      status: "open",
+      title: "CoWork OS self-improvement",
+      summary: "CoWork OS source workspace for PR-based self-improvement.",
+      severity: 0,
+      recurrenceCount: 0,
+      fixabilityScore: 0,
+      priorityScore: 0,
+      evidence: [],
+      firstSeenAt: 0,
+      lastSeenAt: 0,
+    };
   }
 
   private scoreExecutionWorkspace(workspace: Workspace, candidate: ImprovementCandidate): number {
@@ -653,23 +736,8 @@ export class ImprovementLoopService {
   }
 
   private isLikelyCoworkCodeWorkspace(workspace: Workspace): boolean {
-    const score = this.scoreExecutionWorkspace(workspace, {
-      id: "",
-      workspaceId: workspace.id,
-      fingerprint: "",
-      source: "task_failure",
-      status: "open",
-      title: "",
-      summary: "",
-      severity: 0,
-      recurrenceCount: 0,
-      fixabilityScore: 0,
-      priorityScore: 0,
-      evidence: [],
-      firstSeenAt: 0,
-      lastSeenAt: 0,
-    });
-    return score >= 18;
+    const score = this.scoreExecutionWorkspace(workspace, this.buildWorkspaceScoringCandidate(workspace));
+    return score >= COWORK_WORKSPACE_SCORE_THRESHOLD;
   }
 
   private buildReplaySet(candidate: ImprovementCandidate, settings: ImprovementLoopSettings) {
@@ -703,6 +771,17 @@ export class ImprovementLoopService {
     if (!this.agentDaemon) {
       return { ok: false, failureClass: "preflight_failed", message: "Agent daemon unavailable." };
     }
+    const eligibility = getImprovementEligibility();
+    if (!eligibility.eligible) {
+      return { ok: false, failureClass: "preflight_failed", message: eligibility.reason };
+    }
+    if (executionWorkspace.isTemp) {
+      return {
+        ok: false,
+        failureClass: "preflight_failed",
+        message: "Temporary execution workspace is not eligible for PR-based self-improvement.",
+      };
+    }
     if (candidate.status === "parked") {
       return { ok: false, failureClass: "preflight_failed", message: "Candidate is parked." };
     }
@@ -718,14 +797,7 @@ export class ImprovementLoopService {
       executionWorkspace.isTemp,
       settings.requireWorktree,
     );
-    if (worktreeRequired && executionWorkspace.isTemp) {
-      return {
-        ok: false,
-        failureClass: "preflight_failed",
-        message: "Temporary execution workspace is not eligible for PR-based promotion.",
-      };
-    }
-    if (!fs.existsSync(path.join(sourceWorkspace.path, ".git")) && !fs.existsSync(path.join(executionWorkspace.path, ".git"))) {
+    if (!fs.existsSync(path.join(executionWorkspace.path, ".git"))) {
       return {
         ok: false,
         failureClass: "preflight_failed",
@@ -739,6 +811,9 @@ export class ImprovementLoopService {
         executionWorkspaceId: executionWorkspace.id,
         requireWorktree: worktreeRequired,
         automationEligible: true,
+        ownerEnrollment: eligibility.enrolled,
+        canonicalRepo: eligibility.checks.canonicalRepo,
+        repoPath: eligibility.repoPath,
       },
     };
   }
@@ -1060,6 +1135,25 @@ export class ImprovementLoopService {
   private buildPullRequestTitle(candidate: ImprovementCandidate | undefined, campaign: ImprovementCampaign): string {
     if (candidate?.title?.trim()) return `Self-improvement: ${candidate.title.trim()}`;
     return `Self-improvement campaign ${campaign.id.slice(0, 8)}`;
+  }
+
+  private applyEligibilityGuard(settings: ImprovementLoopSettings): ImprovementLoopSettings {
+    const eligibility = getImprovementEligibility();
+    if (eligibility.eligible) {
+      return settings;
+    }
+    return {
+      ...settings,
+      enabled: false,
+      autoRun: false,
+    };
+  }
+
+  private assertImprovementEligible(): void {
+    const eligibility = getImprovementEligibility();
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason);
+    }
   }
 
   private buildPullRequestBody(
