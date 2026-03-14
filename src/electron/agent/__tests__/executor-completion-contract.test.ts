@@ -115,7 +115,7 @@ describe("TaskExecutor completion contract integration", () => {
       planStepDescription: "Draft a plan",
     });
     executor.task.agentConfig = {
-      executionMode: "propose",
+      executionMode: "plan",
     };
     (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(this: Any) {
       const text =
