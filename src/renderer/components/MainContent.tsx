@@ -26,6 +26,7 @@ import { parseLeadingSkillSlashCommand } from "../../shared/skill-slash-commands
 import { CollaborativeThoughtsPanel } from "./CollaborativeThoughtsPanel";
 import { DispatchedAgentsPanel } from "./DispatchedAgentsPanel";
 import { MultiLlmSelectionPanel } from "./MultiLlmSelectionPanel";
+import { AssistantMessageContent } from "./AssistantMessageContent";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import type { AgentRoleData } from "../../electron/preload";
 import { useVoiceInput } from "../hooks/useVoiceInput";
@@ -53,6 +54,7 @@ import {
   truncateTextForTaskPrompt,
 } from "./utils/attachment-content";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
+import { InlineVideoPreview } from "./InlineVideoPreview";
 
 const CODE_PREVIEWS_EXPANDED_KEY = "cowork:codePreviewsExpanded";
 const TASK_TITLE_MAX_LENGTH = 50;
@@ -249,6 +251,7 @@ import { InlineSpreadsheetPreview } from "./InlineSpreadsheetPreview";
 import { InlineDocumentPreview } from "./InlineDocumentPreview";
 import { StepFeed } from "./timeline/StepFeed";
 import { ParallelGroupFeed } from "./timeline/ParallelGroupFeed";
+import { ActionBlock, buildActionBlockSummary } from "./timeline/ActionBlock";
 import { buildParallelGroupProjection } from "./timeline/parallel-group-projection";
 import {
   resolveTimelineIndicator,
@@ -256,18 +259,52 @@ import {
 } from "./timeline/timeline-indicators";
 import { getStepCompletionPreviewPath } from "../utils/step-document-preview";
 
-// Mermaid diagram component
-let mermaidInitialized = false;
+// Mermaid diagram component — theme-aware init for reliable text visibility
+let mermaidLastTheme: boolean | null = null;
+
+// Reset when theme changes so next diagram render picks up new theme
+if (typeof document !== "undefined") {
+  const observer = new MutationObserver(() => {
+    const isDark = !document.documentElement.classList.contains("theme-light");
+    if (mermaidLastTheme !== null && mermaidLastTheme !== isDark) {
+      mermaidLastTheme = null;
+    }
+  });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+}
+
 function initMermaid() {
-  if (!mermaidInitialized) {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: "dark",
-      securityLevel: "strict",
-      fontFamily: "inherit",
-    });
-    mermaidInitialized = true;
-  }
+  const isDark = !document.documentElement.classList.contains("theme-light");
+  if (mermaidLastTheme === isDark) return;
+  mermaidLastTheme = isDark;
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    theme: "base",
+    themeVariables: {
+      darkMode: isDark,
+      fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif",
+      primaryTextColor: isDark ? "#e8e8e8" : "#333333",
+      primaryColor: isDark ? "#363754" : "#fff4dd",
+      primaryBorderColor: isDark ? "#4a4a6a" : "#e8dcc4",
+      lineColor: isDark ? "#6b6b8a" : "#333333",
+      secondaryColor: isDark ? "#454563" : "#f0e6d4",
+      tertiaryColor: isDark ? "#2d2d3a" : "#f5f5f5",
+      nodeTextColor: isDark ? "#e8e8e8" : "#333333",
+      textColor: isDark ? "#e8e8e8" : "#333333",
+      mainBkg: isDark ? "#363754" : "#fff4dd",
+      nodeBorder: isDark ? "#4a4a6a" : "#e8dcc4",
+      clusterBkg: isDark ? "#2d2d3a" : "#f5f5f5",
+      clusterBorder: isDark ? "#4a4a6a" : "#e0e0e0",
+      titleColor: isDark ? "#e8e8e8" : "#333333",
+      edgeLabelBackground: isDark ? "#363754" : "#fff4dd",
+    },
+  });
 }
 
 function sanitizeMermaidSvg(svgMarkup: string): SVGSVGElement | null {
@@ -305,6 +342,22 @@ function MermaidDiagram({ chart }: { chart: string }) {
   const [error, setError] = useState<string | null>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const idRef = useRef(`mermaid-${Math.random().toString(36).slice(2)}`);
+  const [themeKey, setThemeKey] = useState(() =>
+    document.documentElement.classList.contains("theme-light") ? "light" : "dark",
+  );
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const next =
+        document.documentElement.classList.contains("theme-light") ? "light" : "dark";
+      setThemeKey((prev) => (prev === next ? prev : next));
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     initMermaid();
@@ -322,7 +375,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart]);
+  }, [chart, themeKey]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1960,7 +2013,7 @@ interface CreateTaskOptions {
   taskDomain?: TaskDomain;
 }
 
-const EXECUTION_MODE_ORDER: ExecutionMode[] = ["execute", "propose", "analyze", "verified"];
+const EXECUTION_MODE_ORDER: ExecutionMode[] = ["execute", "plan", "analyze", "verified"];
 const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",
@@ -1971,13 +2024,13 @@ const TASK_DOMAIN_ORDER: TaskDomain[] = [
 ];
 const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
   execute: "Execute",
-  propose: "Propose",
+  plan: "Plan",
   analyze: "Analyze",
   verified: "Verified",
 };
 const EXECUTION_MODE_HINT: Record<ExecutionMode, string> = {
   execute: "Allows full tool execution",
-  propose: "Planning mode, no mutating tools",
+  plan: "Planning mode, no mutating tools",
   analyze: "Read-only analysis mode",
   verified: "Execute with external verification after each step",
 };
@@ -2674,6 +2727,7 @@ export function MainContent({
   const [autoScroll, setAutoScroll] = useState(true);
   // Track toggled events by ID for stable state across filtering
   const [toggledEvents, setToggledEvents] = useState<Set<string>>(new Set());
+  const [expandedActionBlocks, setExpandedActionBlocks] = useState<Set<string>>(new Set());
   const [appVersion, setAppVersion] = useState<string>("");
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
@@ -3159,6 +3213,13 @@ export function MainContent({
       eventIndex: number;
       timestamp: number;
     };
+    type ActionBlockItem = {
+      kind: "action_block";
+      blockId: string;
+      events: (typeof filteredEvents)[number][];
+      eventIndices: number[];
+      timestamp: number;
+    };
     type CanvasItem = {
       kind: "canvas";
       session: (typeof canvasSessions)[number];
@@ -3166,14 +3227,61 @@ export function MainContent({
       forceSnapshot: boolean;
     };
     type DispatchedItem = { kind: "dispatched-agents"; timestamp: number };
-    type TimelineItem = EventItem | CanvasItem | DispatchedItem;
+    type TimelineItem = EventItem | ActionBlockItem | CanvasItem | DispatchedItem;
 
-    const eventItems: EventItem[] = filteredEvents.map((event, index) => ({
-      kind: "event" as const,
-      event,
-      eventIndex: index,
-      timestamp: event.timestamp,
-    }));
+    // Group consecutive action events (tool calls, steps) between assistant messages
+    const eventItems: (EventItem | ActionBlockItem)[] = [];
+    let currentBlock: (typeof filteredEvents)[number][] = [];
+    let currentBlockIndices: number[] = [];
+    let blockCounter = 0;
+
+    const flushBlock = () => {
+      if (currentBlock.length > 0) {
+        const blockId = `action-block-${blockCounter}`;
+        blockCounter += 1;
+        eventItems.push({
+          kind: "action_block",
+          blockId,
+          events: [...currentBlock],
+          eventIndices: [...currentBlockIndices],
+          timestamp: currentBlock[0].timestamp,
+        });
+        currentBlock = [];
+        currentBlockIndices = [];
+      }
+    };
+
+    // Event types that act as boundaries (like assistant messages): shown as separate items,
+    // not grouped into collapsible action blocks. Includes terminal, canvas-related outputs,
+    // artifacts, diagrams, etc.
+    const isBoundaryEvent = (ev: (typeof filteredEvents)[number]) => {
+      const t = getEffectiveTaskEventType(ev);
+      return (
+        t === "user_message" ||
+        t === "assistant_message" ||
+        t === "artifact_created" ||
+        t === "diagram_created" ||
+        ev.type === "timeline_artifact_emitted"
+      );
+    };
+
+    for (let i = 0; i < filteredEvents.length; i++) {
+      const event = filteredEvents[i];
+
+      if (isBoundaryEvent(event)) {
+        flushBlock();
+        eventItems.push({
+          kind: "event",
+          event,
+          eventIndex: i,
+          timestamp: event.timestamp,
+        });
+      } else {
+        currentBlock.push(event);
+        currentBlockIndices.push(i);
+      }
+    }
+    flushBlock();
 
     const freezeBefore = latestUserMessageTimestamp;
     const canvasItems: CanvasItem[] = canvasSessions
@@ -6238,6 +6346,11 @@ export function MainContent({
   const stepFeedTimelineIndexPosition = new Map<number, number>();
   let stepFeedEventCount = 0;
   timelineItems.forEach((timelineItem, timelineIndex) => {
+    if (timelineItem.kind === "action_block") {
+      stepFeedTimelineIndexPosition.set(timelineIndex, stepFeedEventCount);
+      stepFeedEventCount += 1;
+      return;
+    }
     if (timelineItem.kind !== "event") return;
     const event = timelineItem.event;
     const eventId = event.id;
@@ -6489,6 +6602,123 @@ export function MainContent({
                   );
                 }
 
+                if (item.kind === "action_block") {
+                  const lastActionBlockIndex = (() => {
+                    for (let i = timelineItems.length - 1; i >= 0; i--) {
+                      if (timelineItems[i].kind === "action_block") return i;
+                    }
+                    return -1;
+                  })();
+                  const isActive = timelineIndex === lastActionBlockIndex;
+                  const { summary, actionCount } = buildActionBlockSummary(item.events);
+                  const expanded =
+                    isActive || expandedActionBlocks.has(item.blockId);
+                  const onToggle = () => {
+                    setExpandedActionBlocks((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(item.blockId)) next.delete(item.blockId);
+                      else next.add(item.blockId);
+                      return next;
+                    });
+                  };
+                  const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
+                  const showConnectorAbove =
+                    typeof indicatorPosition === "number" && indicatorPosition > 0;
+                  const showConnectorBelow =
+                    typeof indicatorPosition === "number" &&
+                    indicatorPosition < stepFeedEventCount - 1;
+                  const commandOutputsForBlock = item.eventIndices.flatMap((ei) =>
+                    commandOutputSessionsByInsertIndex.get(ei) ?? [],
+                  );
+                  return (
+                    <Fragment key={item.blockId}>
+                      <ActionBlock
+                        blockId={item.blockId}
+                        summary={summary}
+                        actionCount={actionCount}
+                        isActive={isActive}
+                        expanded={expanded}
+                        onToggle={onToggle}
+                        showConnectorAbove={showConnectorAbove}
+                        showConnectorBelow={showConnectorBelow}
+                      >
+                        {item.events.map((event, idx) => {
+                          const eventIndex = item.eventIndices[idx];
+                          const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
+                          if (suppressedParallelEventIds.has(event.id) && !parallelGroup) return null;
+                          if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
+                            return null;
+                          }
+                          const isLastChild = idx === item.events.length - 1;
+                          const showChildConnectorAbove = true;
+                          const showChildConnectorBelow = !isLastChild || showConnectorBelow;
+                          if (parallelGroup) {
+                            return (
+                              <ParallelGroupFeed
+                                key={event.id || `event-${eventIndex}`}
+                                group={parallelGroup}
+                                timeLabel={formatTime(parallelGroup.startedAt)}
+                                formatTime={formatTime}
+                                showConnectorAbove={showChildConnectorAbove}
+                                showConnectorBelow={showChildConnectorBelow}
+                              />
+                            );
+                          }
+                          const isExpandable = hasEventDetails(event);
+                          const isExpanded = isEventExpanded(event);
+                          const eventTitle = renderEventTitle(
+                            event,
+                            workspace?.path,
+                            setViewerFilePath,
+                            agentContext,
+                            { summaryMode: !verboseSteps },
+                          );
+                          return (
+                            <StepFeed
+                              key={event.id || `event-${eventIndex}`}
+                              title={
+                                typeof eventTitle === "string" ? (
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={eventTitleMarkdownComponents}
+                                  >
+                                    {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
+                                  </ReactMarkdown>
+                                ) : (
+                                  eventTitle
+                                )
+                              }
+                              timeLabel={formatTime(event.timestamp)}
+                              indicator={resolveTimelineIndicator(event)}
+                              showConnectorAbove={showChildConnectorAbove}
+                              showConnectorBelow={showChildConnectorBelow}
+                              showBranchStub={shouldShowTimelineBranchStub(event)}
+                              expandable={isExpandable}
+                              expanded={isExpanded}
+                              onToggle={
+                                isExpandable ? () => toggleEventExpanded(event.id) : undefined
+                              }
+                              details={
+                                isExpanded
+                                  ? renderEventDetails(event, voiceEnabled, markdownComponents, {
+                                      workspacePath: workspace?.path,
+                                      onOpenViewer: setViewerFilePath,
+                                      events,
+                                      onViewOutputs: onViewTaskOutputs,
+                                      hideVerificationSteps: true,
+                                      summaryMode: !verboseSteps,
+                                    })
+                                  : undefined
+                              }
+                            />
+                          );
+                        })}
+                      </ActionBlock>
+                      {renderCommandOutputs(commandOutputsForBlock)}
+                    </Fragment>
+                  );
+                }
+
                 const event = item.event;
                 const effectiveType = getEffectiveTaskEventType(event);
                 const isUserMessage = effectiveType === "user_message";
@@ -6595,12 +6825,12 @@ export function MainContent({
                             </div>
                           )}
                           <div className="chat-bubble-content markdown-content">
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm]}
-                              components={markdownComponents}
-                            >
-                              {cleanedMessageText}
-                            </ReactMarkdown>
+                            <AssistantMessageContent
+                              message={cleanedMessageText}
+                              markdownComponents={markdownComponents}
+                              workspacePath={workspace?.path}
+                              onOpenViewer={setViewerFilePath}
+                            />
                           </div>
                         </div>
                         <div className="message-actions">
@@ -6633,7 +6863,18 @@ export function MainContent({
                           <div className="bubble-feedback-panel">
                             {currentStep && (
                               <div className="bubble-feedback-step-label">
-                                {currentStep.description}
+                                {currentStep.description === "Thinking..." ? (
+                                  <span className="thinking-title">
+                                    Thinking
+                                    <span className="thinking-ellipsis">
+                                      <span>.</span>
+                                      <span>.</span>
+                                      <span>.</span>
+                                    </span>
+                                  </span>
+                                ) : (
+                                  currentStep.description
+                                )}
                               </div>
                             )}
                             <div className="bubble-feedback-actions">
@@ -7484,6 +7725,24 @@ function truncateForDisplay(text: string, maxLength: number = 2000): string {
   return text.slice(0, maxLength) + "\n\n... [content truncated for display]";
 }
 
+function formatStepContractEscalatedMessage(reason: string): string {
+  const r = reason.trim().toLowerCase();
+  switch (r) {
+    case "end_turn_before_required_mutation":
+      return "Saving progress before making changes";
+    case "loop_warning_threshold_reached":
+      return "Trying a different approach";
+    case "mutation_starvation_guard":
+      return "Waiting for file changes";
+    case "first_write_checkpoint_no_attempt":
+      return "Preparing to make changes";
+    case "first_write_checkpoint_failed":
+      return "Retrying file changes";
+    default:
+      return "Adjusting approach";
+  }
+}
+
 function getSummaryStageLabel(stage: string): string | null {
   switch (stage.trim().toUpperCase()) {
     case "DISCOVER":
@@ -7571,13 +7830,15 @@ function renderEventTitle(
   if (event.type === "timeline_group_started" || event.type === "timeline_group_finished") {
     const stage =
       typeof event.payload?.stage === "string" ? event.payload.stage.trim().toUpperCase() : "";
-    const label =
-      (typeof event.payload?.groupLabel === "string" && event.payload.groupLabel) ||
-      stage ||
-      "Group";
+    const groupLabel =
+      (typeof event.payload?.groupLabel === "string" && event.payload.groupLabel.trim()) || "";
+    const label = groupLabel || stage || "Group";
     const summaryStageLabel = stage ? getSummaryStageLabel(stage) : null;
-    if (summaryMode && summaryStageLabel) {
-      return summaryStageLabel;
+    if (summaryMode) {
+      // Prefer sub-stage label (e.g. "Preparing workspace") over generic stage label (e.g. "Applying fixes")
+      const isSubStage = groupLabel && groupLabel.toUpperCase() !== stage;
+      if (isSubStage) return groupLabel;
+      if (summaryStageLabel) return summaryStageLabel;
     }
 
     const maxParallel =
@@ -7617,7 +7878,21 @@ function renderEventTitle(
   }
 
   if (event.type === "timeline_step_updated" && effectiveType === "progress_update") {
-    return typeof event.payload?.message === "string" ? event.payload.message : "Progress update";
+    const msg =
+      typeof event.payload?.message === "string" ? event.payload.message : "Progress update";
+    if (msg === "Thinking...") {
+      return (
+        <span className="thinking-title">
+          Thinking
+          <span className="thinking-ellipsis">
+            <span>.</span>
+            <span>.</span>
+            <span>.</span>
+          </span>
+        </span>
+      );
+    }
+    return msg;
   }
 
   switch (effectiveType) {
@@ -7647,27 +7922,23 @@ function renderEventTitle(
     case "step_failed":
       return `Step failed: ${event.payload.step?.description || "Unknown step"}`;
     case "continuation_decision":
-      return typeof event.payload?.reason === "string"
-        ? `Continuation decision: ${event.payload.reason}`
-        : "Continuation decision";
+      return "Deciding next steps";
     case "auto_continuation_started":
-      return "Auto continuation started";
+      return "Continuing";
     case "auto_continuation_blocked":
-      return typeof event.payload?.reason === "string"
-        ? `Auto continuation blocked: ${event.payload.reason}`
-        : "Auto continuation blocked";
+      return "Paused before continuing";
     case "context_compaction_started":
-      return "Compacting context for continuation";
+      return "Making room to continue";
     case "context_compaction_completed":
-      return "Context compaction completed";
+      return "Ready to continue";
     case "context_compaction_failed":
-      return "Context compaction failed";
+      return "Continuing with available context";
     case "step_contract_escalated":
       return typeof event.payload?.reason === "string"
-        ? `Step contract escalated: ${event.payload.reason}`
-        : "Step contract escalated";
+        ? formatStepContractEscalatedMessage(event.payload.reason)
+        : "Adjusting approach";
     case "no_progress_circuit_breaker":
-      return "Stopped by no-progress circuit breaker";
+      return "Paused to avoid getting stuck";
     case "tool_call": {
       const tcTool = event.payload.tool;
       const tcInput = event.payload.input;
@@ -7926,6 +8197,7 @@ function renderEventDetails(
   const onViewOutputs = options?.onViewOutputs;
   const summaryMode = options?.summaryMode === true;
   const imageExt = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
+  const videoExt = /\.(mp4|webm)$/i;
   const spreadsheetExt = /\.xlsx?$/i;
   const documentPreviewExt = /\.(pdf|docx|md|markdown|txt)$/i;
   const effectiveType = getEffectiveTaskEventType(event);
@@ -8016,6 +8288,7 @@ function renderEventDetails(
       const primaryOutputName = primaryOutputPath
         ? primaryOutputPath.split("/").pop() || primaryOutputPath
         : "";
+      const primaryOutputIsVideo = typeof primaryOutputPath === "string" && videoExt.test(primaryOutputPath);
       const outputCount = outputSummary?.outputCount ?? 0;
       const outputLabel =
         outputCount === 1
@@ -8037,6 +8310,15 @@ function renderEventDetails(
           )}
           {hasTaskOutputs(outputSummary) && (
             <>
+              {primaryOutputIsVideo && primaryOutputPath && workspacePath && (
+                <div className="completion-output-preview">
+                  <InlineVideoPreview
+                    filePath={primaryOutputPath}
+                    workspacePath={workspacePath}
+                    onOpenViewer={onOpenViewer}
+                  />
+                </div>
+              )}
               <div className="completion-output-subtitle">{outputLabel}</div>
               {primaryOutputPath && (
                 <div className="completion-output-primary">
@@ -8207,9 +8489,12 @@ function renderEventDetails(
       return (
         <div className="event-details assistant-message event-details-scrollable">
           <div className="markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {linkedMessage}
-            </ReactMarkdown>
+            <AssistantMessageContent
+              message={linkedMessage}
+              markdownComponents={markdownComponents}
+              workspacePath={workspacePath}
+              onOpenViewer={onOpenViewer}
+            />
           </div>
           <div className="message-actions">
             <MessageCopyButton text={event.payload.message} />
@@ -8336,11 +8621,28 @@ function renderEventDetails(
         (typeof fcPayload?.mimeType === "string" &&
           fcPayload.mimeType.toLowerCase().startsWith("image/")) ||
         imageExt.test(String(fcPath || ""));
+      const fcIsVideo =
+        fcPayload?.type === "video" ||
+        (typeof fcPayload?.mimeType === "string" &&
+          fcPayload.mimeType.toLowerCase().startsWith("video/")) ||
+        videoExt.test(String(fcPath || ""));
 
       if (fcIsImage && fcPath && workspacePath) {
         return (
           <div className="event-details event-details-file-preview">
             <InlineImagePreview
+              filePath={fcPath}
+              workspacePath={workspacePath}
+              onOpenViewer={onOpenViewer}
+            />
+          </div>
+        );
+      }
+
+      if (fcIsVideo && fcPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <InlineVideoPreview
               filePath={fcPath}
               workspacePath={workspacePath}
               onOpenViewer={onOpenViewer}
@@ -8450,11 +8752,28 @@ function renderEventDetails(
         (typeof fmPayload?.mimeType === "string" &&
           fmPayload.mimeType.toLowerCase().startsWith("image/")) ||
         imageExt.test(String(fmPath || ""));
+      const fmIsVideo =
+        fmPayload?.type === "video" ||
+        (typeof fmPayload?.mimeType === "string" &&
+          fmPayload.mimeType.toLowerCase().startsWith("video/")) ||
+        videoExt.test(String(fmPath || ""));
 
       if (fmIsImage && fmPath && workspacePath) {
         return (
           <div className="event-details event-details-file-preview">
             <InlineImagePreview
+              filePath={fmPath}
+              workspacePath={workspacePath}
+              onOpenViewer={onOpenViewer}
+            />
+          </div>
+        );
+      }
+
+      if (fmIsVideo && fmPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <InlineVideoPreview
               filePath={fmPath}
               workspacePath={workspacePath}
               onOpenViewer={onOpenViewer}
@@ -8517,6 +8836,8 @@ function renderEventDetails(
           typeof event.payload?.mimeType === "string" ? event.payload.mimeType.toLowerCase() : "";
         const artifactIsImage =
           artifactMimeType.startsWith("image/") || imageExt.test(String(artifactPath || ""));
+        const artifactIsVideo =
+          artifactMimeType.startsWith("video/") || videoExt.test(String(artifactPath || ""));
         const artifactIsSpreadsheet = spreadsheetExt.test(String(artifactPath || ""));
         const artifactIsDocument =
           artifactMimeType === "application/pdf" ||
@@ -8529,6 +8850,18 @@ function renderEventDetails(
           return (
             <div className="event-details event-details-file-preview">
               <InlineImagePreview
+                filePath={artifactPath}
+                workspacePath={workspacePath}
+                onOpenViewer={onOpenViewer}
+              />
+            </div>
+          );
+        }
+
+        if (artifactIsVideo && workspacePath) {
+          return (
+            <div className="event-details event-details-file-preview">
+              <InlineVideoPreview
                 filePath={artifactPath}
                 workspacePath={workspacePath}
                 onOpenViewer={onOpenViewer}
