@@ -449,7 +449,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
         onClick={() => setIsOpen(!isOpen)}
         onMouseEnter={() => setIsHoveringButton(true)}
         onMouseLeave={() => setIsHoveringButton(false)}
-        title="Notifications"
+        title="Notifications — click to view past notifications and open tasks"
       >
         <BellIcon color={isHoveringButton ? "#3b82f6" : unreadCount > 0 ? "#3b82f6" : "#6b7280"} />
         {unreadCount > 0 && (
