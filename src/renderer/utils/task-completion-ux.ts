@@ -1,6 +1,83 @@
 import type { TaskOutputSummary, ToastNotification } from "../../shared/types";
 import { getPrimaryOutputFileName, hasTaskOutputs } from "./task-outputs";
 
+/** Normalize path for consistent comparison */
+function normalizePathForCompare(raw: string): string {
+  return raw.trim().replace(/\\/g, "/");
+}
+
+/** Get all output paths from a summary (created + modifiedFallback) */
+export function getAllOutputPathsFromSummary(summary: TaskOutputSummary | null | undefined): string[] {
+  if (!summary) return [];
+  const created = Array.isArray(summary.created) ? summary.created : [];
+  const modified = Array.isArray(summary.modifiedFallback) ? summary.modifiedFallback : [];
+  const effective = created.length > 0 ? created : modified;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of effective) {
+    const n = normalizePathForCompare(String(p));
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  return out;
+}
+
+export interface CompletionToastDecision {
+  show: boolean;
+  /** Paths to add to notified set after showing (for output case) */
+  pathsToRecord: string[];
+}
+
+/**
+ * Decide whether to show the completion toast.
+ * Show on first completion, or when new files are created in a follow-up.
+ * Suppress repeated toasts for the same outputs in the same session.
+ */
+export function shouldShowCompletionToast(
+  taskId: string,
+  outputSummary: TaskOutputSummary | null | undefined,
+  notifiedPathsByTask: Map<string, Set<string>>,
+): CompletionToastDecision {
+  const hasOutputs = hasTaskOutputs(outputSummary);
+  const notified = notifiedPathsByTask.get(taskId);
+
+  if (hasOutputs) {
+    const currentPaths = getAllOutputPathsFromSummary(outputSummary);
+    const notifiedSet = notified ?? new Set<string>();
+    const newPaths = currentPaths.filter((p) => !notifiedSet.has(p));
+    const isFirstCompletion = !notifiedPathsByTask.has(taskId);
+    const show = isFirstCompletion || newPaths.length > 0;
+    return {
+      show,
+      pathsToRecord: show ? [...new Set([...notifiedSet, ...currentPaths])] : [],
+    };
+  }
+
+  // No outputs: show only on first completion for this task
+  const show = !notifiedPathsByTask.has(taskId);
+  return {
+    show,
+    pathsToRecord: [],
+  };
+}
+
+/** Record that we showed the completion toast (call after showing) */
+export function recordCompletionToastShown(
+  taskId: string,
+  pathsToRecord: string[],
+  notifiedPathsByTask: Map<string, Set<string>>,
+  hadOutputs: boolean,
+): void {
+  if (hadOutputs && pathsToRecord.length > 0) {
+    notifiedPathsByTask.set(taskId, new Set(pathsToRecord));
+  } else {
+    // No outputs: use empty set as sentinel so we know we've shown
+    notifiedPathsByTask.set(taskId, new Set());
+  }
+}
+
 export interface CompletionViewContext {
   isMainView: boolean;
   isSelectedTask: boolean;
@@ -24,9 +101,15 @@ export interface CompletionToastActionDependencies {
 export function buildCompletionOutputMessage(summary: TaskOutputSummary): string {
   const primaryOutputName = getPrimaryOutputFileName(summary);
   if (summary.outputCount === 1) {
-    return `1 output ready: ${primaryOutputName || "output file"}`;
+    return primaryOutputName || "1 file created";
   }
-  return `${summary.outputCount} outputs ready${primaryOutputName ? ` · primary: ${primaryOutputName}` : ""}`;
+  if (primaryOutputName) {
+    const more = summary.outputCount - 1;
+    return more === 1
+      ? `${primaryOutputName} + 1 more`
+      : `${primaryOutputName} + ${more} more`;
+  }
+  return `${summary.outputCount} files created`;
 }
 
 export function shouldTrackUnseenCompletion(context: Pick<CompletionViewContext, "isMainView" | "isSelectedTask">): boolean {
