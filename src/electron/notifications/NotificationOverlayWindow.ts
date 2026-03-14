@@ -23,7 +23,7 @@ interface ActiveOverlay {
   index: number;
 }
 
-const NOTIFICATION_WIDTH = 480;
+const NOTIFICATION_WIDTH = 340;
 const NOTIFICATION_HEIGHT = 82;
 const GAP = 10;
 const MENU_BAR_GAP = 8;
@@ -282,9 +282,9 @@ export class NotificationOverlayManager {
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: rgba(20, 20, 26, 0.45);
-    backdrop-filter: blur(80px) saturate(280%) brightness(1.08);
-    -webkit-backdrop-filter: blur(80px) saturate(280%) brightness(1.08);
+    background: rgba(28, 28, 36, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     z-index: -2;
   }
 
@@ -294,9 +294,8 @@ export class NotificationOverlayManager {
     inset: 0;
     border-radius: inherit;
     box-shadow:
-      inset 0 0 0 0.5px rgba(255, 255, 255, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      inset 0 -0.5px 0 rgba(0, 0, 0, 0.15);
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
     z-index: -1;
     pointer-events: none;
   }
@@ -307,7 +306,7 @@ export class NotificationOverlayManager {
   }
 
   body:hover #n::before {
-    background: rgba(30, 30, 40, 0.55);
+    background: rgba(32, 32, 42, 0.95);
   }
 
   #n.out {
