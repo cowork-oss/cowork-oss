@@ -216,19 +216,73 @@ This is advisory only; no automatic skill mutation occurs.
 
 ---
 
-## 3) Workspace Bootstrap Lifecycle
+## 3) Workspace Kit Contracts and Bootstrap Lifecycle
 
-### Required kit files expanded
+The original bootstrap update has now been expanded into a shared workspace-kit contract system used by prompt injection, status computation, CLI linting, and revision tracking.
 
-Workspace kit required set now includes:
+### Contract-driven file model
 
-- `.cowork/BOOTSTRAP.md`
+Root `.cowork/` files now have explicit contracts covering:
+
+- title
+- scope (`task`, `main-session`, `role`, `company-ops`, `heartbeat`, `bootstrap`)
+- parser (`sectioned`, `kv-lines`, `checklist`, `decision-log`, `freeform`)
+- prompt budget (`maxChars`)
+- freshness window (`freshnessDays`)
+- mutability (`system_locked`, `user_owned`, `agent_suggested`, `agent_maintained`)
+- optional special handling (`bootstrap`, `heartbeat`)
+
+Representative root files now include:
+
+- `.cowork/AGENTS.md`
+- `.cowork/MEMORY.md`
+- `.cowork/USER.md`
+- `.cowork/TOOLS.md`
+- `.cowork/IDENTITY.md`
+- `.cowork/RULES.md`
+- `.cowork/SOUL.md`
 - `.cowork/VIBES.md`
+- `.cowork/MISTAKES.md`
 - `.cowork/LORE.md`
+- `.cowork/CROSS_SIGNALS.md`
+- `.cowork/PRIORITIES.md`
+- `.cowork/COMPANY.md`
+- `.cowork/OPERATIONS.md`
+- `.cowork/KPIS.md`
+- `.cowork/HEARTBEAT.md`
+- `.cowork/BOOTSTRAP.md`
 
-Source: `src/electron/ipc/handlers.ts`
+Project-scoped files now live under:
 
-### New lifecycle state file
+- `.cowork/projects/<projectId>/CONTEXT.md`
+- `.cowork/projects/<projectId>/ACCESS.md`
+
+Role profile files live under:
+
+- `.cowork/agents/<roleId>/IDENTITY.md`
+- `.cowork/agents/<roleId>/RULES.md`
+- `.cowork/agents/<roleId>/SOUL.md`
+- `.cowork/agents/<roleId>/VIBES.md`
+
+### Frontmatter and parsing contract
+
+Tracked files can include simple markdown frontmatter such as:
+
+```md
+---
+updated: 2026-03-14
+---
+```
+
+Current behavior:
+
+- `updated` is used for freshness checks on files that declare a freshness window
+- markdown is sanitized and redacted before prompt injection
+- raw unsanitized bodies are still inspected for secret detection where needed
+- files that exceed their prompt budget are truncated for injection and reported as warnings
+- parser-specific formatting is reused across prompt assembly and health/lint surfaces
+
+### Bootstrap lifecycle state
 
 State is persisted at:
 
@@ -244,21 +298,70 @@ Current schema:
 }
 ```
 
-### Lifecycle rules
+Lifecycle rules:
 
-1. If `BOOTSTRAP.md` exists and `bootstrapSeededAt` is empty, seed `bootstrapSeededAt`.
-2. If `BOOTSTRAP.md` is later removed and `bootstrapSeededAt` exists, set `onboardingCompletedAt`.
-3. During `KIT_INIT` in `missing` mode, `BOOTSTRAP.md` is not recreated if onboarding is already completed.
+1. If `.cowork/BOOTSTRAP.md` exists and `bootstrapSeededAt` is empty, seed `bootstrapSeededAt`.
+2. If `.cowork/BOOTSTRAP.md` is later removed and `bootstrapSeededAt` exists, set `onboardingCompletedAt`.
+3. During init in missing-only mode, `.cowork/BOOTSTRAP.md` is not recreated after onboarding is already complete.
+4. `.cowork/HEARTBEAT.md` remains separate from bootstrap and is reserved for recurring heartbeat-only checks.
 
-### Status payload extension
+### Health, linting, and tracked directories
 
-`WorkspaceKitStatus` now includes onboarding metadata:
+Workspace-kit status is now computed from one shared path and includes:
 
-- `bootstrapSeededAt`
-- `onboardingCompletedAt`
-- `bootstrapPresent`
+- `hasKitDir`
+- tracked file entries with title, modification time, stale state, issues, revision count, and special handling
+- onboarding metadata (`bootstrapSeededAt`, `onboardingCompletedAt`, `bootstrapPresent`)
+- aggregate warning/error counts
+- missing tracked entry count
 
-Source: `src/shared/types.ts`
+Tracked directories now include:
+
+- `.cowork/memory/`
+- `.cowork/memory/hourly/`
+- `.cowork/memory/weekly/`
+- `.cowork/projects/`
+- `.cowork/agents/`
+
+Lint behavior now includes:
+
+- missing `updated` warnings on freshness-tracked files
+- stale warnings when `updated` is older than the file contract allows
+- possible-overlap warnings when content appears to belong in another file
+- secret detection errors for likely credentials in `ACCESS.md` and `TOOLS.md`
+- truncation warnings when injected content exceeds the prompt budget
+
+### CLI and revision history
+
+Workspace-kit validation is now available through:
+
+- `npm run kit:lint`
+- `npm run kit:lint -- --json`
+- `npm run kit:lint -- --strict`
+
+Tracked writes now store previous versions under:
+
+- `.cowork/**/.history/<file>/`
+
+Each revision records:
+
+- file name
+- who changed it (`user`, `agent`, `system`)
+- optional reason
+- prior content hash
+- timestamp
+
+### Source modules
+
+Primary implementation now lives in:
+
+- `src/electron/context/kit-contracts.ts`
+- `src/electron/context/kit-parser.ts`
+- `src/electron/context/kit-linter.ts`
+- `src/electron/context/kit-status.ts`
+- `src/electron/context/kit-revisions.ts`
+- `src/electron/context/kit-lint-cli.ts`
+- `src/shared/types.ts`
 
 ---
 
@@ -304,10 +407,13 @@ Use this matrix for release and support verification.
 
 ### Kit + heartbeat
 
-1. Kit init creates `BOOTSTRAP.md`, `VIBES.md`, `LORE.md`.
-2. Kit status includes onboarding state fields.
-3. Deleting `BOOTSTRAP.md` marks onboarding completed in workspace state.
-4. Proactive tasks respect `frequencyMinutes` and do not run each heartbeat.
+1. Kit init creates the expected `.cowork/` structure for the selected preset, including shared root files plus tracked directories.
+2. Kit status reports missing tracked entries, stale files, lint warning/error counts, revision counts, and onboarding state fields.
+3. Files with freshness windows warn when `updated` is missing or stale.
+4. `ACCESS.md` and `TOOLS.md` surface secret-detection errors when likely credentials are pasted into them.
+5. Deleting `.cowork/BOOTSTRAP.md` marks onboarding completed in workspace state.
+6. `npm run kit:lint` and `npm run kit:lint -- --strict` match the in-app health model.
+7. Proactive tasks respect `frequencyMinutes` and do not run each heartbeat.
 
 ---
 
