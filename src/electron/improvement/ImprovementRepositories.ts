@@ -764,6 +764,8 @@ function updateJsonAwareTable(
       key === "outcomeMetrics" ||
       key === "mergeResult" ||
       key === "pullRequest" ||
+      key === "providerHealthSnapshot" ||
+      key === "stageBudget" ||
       key === "trainingEvidence" ||
       key === "holdoutEvidence" ||
       key === "replayCases"
