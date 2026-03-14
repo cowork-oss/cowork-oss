@@ -65,6 +65,7 @@ import {
 import {
   extractTimelineEvidenceRefs,
   inferTimelineStageForLegacyType,
+  inferTimelineSubStageLabel,
   isTimelineEventType,
   normalizeTaskEventToTimelineV2,
 } from "../../shared/timeline-v2";
@@ -85,6 +86,10 @@ import { DerivedTaskStrategy, TaskStrategyService } from "./strategy/TaskStrateg
 import type { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
 import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
 import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
+import {
+  resolveOperationalAutonomyPolicy,
+  buildAgentConfigFromAutonomyPolicy,
+} from "../agents/autonomy-policy";
 import { WorktreeManager } from "../git/WorktreeManager";
 import type { ComparisonService } from "../git/ComparisonService";
 import {
@@ -359,26 +364,51 @@ export class AgentDaemon extends EventEmitter {
 
     const denied = role.toolRestrictions?.deniedTools;
     if (!Array.isArray(denied) || denied.length === 0) {
-      return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+      // Fall through to autonomy merge
+    } else {
+      const merged = new Set<string>();
+
+      const addAll = (values: unknown) => {
+        if (!Array.isArray(values)) return;
+        for (const raw of values) {
+          const value = typeof raw === "string" ? raw.trim() : "";
+          if (!value) continue;
+          merged.add(value);
+        }
+      };
+
+      addAll(nextAgentConfig.toolRestrictions);
+      addAll(denied);
+
+      if (merged.size > 0) {
+        nextAgentConfig.toolRestrictions = Array.from(merged);
+        changed = true;
+      }
     }
 
-    const merged = new Set<string>();
-
-    const addAll = (values: unknown) => {
-      if (!Array.isArray(values)) return;
-      for (const raw of values) {
-        const value = typeof raw === "string" ? raw.trim() : "";
-        if (!value) continue;
-        merged.add(value);
+    // Per-agent exec approval: when task is gateway-originated, apply agent role's autonomy policy
+    // so run_command approvals follow the agent's configured allowlist/autoApproveTypes
+    const isGatewayTask = typeof nextAgentConfig.originChannel === "string";
+    if (isGatewayTask) {
+      const autonomyPolicy = resolveOperationalAutonomyPolicy(role);
+      const autonomyConfig = buildAgentConfigFromAutonomyPolicy(autonomyPolicy);
+      if (Object.keys(autonomyConfig).length > 0) {
+        if (
+          nextAgentConfig.autonomousMode === undefined &&
+          typeof autonomyConfig.autonomousMode === "boolean"
+        ) {
+          nextAgentConfig.autonomousMode = autonomyConfig.autonomousMode;
+          changed = true;
+        }
+        if (
+          !Array.isArray(nextAgentConfig.autoApproveTypes) &&
+          Array.isArray(autonomyConfig.autoApproveTypes) &&
+          autonomyConfig.autoApproveTypes.length > 0
+        ) {
+          nextAgentConfig.autoApproveTypes = autonomyConfig.autoApproveTypes;
+          changed = true;
+        }
       }
-    };
-
-    addAll(nextAgentConfig.toolRestrictions);
-    addAll(denied);
-
-    if (merged.size > 0) {
-      nextAgentConfig.toolRestrictions = Array.from(merged);
-      changed = true;
     }
 
     return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
@@ -2234,6 +2264,40 @@ export class AgentDaemon extends EventEmitter {
       return true;
     }
 
+    // Allowlist fallback for gateway tasks: when run_command and task is gateway-originated,
+    // if command matches trusted patterns, auto-approve (avoids blocking when prompt cannot be shown)
+    if (
+      allowAutoApprove &&
+      type === "run_command" &&
+      typeof task?.agentConfig?.originChannel === "string"
+    ) {
+      const command = typeof details?.command === "string" ? details.command : "";
+      if (command) {
+        const trustCheck = GuardrailManager.isCommandTrusted(command);
+        if (trustCheck.trusted) {
+          const approval = this.approvalRepo.create({
+            taskId,
+            type: type as Any,
+            description,
+            details,
+            status: "approved",
+            requestedAt: Date.now(),
+          });
+          this.approvalRepo.update(approval.id, "approved");
+          this.logEvent(taskId, "approval_requested", {
+            approval,
+            autoApproved: true,
+          });
+          this.logEvent(taskId, "approval_granted", {
+            approvalId: approval.id,
+            autoApproved: true,
+            reason: "gateway_allowlist_fallback",
+          });
+          return true;
+        }
+      }
+    }
+
     const approval = this.approvalRepo.create({
       taskId,
       type: type as Any,
@@ -2510,7 +2574,7 @@ export class AgentDaemon extends EventEmitter {
           message:
             typeof payloadObj.message === "string"
               ? payloadObj.message
-              : "Streaming response in progress",
+              : "Thinking...",
         },
         timestamp,
         eventId,
@@ -2587,7 +2651,28 @@ export class AgentDaemon extends EventEmitter {
     if (stageSourceType) {
       const inferredStage = inferTimelineStageForLegacyType(stageSourceType);
       if (inferredStage) {
-        this.transitionTimelineStage(taskId, inferredStage);
+        const currentStage = this.activeTimelineStageByTask.get(taskId);
+        // Avoid oscillating FIX ↔ BUILD: when in FIX, tool_call/tool_result/file_* are part of
+        // the fix work — stay in FIX until step_started/step_completed signals a new phase.
+        const buildWorkEvents: EventType[] = [
+          "tool_call",
+          "tool_result",
+          "file_created",
+          "file_modified",
+          "file_deleted",
+          "command_output",
+          "artifact_created",
+        ];
+        const wouldOscillate =
+          currentStage === "FIX" &&
+          inferredStage === "BUILD" &&
+          buildWorkEvents.includes(stageSourceType);
+        if (wouldOscillate) {
+          // Stay in FIX; tool_call/tool_result/file_* during fix are part of the fix work
+        } else {
+          const subStageLabel = inferTimelineSubStageLabel(stageSourceType);
+          this.transitionTimelineStage(taskId, inferredStage, subStageLabel);
+        }
       }
     }
 
@@ -2672,7 +2757,11 @@ export class AgentDaemon extends EventEmitter {
     return next;
   }
 
-  private transitionTimelineStage(taskId: string, nextStage: TimelineStage): void {
+  private transitionTimelineStage(
+    taskId: string,
+    nextStage: TimelineStage,
+    subStageLabel?: string,
+  ): void {
     const currentStage = this.activeTimelineStageByTask.get(taskId);
     if (currentStage === nextStage) return;
 
@@ -2687,8 +2776,9 @@ export class AgentDaemon extends EventEmitter {
         legacyType: "step_completed",
       });
     }
+    const groupLabel = subStageLabel ?? nextStage;
     timeline.startGroup(nextStage, {
-      label: nextStage,
+      label: groupLabel,
       actor: "system",
       legacyType: "step_started",
       maxParallel:
@@ -4281,7 +4371,36 @@ export class AgentDaemon extends EventEmitter {
       ...patch,
     };
     this.workspaceRepo.updatePermissions(workspaceId, updatedPermissions);
-    return this.workspaceRepo.findById(workspaceId);
+    const refreshed = this.workspaceRepo.findById(workspaceId);
+    this.refreshActiveExecutorsForWorkspace(workspaceId);
+    return refreshed;
+  }
+
+  /**
+   * Refresh active task executors that use the given workspace.
+   * Called when workspace permissions change (e.g. Shell toggled in UI) so
+   * executors pick up new tool availability (e.g. run_command when shell enabled).
+   */
+  refreshActiveExecutorsForWorkspace(workspaceId: string): void {
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    if (!workspace) return;
+
+    let refreshed = 0;
+    this.activeTasks.forEach((cached, taskId) => {
+      if (cached.status !== "active" || !cached.executor) return;
+      if (cached.executor.getWorkspaceId?.() !== workspaceId) return;
+      try {
+        cached.executor.updateWorkspace(workspace);
+        refreshed++;
+      } catch (err) {
+        console.warn(`[AgentDaemon] Failed to refresh executor for task ${taskId}:`, err);
+      }
+    });
+    if (refreshed > 0) {
+      console.log(
+        `[AgentDaemon] Refreshed ${refreshed} active executor(s) for workspace ${workspace.name} (permissions updated)`,
+      );
+    }
   }
 
   /**
