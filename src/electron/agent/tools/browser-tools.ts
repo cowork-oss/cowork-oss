@@ -1,7 +1,10 @@
+import * as os from "os";
 import * as path from "path";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { BrowserService } from "../browser/browser-service";
+
+type Any = any;
 
 /**
  * BrowserTools provides browser automation capabilities to the agent
@@ -12,10 +15,12 @@ export class BrowserTools {
     headless: boolean;
     profile: string | null;
     browserChannel: "chromium" | "chrome" | "brave";
+    debuggerUrl: string | null;
   } = {
     headless: true,
     profile: null,
     browserChannel: "chromium",
+    debuggerUrl: null,
   };
 
   constructor(
@@ -40,7 +45,12 @@ export class BrowserTools {
       headless: true,
       timeout: 90000,
     });
-    this.browserState = { headless: true, profile: null, browserChannel: "chromium" };
+    this.browserState = {
+      headless: true,
+      profile: null,
+      browserChannel: "chromium",
+      debuggerUrl: null,
+    };
   }
 
   private getTimeoutMs(input: unknown): number | undefined {
@@ -53,6 +63,16 @@ export class BrowserTools {
   }
 
   private getPersistentUserDataDir(profile: string): string {
+    const trimmed = profile.trim().toLowerCase();
+    if (trimmed === "user") {
+      return this.getSystemChromeUserDataDir();
+    }
+    if (trimmed === "chrome-relay") {
+      return path.join(this.workspace.path, ".cowork", "browser-profiles", "chrome-relay");
+    }
+    if (trimmed === "workspace") {
+      return path.join(this.workspace.path, ".cowork", "browser-profiles", "default");
+    }
     const safe =
       path
         .basename(profile.trim())
@@ -61,10 +81,23 @@ export class BrowserTools {
     return path.join(this.workspace.path, ".cowork", "browser-profiles", safe);
   }
 
+  private getSystemChromeUserDataDir(): string {
+    const home = os.homedir();
+    if (process.platform === "darwin") {
+      return path.join(home, "Library", "Application Support", "Google", "Chrome");
+    }
+    if (process.platform === "win32") {
+      const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+      return path.join(local, "Google", "Chrome", "User Data");
+    }
+    return path.join(home, ".config", "google-chrome");
+  }
+
   private async ensureBrowserConfigured(opts: {
     headless?: unknown;
     profile?: unknown;
     browser_channel?: unknown;
+    debugger_url?: unknown;
   }): Promise<void> {
     const requestedHeadless = typeof opts.headless === "boolean" ? opts.headless : undefined;
     const profileRaw = typeof opts.profile === "string" ? opts.profile.trim() : undefined;
@@ -76,15 +109,24 @@ export class BrowserTools {
       channelRaw === "chrome" || channelRaw === "chromium" || channelRaw === "brave"
         ? channelRaw
         : undefined;
+    const debuggerUrlRaw =
+      typeof opts.debugger_url === "string" ? opts.debugger_url.trim() || null : null;
 
     const nextHeadless = requestedHeadless ?? this.browserState.headless;
     const nextProfile = requestedProfile ?? this.browserState.profile;
-    const nextChannel = requestedChannel ?? this.browserState.browserChannel;
+    const nextChannel =
+      requestedChannel ??
+      (nextProfile?.toLowerCase() === "user" ? "chrome" : this.browserState.browserChannel);
+    const nextDebuggerUrl =
+      requestedProfile !== undefined || requestedChannel !== undefined
+        ? null
+        : debuggerUrlRaw ?? this.browserState.debuggerUrl;
 
     if (
       nextHeadless === this.browserState.headless &&
       nextProfile === this.browserState.profile &&
-      nextChannel === this.browserState.browserChannel
+      nextChannel === this.browserState.browserChannel &&
+      nextDebuggerUrl === this.browserState.debuggerUrl
     ) {
       return;
     }
@@ -95,11 +137,13 @@ export class BrowserTools {
       timeout: 90000,
       userDataDir: nextProfile ? this.getPersistentUserDataDir(nextProfile) : undefined,
       channel: nextChannel,
+      debuggerUrl: nextDebuggerUrl ?? undefined,
     });
     this.browserState = {
       headless: nextHeadless,
       profile: nextProfile,
       browserChannel: nextChannel,
+      debuggerUrl: nextDebuggerUrl,
     };
   }
 
@@ -108,6 +152,26 @@ export class BrowserTools {
    */
   static getToolDefinitions() {
     return [
+      {
+        name: "browser_attach",
+        description:
+          "Attach to an existing Chrome browser session via Chrome DevTools Protocol. " +
+          "Use when you need to control a signed-in browser (e.g. Gmail, social media). " +
+          "Setup: Launch Chrome with --remote-debugging-port=9222, or visit chrome://inspect/#devices. " +
+          "The debugger_url is typically http://localhost:9222 or the WebSocket URL from the version endpoint. " +
+          "After attach, use browser_navigate and other browser_* tools on the attached session.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            debugger_url: {
+              type: "string",
+              description:
+                "Chrome DevTools endpoint (e.g. http://localhost:9222 or ws://127.0.0.1:9222/... from chrome://inspect)",
+            },
+          },
+          required: ["debugger_url"],
+        },
+      },
       {
         name: "browser_navigate",
         description:
@@ -137,7 +201,8 @@ export class BrowserTools {
             profile: {
               type: "string",
               description:
-                "Optional persistent profile name. If set, cookies/storage persist across tasks under .cowork/browser-profiles/<profile>.",
+                "Optional profile. Presets: 'user' (system Chrome signed-in), 'chrome-relay' (extension relay), 'workspace' (workspace default). " +
+                "Or any name for .cowork/browser-profiles/<name>.",
             },
             browser_channel: {
               type: "string",
@@ -399,6 +464,51 @@ export class BrowserTools {
         },
       },
       {
+        name: "browser_act_batch",
+        description:
+          "Execute a batch of browser actions in sequence. Use for multi-step interactions (e.g. fill form, click submit, wait for result). " +
+          "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            actions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["click", "fill", "type", "press", "wait", "scroll"],
+                    description: "Action type",
+                  },
+                  selector: {
+                    type: "string",
+                    description: "CSS selector (required for click, fill, type, wait)",
+                  },
+                  value: { type: "string", description: "Value for fill" },
+                  text: { type: "string", description: "Text for type" },
+                  key: { type: "string", description: "Key for press (e.g. Enter, Tab)" },
+                  direction: {
+                    type: "string",
+                    enum: ["up", "down", "top", "bottom"],
+                    description: "Scroll direction",
+                  },
+                  amount: { type: "number", description: "Scroll amount in pixels" },
+                  timeout_ms: { type: "number", description: "Wait timeout for wait action" },
+                  delay_ms: {
+                    type: "number",
+                    description: "Delay before this action (ms)",
+                  },
+                },
+                required: ["type"],
+              },
+              description: "Array of actions to execute in order",
+            },
+          },
+          required: ["actions"],
+        },
+      },
+      {
         name: "browser_close",
         description: "Close the browser",
         input_schema: {
@@ -414,11 +524,43 @@ export class BrowserTools {
    */
   async executeTool(toolName: string, input: Any): Promise<Any> {
     switch (toolName) {
+      case "browser_attach": {
+        const debuggerUrl = typeof input?.debugger_url === "string" ? input.debugger_url.trim() : "";
+        if (!debuggerUrl) {
+          return {
+            success: false,
+            error: "debugger_url is required. Use http://localhost:9222 or the WebSocket URL from chrome://inspect",
+          };
+        }
+        await this.browserService.close();
+        this.browserService = new BrowserService(this.workspace, {
+          headless: true,
+          timeout: 90000,
+          debuggerUrl,
+        });
+        this.browserState = {
+          ...this.browserState,
+          debuggerUrl,
+        };
+        await this.browserService.init();
+        const url = this.browserService.getUrl();
+        this.daemon.logEvent(this.taskId, "browser_action", {
+          action: "attach",
+          debuggerUrl: debuggerUrl.replace(/\/[^/]*$/, "/..."),
+        });
+        return {
+          success: true,
+          message: "Attached to existing Chrome session",
+          currentUrl: url || "(new tab)",
+        };
+      }
+
       case "browser_navigate": {
         await this.ensureBrowserConfigured({
           headless: input?.headless,
           profile: input?.profile,
           browser_channel: input?.browser_channel,
+          debugger_url: this.browserState.debuggerUrl,
         });
         const result = await this.browserService.navigate(input.url, input.wait_until || "load");
         this.daemon.logEvent(this.taskId, "browser_action", {
@@ -634,6 +776,97 @@ export class BrowserTools {
           type: "pdf",
         });
         return result;
+      }
+
+      case "browser_act_batch": {
+        const actions = Array.isArray(input?.actions) ? input.actions : [];
+        if (actions.length === 0) {
+          return { success: false, error: "actions array is required and must not be empty" };
+        }
+        const results: Array<{ type: string; success: boolean; error?: string }> = [];
+        const timeoutMs = this.getTimeoutMs(input);
+        for (let i = 0; i < actions.length; i++) {
+          const act = actions[i] as Record<string, unknown>;
+          const delayMs = typeof act.delay_ms === "number" && act.delay_ms > 0 ? act.delay_ms : 0;
+          if (delayMs > 0) {
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+          const actType = String(act.type || "").toLowerCase();
+          try {
+            if (actType === "click") {
+              const r = await this.browserService.click(
+                String(act.selector || ""),
+                (act.timeout_ms as number) || timeoutMs,
+              );
+              results.push({ type: "click", success: r.success, error: r.error });
+              if (!r.success) break;
+            } else if (actType === "fill") {
+              const r = await this.browserService.fill(
+                String(act.selector || ""),
+                String(act.value ?? ""),
+                (act.timeout_ms as number) || timeoutMs,
+              );
+              results.push({ type: "fill", success: r.success, error: r.error });
+              if (!r.success) break;
+            } else if (actType === "type") {
+              const r = await this.browserService.type(
+                String(act.selector || ""),
+                String(act.text ?? ""),
+                typeof act.delay_ms === "number" ? act.delay_ms : 50,
+                (act.timeout_ms as number) || timeoutMs,
+              );
+              results.push({ type: "type", success: r.success, error: r.error });
+              if (!r.success) break;
+            } else if (actType === "press") {
+              const r = await this.browserService.press(String(act.key || ""));
+              results.push({ type: "press", success: r.success, error: (r as Any).error });
+              if (!r.success) break;
+            } else if (actType === "wait") {
+              const r = await this.browserService.waitForSelector(
+                String(act.selector || ""),
+                (act.timeout_ms as number) || timeoutMs || 10000,
+              );
+              results.push({ type: "wait", success: r.success, error: (r as Any).error });
+              if (!r.success) break;
+            } else if (actType === "scroll") {
+              const direction =
+                act.direction === "up" ||
+                act.direction === "down" ||
+                act.direction === "top" ||
+                act.direction === "bottom"
+                  ? act.direction
+                  : "down";
+              const r = await this.browserService.scroll(
+                direction,
+                typeof act.amount === "number" ? act.amount : undefined,
+              );
+              results.push({ type: "scroll", success: (r as Any).success });
+            } else {
+              results.push({ type: actType, success: false, error: `Unknown action type: ${actType}` });
+              break;
+            }
+          } catch (err) {
+            results.push({
+              type: actType,
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            break;
+          }
+        }
+        const allSuccess = results.every((r) => r.success);
+        this.daemon.logEvent(this.taskId, "browser_action", {
+          action: "act_batch",
+          count: actions.length,
+          completed: results.length,
+          success: allSuccess,
+        });
+        return {
+          success: allSuccess,
+          results,
+          completed: results.length,
+          total: actions.length,
+        };
       }
 
       case "browser_close": {
