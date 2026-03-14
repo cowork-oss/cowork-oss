@@ -1,5 +1,20 @@
 #!/usr/bin/env node
 
+// Apply COWORK_TZ → TZ before any other code (systemd/Docker env support).
+// Validate: invalid IANA timezone can cause silent date bugs.
+if (process.env.COWORK_TZ) {
+  try {
+    const test = new Date().toLocaleString("en-US", { timeZone: process.env.COWORK_TZ });
+    if (test && test !== "Invalid Date") {
+      process.env.TZ = process.env.COWORK_TZ;
+    } else {
+      console.warn(`[coworkd] Invalid COWORK_TZ='${process.env.COWORK_TZ}', using default`);
+    }
+  } catch {
+    console.warn(`[coworkd] Invalid COWORK_TZ='${process.env.COWORK_TZ}', using default`);
+  }
+}
+
 /**
  * coworkd: Headless daemon entrypoint.
  *
