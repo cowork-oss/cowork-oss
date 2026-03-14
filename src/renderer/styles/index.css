@@ -1135,7 +1135,7 @@ body {
   height: var(--title-bar-height);
   min-height: var(--title-bar-height);
   width: 100%;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
   background: transparent;
   position: absolute;
   top: 0;
@@ -1147,23 +1147,6 @@ body {
   padding-left: 80px;
   padding-right: 12px;
   overflow: visible;
-}
-
-/* Dedicated drag handle for window movement — left side only, rest is clickable */
-.title-bar-drag-handle {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: var(--title-bar-drag-width, 80px);
-  height: 100%;
-  -webkit-app-region: drag;
-  pointer-events: auto;
-}
-
-.title-bar-spacer {
-  flex: 1;
-  min-width: 0;
-  -webkit-app-region: no-drag;
 }
 
 /* Left side of title bar (sidebar toggle) */
@@ -1244,7 +1227,7 @@ body {
   font-size: 13px;
   position: relative;
   z-index: 1001;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .update-banner-content {
@@ -1370,7 +1353,7 @@ a,
   display: flex;
   padding: 0 12px;
   gap: 4px;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
   height: var(--header-height);
   align-items: center;
   border-bottom: 1px solid var(--color-border-subtle);
@@ -1733,7 +1716,7 @@ a,
   display: flex;
   align-items: center;
   gap: 12px;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
   height: 28px;
   background: transparent;
   position: relative;
@@ -4296,6 +4279,108 @@ a,
   border-radius: 0;
 }
 
+/* Animated "Thinking..." ellipsis (Codex/Claude Code style) */
+.thinking-title .thinking-ellipsis span {
+  opacity: 0.4;
+  animation: thinkDot 1.2s ease-in-out infinite;
+}
+.thinking-title .thinking-ellipsis span:nth-child(1) {
+  animation-delay: 0s;
+}
+.thinking-title .thinking-ellipsis span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking-title .thinking-ellipsis span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Action block (collapsible tool/step group between assistant messages) */
+.action-block {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.action-block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.action-block-header:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.action-block-header svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+.action-block-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.action-block-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.action-block-content {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.action-block-indicator .action-block-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.action-block.active .action-block-dot {
+  background: var(--color-accent);
+}
+
+.action-block-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.action-block-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+  margin-top: 8px;
+}
+@keyframes thinkDot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.4;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
 .event-time {
   font-size: 10px;
   color: var(--color-text-muted);
@@ -4512,6 +4597,130 @@ a,
 .inline-image-preview-meta {
   font-size: 11px;
   color: var(--color-text-muted);
+}
+
+.inline-video-preview {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+  background: var(--color-bg-secondary);
+}
+
+.inline-video-loading,
+.inline-video-error {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.inline-video-error {
+  color: var(--color-error);
+}
+
+.inline-video-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.inline-video-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inline-video-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #7c3aed;
+  color: #fff;
+}
+
+.inline-video-name-wrap {
+  min-width: 0;
+}
+
+.inline-video-filename {
+  font-size: 13px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inline-video-subtitle {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.inline-video-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.inline-video-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.inline-video-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.inline-video-player-wrap {
+  padding: 12px;
+}
+
+.inline-video-player {
+  display: block;
+  width: min(100%, 720px);
+  max-width: 100%;
+  max-height: 520px;
+  background: #000;
+  border-radius: 8px;
+}
+
+.assistant-video-embed {
+  margin: 12px 0;
+}
+
+.assistant-video-error {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-error);
+  font-size: 12px;
+}
+
+.completion-output-preview {
+  margin-bottom: 12px;
 }
 
 /* Inline Spreadsheet Preview (ChatGPT-style) */
@@ -5017,6 +5226,25 @@ a,
 .mermaid-diagram-image {
   max-width: 100%;
   height: auto;
+}
+
+/* Ensure text/labels in Mermaid SVGs are visible (fallback for theme quirks) */
+.mermaid-diagram svg text,
+.mermaid-diagram svg .nodeLabel,
+.mermaid-diagram svg .edgeLabel,
+.mermaid-diagram svg .label {
+  fill: #e8e8e8 !important;
+}
+
+.theme-light .mermaid-diagram {
+  background: #f5f5f7;
+}
+
+.theme-light .mermaid-diagram svg text,
+.theme-light .mermaid-diagram svg .nodeLabel,
+.theme-light .mermaid-diagram svg .edgeLabel,
+.theme-light .mermaid-diagram svg .label {
+  fill: #333333 !important;
 }
 
 .mermaid-loading {
@@ -11595,7 +11823,7 @@ button {
   height: var(--header-height);
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid var(--color-border-subtle);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .cli-sidebar-title {
@@ -13512,7 +13740,7 @@ button {
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0 0 4px;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .settings-sidebar-search {
@@ -20053,6 +20281,21 @@ button {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+.file-viewer-video-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+.file-viewer-video {
+  width: 100%;
+  max-height: 72vh;
+  background: #000;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 /* Placeholder for unsupported files */
 .file-viewer-placeholder {
   display: flex;
@@ -21386,7 +21629,7 @@ button {
   padding-left: 80px;
   border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(0, 0, 0, 0.2);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .browser-toolbar-btn,
@@ -28066,10 +28309,6 @@ html.platform-win32 .right-panel {
 /* Windows: reduce left padding (no macOS traffic lights) */
 html.platform-win32 .title-bar {
   padding-left: 12px;
-}
-
-html.platform-win32 .title-bar-drag-handle {
-  --title-bar-drag-width: 60px;
 }
 
 /* ============================================
