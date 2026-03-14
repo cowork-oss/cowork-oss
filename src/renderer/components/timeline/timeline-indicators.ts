@@ -38,6 +38,12 @@ function resolveStage(payload: unknown): string {
   return raw;
 }
 
+function resolveGroupLabel(payload: unknown): string {
+  const obj = asObject(payload);
+  const raw = typeof obj.groupLabel === "string" ? obj.groupLabel.trim() : "";
+  return raw;
+}
+
 export function resolveTimelineGroupId(event: TaskEvent): string | null {
   if (typeof event.groupId === "string" && event.groupId.trim().length > 0) {
     return event.groupId.trim();
@@ -60,19 +66,22 @@ export function resolveTimelineIndicator(event: TaskEvent): TimelineIndicatorSpe
 
   if (event.type === "timeline_group_started") {
     const stage = resolveStage(event.payload);
+    const groupLabel = resolveGroupLabel(event.payload);
+    const isSubStage = groupLabel && groupLabel.toUpperCase() !== stage;
+    const subStageLabel = isSubStage ? groupLabel : null;
     switch (stage) {
       case "DISCOVER":
-        return { icon: Search, tone: "active", label: "Discover stage started" };
+        return { icon: Search, tone: "active", label: subStageLabel ?? "Discover stage started" };
       case "BUILD":
-        return { icon: Terminal, tone: "active", label: "Build stage started" };
+        return { icon: Terminal, tone: "active", label: subStageLabel ?? "Build stage started" };
       case "VERIFY":
-        return { icon: Shield, tone: "active", label: "Verify stage started" };
+        return { icon: Shield, tone: "active", label: subStageLabel ?? "Verify stage started" };
       case "FIX":
-        return { icon: Wrench, tone: "active", label: "Fix stage started" };
+        return { icon: Wrench, tone: "active", label: subStageLabel ?? "Fix stage started" };
       case "DELIVER":
-        return { icon: Package, tone: "active", label: "Deliver stage started" };
+        return { icon: Package, tone: "active", label: subStageLabel ?? "Deliver stage started" };
       default:
-        return { icon: Play, tone: "active", label: "Group started" };
+        return { icon: Play, tone: "active", label: subStageLabel ?? "Group started" };
     }
   }
 
