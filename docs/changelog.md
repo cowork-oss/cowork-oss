@@ -8,15 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Chrome DevTools attach mode**: `browser_attach` tool for connecting to existing Chrome via CDP. See [Browser Automation](features.md#chrome-devtools-attach-mode).
+- **Batched browser actions**: `browser_act_batch` for sequential click, fill, type, press, wait, scroll with optional delays.
+- **Browser profile presets**: `user`, `chrome-relay`, `workspace` presets. Use `browser_attach` for existing signed-in sessions.
+- **Docker timezone**: `COWORK_TZ` env var for IANA timezone in Docker and systemd. Invalid values fall back to UTC.
+- **Gateway exec approval fallback**: Per-agent policy and allowlist honored for channel-originated `run_command`; trusted commands auto-approved when approval UI unavailable.
 - **Managed devices docs refresh**: documented the Devices tab, saved remote devices, remote task launching, per-device summaries, and remote file selection workflows.
 - **Automation control center docs refresh**: documented the consolidated `Automations` settings group and the relationship between Task Queue, Scheduled Tasks, Webhooks, Event Triggers, Daily Briefing, and Self-Improve.
 - **Zero-human-company docs refresh**: documented the `Settings > Companies` workflow, persisted company-linked digital twins, and company-aware handoff between Companies, Digital Twins, and Mission Control.
 
 ### Changed
+- **Dashboard chat UI**: Batched tool events (400ms flush) to avoid UI freeze; flush on subscription cleanup.
 - **README and feature documentation**: updated product-facing docs to reflect managed devices, automation navigation, bounded self-improvement campaigns, remote session inspection, and the current companies workflow.
 - **Self-improvement documentation**: added detailed architecture and troubleshooting coverage for staged autonomous campaigns, startup ordering, worktree requirements, candidate parking/cooldowns, notification flow, and `logs/dev-latest.log` verification steps.
 
 ### Fixed
+- **Browser profile=user errors**: Clearer messages when Chrome not installed or profile locked.
+- **Invalid COWORK_TZ**: Validation with UTC fallback.
+- **Event batch loss**: Flush pending events on subscription cleanup.
 - **Autonomous improvement startup race**: `ImprovementLoopService` now starts after `MemoryService` initialization, skips non-worktree-capable workspaces when isolated git execution is required, and suppresses misleading legacy `ERR_UNHANDLED_ERROR` log noise from unhandled `"error"` alias emission during startup failures.
 
 ## [0.4.13] - 2026-03-05
@@ -24,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Universal workflow slash skills**: `/simplify` and `/batch` now work across desktop and gateway channels, including inline chaining (`then run /simplify`) and shared parsing/normalization.
 - **Zero-config web search fallback**: DuckDuckGo now acts as a built-in last-resort search provider, so `web_search` works even without paid API keys.
-- **Structured input requests**: propose-mode tasks can use `request_user_input` to pause for persisted multiple-choice decisions, with submission from the desktop UI or Control Plane dashboard.
+- **Structured input requests**: plan-mode tasks can use `request_user_input` to pause for persisted multiple-choice decisions, with submission from the desktop UI or Control Plane dashboard.
 - **Tier-1 integration orchestration**: new `integration_setup` flow supports `list`, `inspect`, and `configure` for Resend, Slack, the Google family, Jira, Linear, and HubSpot with `expected_plan_hash` stale-plan protection.
 - **Approval-gated skill expansion**: new `skill_proposal` lifecycle lets agents draft, list, approve, and reject workspace-local skill proposals instead of mutating skills directly.
 - **Workspace bootstrap lifecycle**: `.cowork/BOOTSTRAP.md`, `.cowork/VIBES.md`, `.cowork/LORE.md`, and `.cowork/workspace-state.json` now track onboarding/bootstrap state and heartbeat-ready context.
