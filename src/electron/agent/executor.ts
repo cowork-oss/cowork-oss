@@ -135,6 +135,7 @@ import { ProgressScoreEngine } from "./progress-score-engine";
 import { processAssistantResponseText as processAssistantResponseTextUtil } from "./executor-assistant-output-utils";
 import { sanitizeToolCallTextFromAssistant } from "./tool-call-text-sanitizer";
 import {
+  evaluateToolAvailability,
   evaluateToolPolicy,
   filterToolsByPolicy,
   normalizeExecutionMode,
@@ -626,6 +627,8 @@ export class TaskExecutor {
   private successfulToolUsageCounts: Map<string, number> = new Map();
   private toolUsageEventsSinceDecay = 0;
   private toolSelectionEpoch = 0;
+  private availableToolsCacheKey: string | null = null;
+  private availableToolsCache: Any[] | null = null;
   private lastAssistantOutput: string | null = null;
   private lastNonVerificationOutput: string | null = null;
   private readonly toolResultMemoryLimit = 8;
@@ -3532,6 +3535,11 @@ ${transcript}
   private agentPolicyConfig: AgentPolicyConfig | null = null;
   private agentPolicyFilePath: string | null = null;
 
+  /** Expose workspace ID for daemon to refresh executors when permissions change. */
+  getWorkspaceId(): string {
+    return this.task.workspaceId;
+  }
+
   constructor(
     private task: Task,
     private workspace: Workspace,
@@ -3927,7 +3935,10 @@ ${transcript}
         "You have access to native infrastructure tools for autonomous cloud operations.",
       ];
 
-      if (settings.enabledCategories.sandbox) {
+      if (
+        settings.enabledCategories.sandbox &&
+        settings.e2b?.apiKey?.trim()
+      ) {
         lines.push(
           "- CLOUD SANDBOXES: Create and manage Linux VMs (cloud_sandbox_create, cloud_sandbox_exec, cloud_sandbox_write_file, cloud_sandbox_read_file, cloud_sandbox_url, cloud_sandbox_delete). Use these to deploy servers, run code, and expose web services.",
         );
@@ -3950,9 +3961,14 @@ ${transcript}
       lines.push(
         "Payment and domain registration tools require explicit user approval before execution.",
       );
-      lines.push(
-        "For deployments: cloud_sandbox_create → cloud_sandbox_exec (install deps) → cloud_sandbox_url for web access.",
-      );
+      if (
+        settings.enabledCategories.sandbox &&
+        settings.e2b?.apiKey?.trim()
+      ) {
+        lines.push(
+          "For deployments: cloud_sandbox_create → cloud_sandbox_exec (install deps) → cloud_sandbox_url for web access.",
+        );
+      }
 
       return lines.join("\n");
     } catch (error) {
@@ -6886,7 +6902,7 @@ ${transcript}
     }
 
     const structuredInputIntent =
-      executionMode === "propose" &&
+      executionMode === "plan" &&
       (/\b(ask|collect|gather|clarify|confirm)\b[\s\S]{0,60}\b(user|preferences?|inputs?|choices?|options?|requirements?|constraints?)\b/.test(
         desc,
       ) ||
@@ -7394,6 +7410,8 @@ ${transcript}
         let normalized = upper;
         if (upper === "UK") normalized = "GB";
         if (upper === "USA") normalized = "US";
+        // Brave API rejects "EU" (European Union); it only accepts country codes or "ALL"
+        if (upper === "EU") normalized = "ALL";
         if (normalized !== raw) {
           input.region = normalized;
           modified = true;
@@ -8339,7 +8357,94 @@ ${transcript}
       taskDomain: this.getEffectiveTaskDomain(),
       conversationMode: this.task.agentConfig?.conversationMode,
       taskIntent: this.task.agentConfig?.taskIntent,
+      shellEnabled: this.workspace.permissions.shell,
     };
+  }
+
+  private buildAvailableToolsCacheKey(params: {
+    disabledTools: string[];
+    restrictedTools: Set<string>;
+    allowedTools: Set<string>;
+    hasAllowlist: boolean;
+  }): string {
+    const currentStep =
+      this.currentStepId && this.plan?.steps
+        ? this.plan.steps.find((candidate) => candidate.id === this.currentStepId)
+        : undefined;
+    const usageCounts = this.toolUsageCounts instanceof Map ? this.toolUsageCounts : new Map<string, number>();
+    const recentUsage = Array.from(usageCounts.entries())
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 16);
+
+    return JSON.stringify({
+      stepId: this.currentStepId || "",
+      stepDescription: currentStep?.description?.slice(0, 220) || "",
+      executionMode: this.getEffectiveExecutionMode(),
+      taskDomain: this.getEffectiveTaskDomain(),
+      taskIntent: this.task.agentConfig?.taskIntent || "",
+      webSearchMode: this.webSearchMode,
+      visualCanvasTask: this.isVisualCanvasTask(),
+      hasAllowlist: params.hasAllowlist,
+      allowedTools: Array.from(params.allowedTools.values()).sort(),
+      restrictedTools: Array.from(params.restrictedTools.values()).sort(),
+      disabledTools: [...params.disabledTools].sort(),
+      recentUsage,
+      recoveryRequestActive: this.recoveryRequestActive,
+      lastAssistantOutput: this.lastAssistantOutput?.slice(0, 240) || "",
+    });
+  }
+
+  private applyAdaptiveToolAvailabilityFilter<T extends { name: string }>(tools: T[]): T[] {
+    if (tools.length === 0) return tools;
+    if (this.hasTaskToolAllowlistConfigured()) return tools;
+
+    const currentStep =
+      this.currentStepId && this.plan?.steps
+        ? this.plan.steps.find((candidate) => candidate.id === this.currentStepId)
+        : undefined;
+    const stepContract = currentStep ? this.resolveStepExecutionContract(currentStep) : null;
+    const taskText = [
+      this.task.title || "",
+      this.task.prompt || "",
+      this.lastUserMessage || "",
+      currentStep?.description || "",
+      this.lastAssistantOutput || "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    if (!taskText) return tools;
+
+    const usageCounts = this.toolUsageCounts instanceof Map ? this.toolUsageCounts : new Map<string, number>();
+    const recentlyUsedTools = Array.from(usageCounts.entries())
+      .filter(([, count]) => count > 0)
+      .map(([name]) => name);
+    const requiredTools = stepContract ? Array.from(stepContract.requiredTools.values()) : [];
+    const policyContext = this.getToolPolicyContext();
+    let deferredCount = 0;
+    const filtered = tools.filter((tool) => {
+      const availability = evaluateToolAvailability(tool.name, {
+        ...policyContext,
+        taskText,
+        recentlyUsedTools,
+        requiredTools,
+      });
+      if (availability.decision === "allow") return true;
+      deferredCount += 1;
+      return false;
+    });
+
+    if (deferredCount > 0) {
+      this.emitEvent("log", {
+        metric: "adaptive_tool_exposure_filter_applied",
+        deferredCount,
+        remainingCount: filtered.length,
+      });
+    }
+
+    return filtered.length > 0 ? filtered : tools;
   }
 
   private getEffectiveExecutionModeSource(): ExecutionModeSource {
@@ -8667,7 +8772,6 @@ ${transcript}
    * This prevents the LLM from trying to use tools that have been disabled by the circuit breaker
    */
   private getAvailableTools() {
-    const allTools = this.toolRegistry.getTools();
     const restrictedTools = this.getTaskToolRestrictions();
     const hasAllowlist = this.hasTaskToolAllowlistConfigured();
     const allowedTools = this.getTaskToolAllowlist();
@@ -8676,6 +8780,18 @@ ${transcript}
     const blockedByAllowlist = (name: string) =>
       hasAllowlist && !allowedTools.has("*") && !allowedTools.has(name);
     const disabledTools = this.toolFailureTracker.getDisabledTools();
+    const cacheKey = this.buildAvailableToolsCacheKey({
+      disabledTools,
+      restrictedTools,
+      allowedTools,
+      hasAllowlist,
+    });
+    if (this.availableToolsCacheKey === cacheKey && this.availableToolsCache) {
+      return this.availableToolsCache.slice();
+    }
+
+    const allTools = this.toolRegistry.getTools();
+    let finalTools: Any[];
 
     if (disabledTools.length === 0 && restrictedTools.size === 0 && !hasAllowlist) {
       let tools = allTools;
@@ -8685,7 +8801,12 @@ ${transcript}
       const policyFiltered = filterToolsByPolicy(tools, this.getToolPolicyContext());
       const modeFiltered = this.applyWebSearchModeFilter(policyFiltered.tools);
       const agentPolicyFiltered = this.applyAgentPolicyToolFilter(modeFiltered);
-      return this.applyStepScopedToolPolicy(this.applyIntentFilter(agentPolicyFiltered));
+      finalTools = this.applyAdaptiveToolAvailabilityFilter(
+        this.applyStepScopedToolPolicy(this.applyIntentFilter(agentPolicyFiltered)),
+      );
+      this.availableToolsCacheKey = cacheKey;
+      this.availableToolsCache = finalTools.slice();
+      return finalTools;
     }
 
     let filtered = allTools
@@ -8719,7 +8840,12 @@ ${transcript}
     }
     const modeFiltered = this.applyWebSearchModeFilter(policyFiltered.tools);
     const agentPolicyFiltered = this.applyAgentPolicyToolFilter(modeFiltered);
-    return this.applyStepScopedToolPolicy(this.applyIntentFilter(agentPolicyFiltered));
+    finalTools = this.applyAdaptiveToolAvailabilityFilter(
+      this.applyStepScopedToolPolicy(this.applyIntentFilter(agentPolicyFiltered)),
+    );
+    this.availableToolsCacheKey = cacheKey;
+    this.availableToolsCache = finalTools.slice();
+    return finalTools;
   }
 
   /**
@@ -8871,6 +8997,8 @@ ${transcript}
       "browser_get_text",
       "browser_screenshot",
       "browser_wait",
+      "run_command",
+      "run_applescript",
     ]);
 
     const mutation = new Set<string>([
@@ -8898,6 +9026,8 @@ ${transcript}
       "browser_get_text",
       "browser_wait",
       "browser_screenshot",
+      "run_command",
+      "run_applescript",
     ]);
 
     const base =
@@ -15958,7 +16088,7 @@ PLANNING RULES:
 - Use specific file names/paths when known.
 - ${shouldRequirePlanVerificationStep ? "Include one final verification step for non-trivial tasks. Verification steps MUST use only objective, machine-checkable criteria: file existence, section/keyword presence, structural requirements, format validity. NEVER use subjective quality criteria (e.g. 'clearly written', 'comprehensive', 'actionable', 'well-structured')." : "Skip dedicated verification steps unless the user explicitly asks for verification."}
 - Avoid redundant review/verify steps and repeated file reads.
-- In propose mode, if the plan needs user choices/preferences, include a step that uses request_user_input (not plain free-text questioning).
+- In plan mode, if the plan needs user choices/preferences, include a step that uses request_user_input (not plain free-text questioning).
 
 RESILIENCE RULES:
 - Do not stop at "cannot be done" when fallbacks exist.
@@ -17193,7 +17323,7 @@ ${this.task.agentConfig?.allowUserInput === false ? `AUTONOMOUS DECISION POLICY 
 - If you ask the user for required information or a decision, STOP and wait.
 - Do NOT continue executing steps or call tools after asking such questions.
 - If safe defaults exist, state the assumption and proceed without asking.
-- In propose mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
+- In plan mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
 - When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.`}
 
 CLOUD STORAGE ROUTING (CRITICAL):
@@ -18847,10 +18977,15 @@ TASK / CONVERSATION HISTORY:
                 error: "Tool not available in current context or permissions",
                 blocked: true,
               });
+              const runCommandShellHint =
+                content.name === "run_command" && !this.workspace.permissions.shell
+                  ? "Enable Shell for this workspace (⋮ menu → Shell) to run commands."
+                  : undefined;
               toolResults.push(
                 buildUnavailableToolResultUtil({
                   toolName: content.name,
                   toolUseId: content.id,
+                  hint: runCommandShellHint,
                 }),
               );
               hasUnavailableToolAttempt = true;
@@ -20349,7 +20484,7 @@ TASK / CONVERSATION HISTORY:
           assistantAskedQuestion && this.isBlockingRequiredDecisionQuestion(assistantText || "");
         const shouldEnforceStructuredInputTool =
           requiredDecisionDetected &&
-          this.getEffectiveExecutionMode() === "propose" &&
+          this.getEffectiveExecutionMode() === "plan" &&
           !responseHasToolUse &&
           availableToolNames.has("request_user_input") &&
           structuredInputEnforcementAttempts < 2;
@@ -22506,7 +22641,7 @@ ${this.task.agentConfig?.allowUserInput === false ? `AUTONOMOUS DECISION POLICY 
 - If you ask the user for required information or a decision, STOP and wait.
 - Do NOT continue executing steps or call tools after asking such questions.
 - If safe defaults exist, state the assumption and proceed without asking.
-- In propose mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
+- In plan mode, prefer request_user_input for required decisions/preferences instead of free-text questions.
 - When using request_user_input: ask 1-3 short questions, 2-3 options each, and put the recommended option first.`}
 
 CLOUD STORAGE ROUTING (CRITICAL):
@@ -23498,10 +23633,15 @@ TASK / CONVERSATION HISTORY:
                 error: "Tool not available in current context or permissions",
                 blocked: true,
               });
+              const runCommandShellHint =
+                content.name === "run_command" && !this.workspace.permissions.shell
+                  ? "Enable Shell for this workspace (⋮ menu → Shell) to run commands."
+                  : undefined;
               toolResults.push(
                 buildUnavailableToolResultUtil({
                   toolName: content.name,
                   toolUseId: content.id,
+                  hint: runCommandShellHint,
                 }),
               );
               hasUnavailableToolAttempt = true;
@@ -24234,7 +24374,7 @@ TASK / CONVERSATION HISTORY:
           assistantAskedQuestion && this.isBlockingRequiredDecisionQuestion(assistantText || "");
         const shouldEnforceStructuredInputTool =
           followupRequiredDecisionDetected &&
-          this.getEffectiveExecutionMode() === "propose" &&
+          this.getEffectiveExecutionMode() === "plan" &&
           !responseHasToolUse &&
           availableToolNames.has("request_user_input") &&
           structuredInputEnforcementAttempts < 2;
@@ -24698,6 +24838,9 @@ TASK / CONVERSATION HISTORY:
     this.cancelled = true;
     this.cancelReason = reason;
     this.taskCompleted = true; // Also mark as completed to prevent any further processing
+
+    // Stop progress journal to avoid FK errors when task is deleted before next tick
+    this.stopProgressJournal();
 
     // Abort any in-flight LLM requests immediately
     this.abortController.abort();
