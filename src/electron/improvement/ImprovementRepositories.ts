@@ -4,6 +4,7 @@ import type {
   EvalBaselineMetrics,
   ImprovementCampaign,
   ImprovementEvidence,
+  ImprovementHistoryResetResult,
   ImprovementJudgeVerdict,
   ImprovementCandidate,
   ImprovementReplayCase,
@@ -720,6 +721,33 @@ export class ImprovementJudgeVerdictRepository {
       comparedAt: Number(row.compared_at || 0),
     };
   }
+}
+
+export function clearImprovementHistoryData(
+  db: Database.Database,
+): ImprovementHistoryResetResult["deleted"] {
+  const countTable = (table: string): number => {
+    const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number } | undefined;
+    return Number(row?.count || 0);
+  };
+
+  const deleted: ImprovementHistoryResetResult["deleted"] = {
+    candidates: countTable("improvement_candidates"),
+    campaigns: countTable("improvement_campaigns"),
+    variantRuns: countTable("improvement_variant_runs"),
+    judgeVerdicts: countTable("improvement_judge_verdicts"),
+    legacyRuns: countTable("improvement_runs"),
+  };
+
+  db.transaction(() => {
+    db.prepare("DELETE FROM improvement_judge_verdicts").run();
+    db.prepare("DELETE FROM improvement_variant_runs").run();
+    db.prepare("DELETE FROM improvement_campaigns").run();
+    db.prepare("DELETE FROM improvement_runs").run();
+    db.prepare("DELETE FROM improvement_candidates").run();
+  })();
+
+  return deleted;
 }
 
 function buildFilterSql(
