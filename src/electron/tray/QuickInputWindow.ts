@@ -361,6 +361,11 @@ export class QuickInputWindow {
     .loading-dot:nth-child(2) { animation-delay: 0.2s; }
     .loading-dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes pulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); } 40% { opacity: 1; transform: scale(1); } }
+    .thinking-ellipsis span { opacity: 0.35; animation: thinkDot 1.2s ease-in-out infinite; }
+    .thinking-ellipsis span:nth-child(1) { animation-delay: 0s; }
+    .thinking-ellipsis span:nth-child(2) { animation-delay: 0.15s; }
+    .thinking-ellipsis span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes thinkDot { 0%, 70%, 100% { opacity: 0.35; } 35% { opacity: 1; } }
 
     /* Input area */
     .input-container {
@@ -426,7 +431,7 @@ export class QuickInputWindow {
           <div class="loading-dot"></div>
           <div class="loading-dot"></div>
           <div class="loading-dot"></div>
-          <span>Thinking...</span>
+          <span>Thinking<span class="thinking-ellipsis"><span>.</span><span>.</span><span>.</span></span></span>
         </div>
       </div>
       <div class="input-container">
