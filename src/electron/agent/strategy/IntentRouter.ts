@@ -8,7 +8,8 @@ export type RoutedIntent =
   | "mixed"
   | "thinking"
   | "workflow"
-  | "deep_work";
+  | "deep_work"
+  | "redirect";
 
 export type TaskComplexity = "low" | "medium" | "high";
 
@@ -28,6 +29,7 @@ interface IntentScores {
   planning: number;
   execution: number;
   thinking: number;
+  redirect: number;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -35,6 +37,60 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class IntentRouter {
+  private static getRedirectSignals(lower: string): string[] {
+    const signals: string[] = [];
+
+    if (
+      /\bignore\b[\s\S]{0,150}\b(?:focus|work|do|build|create|handle|tackle|look\s+at|concentrate|instead)\b/i.test(
+        lower,
+      )
+    ) {
+      signals.push("redirect-ignore-pivot");
+    }
+
+    if (
+      /\b(?:pivot\s+to|redirect\s+to|change\s+(?:the\s+)?(?:direction|focus|approach|course)|new\s+direction|different\s+direction)\b/i.test(
+        lower,
+      ) ||
+      /\blet'?s?\s+(?:instead|pivot|redirect|change\s+(?:the\s+)?(?:direction|focus|approach))\b/i.test(
+        lower,
+      )
+    ) {
+      signals.push("redirect-explicit-pivot");
+    }
+
+    if (
+      /\b(?:instead\s+of|rather\s+than)\b[\s\S]{0,150}\b(?:focus|work|do|build|create|look|tackle|explore|concentrate)\b/i.test(
+        lower,
+      )
+    ) {
+      signals.push("redirect-contrast");
+    }
+
+    if (
+      /\b(?:don'?t|skip|forget|drop|abandon|leave|set\s+aside)\b[\s\S]{0,100}\b(?:focus|instead|concentrate|and\s+(?:focus|work|do|build|look|tackle))\b/i.test(
+        lower,
+      )
+    ) {
+      signals.push("redirect-negate-pivot");
+    }
+
+    if (
+      /\b(?:focus\s+(?:only|just|solely|exclusively)\s+on|only\s+(?:focus|work)\s+on|concentrate\s+(?:only\s+)?on\s+(?:the\s+)?(?:new|other|different))\b/i.test(
+        lower,
+      )
+    ) {
+      signals.push("redirect-scope-narrow");
+    }
+
+    return signals;
+  }
+
+  static isRedirectIntent(text: string): boolean {
+    const lower = (text || "").toLowerCase();
+    return this.getRedirectSignals(lower).length > 0;
+  }
+
   private static stripStrategyContext(text: string): string {
     if (!text) return text;
     const open = "[AGENT_STRATEGY_CONTEXT_V1]";
@@ -98,7 +154,7 @@ export class IntentRouter {
     const sanitizedPrompt = this.stripStrategyContext(String(prompt || ""));
     const text = `${title || ""}\n${sanitizedPrompt}`.trim();
     const lower = text.toLowerCase();
-    const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0, thinking: 0 };
+    const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0, thinking: 0, redirect: 0 };
     const signals: string[] = [];
 
     const add = (
@@ -217,6 +273,15 @@ export class IntentRouter {
       cloudProviderMentioned && cloudQueryIntent,
     );
 
+    // Redirect / re-scope intent — user is pivoting away from prior work to a new direction.
+    // Scored separately so it can win decisively over "execution" when both are present.
+    const redirectSignals = this.getRedirectSignals(lower);
+    add("redirect", 5, "redirect-ignore-pivot", redirectSignals.includes("redirect-ignore-pivot"));
+    add("redirect", 5, "redirect-explicit-pivot", redirectSignals.includes("redirect-explicit-pivot"));
+    add("redirect", 4, "redirect-contrast", redirectSignals.includes("redirect-contrast"));
+    add("redirect", 4, "redirect-negate-pivot", redirectSignals.includes("redirect-negate-pivot"));
+    add("redirect", 3, "redirect-scope-narrow", redirectSignals.includes("redirect-scope-narrow"));
+
     // "Think with me" mode — Socratic reasoning, not task execution
     add(
       "thinking",
@@ -273,6 +338,7 @@ export class IntentRouter {
     const executionLike = scores.execution;
     const chatLike = scores.chat;
     const thinkingLike = scores.thinking;
+    const redirectLike = scores.redirect;
 
     // Complexity scoring: how multi-faceted or demanding is this prompt?
     const wordCount = text.split(/\s+/).length;
@@ -291,8 +357,13 @@ export class IntentRouter {
       hasDeepWorkSignal && executionLike >= 3 && (wordCount > 100 || uniqueActionVerbs >= 4);
 
     let intent: RoutedIntent;
-    // Deep work: highest priority — long-running autonomous execution
-    if (isDeepWork) {
+    // Redirect: checked first — a pivot message wins over all other intents,
+    // including deep_work. "build this end-to-end from scratch" is still a
+    // redirect if it's prefaced by "forget the current plan and…".
+    if (redirectLike >= 3) {
+      intent = "redirect";
+      // Deep work: long-running autonomous execution
+    } else if (isDeepWork) {
       intent = "deep_work";
       // Multi-phase workflow: 3+ distinct action verbs with sequential connectives
     } else if (hasWorkflowConnectives && uniqueActionVerbs >= 3 && executionLike >= 3) {
@@ -319,7 +390,7 @@ export class IntentRouter {
       intent = "chat";
     }
 
-    const confidenceBase = Math.max(chatLike, planningLike, executionLike, thinkingLike);
+    const confidenceBase = Math.max(chatLike, planningLike, executionLike, thinkingLike, redirectLike);
     const confidenceSpread = Math.abs(planningLike + executionLike - chatLike);
     const confidence = clamp(0.55 + confidenceBase * 0.08 + confidenceSpread * 0.02, 0.55, 0.95);
 
@@ -328,7 +399,7 @@ export class IntentRouter {
         ? "chat"
         : intent === "thinking"
           ? "think"
-          : intent === "execution" || intent === "workflow" || intent === "deep_work"
+          : intent === "execution" || intent === "workflow" || intent === "deep_work" || intent === "redirect"
             ? "task"
             : "hybrid";
 
