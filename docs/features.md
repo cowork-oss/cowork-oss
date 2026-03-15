@@ -113,6 +113,7 @@ See [Zero-Human Company Operations](zero-human-company.md) for architecture, set
 
 The self-improvement loop is now intentionally narrower and more operational:
 
+- **Owner-only eligibility**: currently restricted to unpackaged runs of the canonical CoWork OS repository with maintainer-signed owner enrollment
 - **Single-lane bounded campaigns by default**: new settings default to one variant, one concurrent executor, and one queued campaign
 - **Explicit campaign stages**: `queued`, `preflight`, `reproducing`, `implementing`, `verifying`, and `completed`
 - **Promotion gate hardening**: campaigns are promoted only when the winning run shows reproduction, verification, and PR-readiness evidence
@@ -1072,7 +1073,7 @@ See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-sk
 | **Dropbox** | `dropbox_action` | List, search, upload, manage files |
 | **SharePoint** | `sharepoint_action` | Search sites, manage drive items |
 
-Configure in **Settings** > **Integrations**.
+Configure by clicking any card in **Settings** > **Integrations**. Enterprise MCP connectors (Salesforce, Jira, HubSpot, Slack, etc.) are also managed from the same tab.
 
 ---
 
