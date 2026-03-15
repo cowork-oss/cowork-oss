@@ -258,6 +258,42 @@ That indicates a different startup-order regression. Capture the latest log and 
 
 If the task starts before memory initialization, treat it as a bug and inspect the startup sequence in `src/electron/main.ts`.
 
+## Self-improvement fails to initialize with `SqliteError: 27 values for 28 columns`
+
+If `logs/dev-latest.log` shows something like:
+
+```text
+[Main] Failed to initialize ImprovementLoopService: SqliteError: 27 values for 28 columns
+```
+
+the failure is coming from the self-improvement candidate repository, not from eligibility checks.
+
+### What it means
+
+- `ImprovementCandidateRepository.create()` built an `INSERT` statement for `improvement_candidates`
+- the listed column count and placeholder count drifted out of sync
+- startup could still continue, but `ImprovementLoopService` would fail to initialize and candidate ingestion would be disabled
+
+### Current fix
+
+Current builds align the `INSERT` placeholder count with the 28-column `improvement_candidates` schema.
+
+### How to verify
+
+Capture a fresh log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
+You should no longer see the `27 values for 28 columns` initialization failure.
+
 See also:
 
 - [Development Guide](development.md)
