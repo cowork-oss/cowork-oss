@@ -376,4 +376,80 @@ describe("ImprovementCandidateService", () => {
     ]);
     expect(candidates.has("candidate-duplicate")).toBe(false);
   });
+
+  it("keeps runnable readiness while recording the latest skip reason", () => {
+    candidates.set("candidate-1", {
+      id: "candidate-1",
+      workspaceId: "workspace-1",
+      fingerprint: "fingerprint-1",
+      source: "task_failure",
+      status: "open",
+      title: "Fix repeated contract error failures",
+      summary: "Verifier still fails after completion.",
+      severity: 0.9,
+      recurrenceCount: 2,
+      fixabilityScore: 0.95,
+      priorityScore: 0.88,
+      evidence: [
+        {
+          type: "task_failure",
+          taskId: "task-1",
+          summary: "Verifier still fails after completion.",
+          createdAt: Date.now(),
+        },
+      ],
+      firstSeenAt: Date.now(),
+      lastSeenAt: Date.now(),
+    });
+
+    const service = new ImprovementCandidateService(db);
+    service.recordCandidateSkip("candidate-1", "Skipped because no promotable worktree is available.");
+
+    expect(candidates.get("candidate-1")?.readiness).toBe("ready");
+    expect(candidates.get("candidate-1")?.readinessReason).toBe(
+      "Skipped because no promotable worktree is available.",
+    );
+    expect(candidates.get("candidate-1")?.lastSkipReason).toBe(
+      "Skipped because no promotable worktree is available.",
+    );
+  });
+
+  it("parks repeated provider failures with blocked_provider readiness", () => {
+    candidates.set("candidate-1", {
+      id: "candidate-1",
+      workspaceId: "workspace-1",
+      fingerprint: "fingerprint-1",
+      source: "task_failure",
+      status: "open",
+      title: "Fix repeated provider failures",
+      summary: "429 from provider",
+      severity: 0.7,
+      recurrenceCount: 1,
+      fixabilityScore: 0.35,
+      priorityScore: 0.5,
+      evidence: [
+        {
+          type: "task_failure",
+          taskId: "task-1",
+          summary: "429 from provider",
+          createdAt: Date.now(),
+        },
+      ],
+      firstSeenAt: Date.now(),
+      lastSeenAt: Date.now(),
+    });
+
+    const service = new ImprovementCandidateService(db);
+    for (let i = 0; i < 3; i += 1) {
+      service.recordCampaignFailure("candidate-1", {
+        failureClass: "provider_rate_limited",
+        attemptFingerprint: "candidate-1:fingerprint-1:promotion",
+        reason: "429 Too Many Requests",
+      });
+    }
+
+    expect(candidates.get("candidate-1")?.status).toBe("parked");
+    expect(candidates.get("candidate-1")?.readiness).toBe("blocked_provider");
+    expect(candidates.get("candidate-1")?.parkReason).toBe("429 Too Many Requests");
+  });
 });
